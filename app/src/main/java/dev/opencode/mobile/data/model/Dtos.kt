@@ -267,6 +267,13 @@ data class Agent(
 data class ModelInfo(
     val id: String = "",
     val name: String = "",
+    val limit: ModelLimit? = null,
+)
+
+@Serializable
+data class ModelLimit(
+    val context: Long = 0,
+    val output: Long = 0,
 )
 
 @Serializable

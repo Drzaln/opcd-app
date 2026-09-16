@@ -469,12 +469,24 @@ private fun MessageRow(
                 PartView(part = part, onOpenFile = onOpenFile)
             }
             val tokens = message.info.tokens
-            if (tokens != null) {
-                MutedLabel(
-                    "in ${tokens.input} · out ${tokens.output}" +
-                        (if (tokens.reasoning > 0) " · reasoning ${tokens.reasoning}" else ""),
-                    modifier = Modifier.padding(top = 2.dp),
-                )
+            val cost = message.info.cost
+            if (tokens != null || cost != null) {
+                val bits = mutableListOf<String>()
+                if (tokens != null) {
+                    bits.add("in ${"%,d".format(tokens.input)} · out ${"%,d".format(tokens.output)}")
+                    val limit = models.firstOrNull {
+                        it.providerId == message.info.providerID && it.modelId == message.info.modelID
+                    }?.contextLimit ?: 0L
+                    if (limit > 0) {
+                        val used = tokens.input + tokens.output
+                        val pct = used * 100.0 / limit
+                        bits.add("ctx ${"%.0f".format(pct)}%")
+                    }
+                }
+                if (cost != null && cost > 0) {
+                    bits.add("$" + if (cost >= 0.01) "%.2f".format(cost) else "%.4f".format(cost))
+                }
+                MutedLabel(bits.joinToString(" · "), modifier = Modifier.padding(top = 2.dp))
             }
         }
     }

@@ -33,6 +33,7 @@ data class ModelOption(
     val providerId: String,
     val modelId: String,
     val label: String,
+    val contextLimit: Long = 0,
 )
 
 class ChatViewModel(
@@ -95,7 +96,12 @@ class ChatViewModel(
                 .filter { it.id in connected }
                 .flatMap { provider ->
                     provider.models.values.map { model ->
-                        ModelOption(provider.id, model.id, "${provider.name} · ${model.name}")
+                        ModelOption(
+                            provider.id,
+                            model.id,
+                            "${provider.name} · ${model.name}",
+                            model.limit?.context ?: 0L,
+                        )
                     }
                 }
             _ui.update { it.copy(agents = agents, models = models) }
