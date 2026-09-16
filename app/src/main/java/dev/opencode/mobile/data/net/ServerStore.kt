@@ -28,6 +28,8 @@ class ServerStore(private val context: Context) {
 
     private val serversKey = stringPreferencesKey("servers")
     private val activeKey = stringPreferencesKey("active")
+    private val selectedModelKey = stringPreferencesKey("selected_model")
+    private val selectedAgentKey = stringPreferencesKey("selected_agent")
 
     val servers: Flow<List<ServerConfig>> = context.dataStore.data.map { prefs ->
         val raw = prefs[serversKey] ?: "[]"
@@ -35,6 +37,30 @@ class ServerStore(private val context: Context) {
     }
 
     val activeId: Flow<String?> = context.dataStore.data.map { it[activeKey] }
+
+    val selectedModels: Flow<Map<String, String>> = context.dataStore.data.map {
+        decodeStringMap(it[selectedModelKey])
+    }
+
+    val selectedAgents: Flow<Map<String, String>> = context.dataStore.data.map {
+        decodeStringMap(it[selectedAgentKey])
+    }
+
+    suspend fun setSelectedModel(serverId: String, value: String?) {
+        context.dataStore.edit { prefs ->
+            val map = decodeStringMap(prefs[selectedModelKey]).toMutableMap()
+            if (value == null) map.remove(serverId) else map[serverId] = value
+            prefs[selectedModelKey] = json.encodeToString(map)
+        }
+    }
+
+    suspend fun setSelectedAgent(serverId: String, value: String?) {
+        context.dataStore.edit { prefs ->
+            val map = decodeStringMap(prefs[selectedAgentKey]).toMutableMap()
+            if (value == null) map.remove(serverId) else map[serverId] = value
+            prefs[selectedAgentKey] = json.encodeToString(map)
+        }
+    }
 
     suspend fun add(config: ServerConfig) {
         context.dataStore.edit { prefs ->
@@ -66,4 +92,7 @@ class ServerStore(private val context: Context) {
 
     private fun decodeServers(raw: String?): List<ServerConfig> =
         runCatching { json.decodeFromString<List<ServerConfig>>(raw ?: "[]") }.getOrDefault(emptyList())
+
+    private fun decodeStringMap(raw: String?): Map<String, String> =
+        runCatching { json.decodeFromString<Map<String, String>>(raw ?: "{}") }.getOrDefault(emptyMap())
 }

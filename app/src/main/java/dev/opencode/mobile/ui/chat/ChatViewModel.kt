@@ -19,6 +19,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -37,7 +38,7 @@ data class ModelOption(
 )
 
 class ChatViewModel(
-    app: OpenCodeApp,
+    private val app: OpenCodeApp,
     private val server: ServerConfig,
     private val sessionId: String,
     private val projectDir: () -> String?,
@@ -80,10 +81,14 @@ class ChatViewModel(
 
     fun selectAgent(name: String?) {
         _ui.update { it.copy(selectedAgent = name) }
+        viewModelScope.launch { app.serverStore.setSelectedAgent(server.id, name) }
     }
 
     fun selectModel(model: ModelOption?) {
         _ui.update { it.copy(selectedModel = model) }
+        viewModelScope.launch {
+            app.serverStore.setSelectedModel(server.id, model?.let { "${it.providerId}/${it.modelId}" })
+        }
     }
 
     private fun loadMeta() {
@@ -104,7 +109,17 @@ class ChatViewModel(
                         )
                     }
                 }
-            _ui.update { it.copy(agents = agents, models = models) }
+            val storedModel = app.serverStore.selectedModels.first()[server.id]
+            val storedAgent = app.serverStore.selectedAgents.first()[server.id]
+            val selectedModel = storedModel?.let { ref ->
+                val parts = ref.split("/", limit = 2)
+                if (parts.size == 2) {
+                    models.firstOrNull { it.providerId == parts[0] && it.modelId == parts[1] }
+                } else null
+            }
+            _ui.update {
+                it.copy(agents = agents, models = models, selectedAgent = storedAgent, selectedModel = selectedModel)
+            }
         }
     }
 
