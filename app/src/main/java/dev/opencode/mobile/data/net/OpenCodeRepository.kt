@@ -27,7 +27,7 @@ data class OcEvent(
 
 class OpenCodeRepository {
 
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
 
     private val lock = Any()
     private val apiCache = mutableMapOf<String, OpenCodeApi>()
