@@ -51,6 +51,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -92,11 +94,21 @@ fun ChatScreen(
         return
     }
 
+    var foreground by remember { mutableStateOf(true) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { foreground = true }
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { foreground = false }
+
     val vm: ChatViewModel = viewModel(
         key = "chat_${serverId}_$sessionId",
         factory = viewModelFactory {
             initializer {
-                ChatViewModel(app, actualServer, sessionId, projectDir = { appVm.currentDirectory.value })
+                ChatViewModel(
+                    app,
+                    actualServer,
+                    sessionId,
+                    projectDir = { appVm.currentDirectory.value },
+                    isForeground = { foreground },
+                )
             }
         },
     )
