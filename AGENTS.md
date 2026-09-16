@@ -12,10 +12,28 @@ make build        # assembleDebug → app/build/outputs/apk/debug/app-debug.apk
 make release      # assembleRelease (signed w/ debug key unless keystore.properties exists)
 make install      # adb install the debug APK
 make serve        # local opencode test server on :4199 (password: secret)
+make ship         # bump version, build release, push main + v* tag (see Release workflow)
 ```
 
 Requirements: JDK 17, Android SDK 36 (compileSdk), Gradle 8.13 (wrapper included).
 No local.properties needed — `ANDROID_HOME`/SDK on PATH is enough.
+
+## Release workflow (when the user says "ship it" / "push it" / "release it")
+
+Always do ALL of these, in order:
+
+1. **Bump the version**: run `./scripts/ship.sh [patch|minor|major|<x.y.z>]` (default `patch`).
+   It bumps `versionCode` (+1) and `versionName` in `app/build.gradle.kts`, builds `assembleRelease`,
+   commits, pushes `main`, tags `v<versionName>`, and pushes the tag. The tag triggers CI
+   (`.github/workflows/build.yml`) which builds the APK and creates a GitHub Release.
+2. If the user asked for a specific bump type, pass it (e.g. `make ship minor`); otherwise default to `patch`.
+3. **Verify**: confirm the CI run on the tag completes and a GitHub Release with `app-release.apk` exists
+   (check via `curl https://api.github.com/repos/Drzaln/opcd-app/releases` or the Actions tab).
+4. If the CI release step 403s, the repo Actions token is read-only — ask the user to enable
+   Settings → Actions → General → Workflow permissions → "Read and write permissions", then re-run.
+5. Never create a version bump commit or tag without the user asking to ship (or saying ship/push/release).
+
+Note: release APK is signed with the debug key unless `keystore.properties` + CI signing secrets exist.
 
 ## How the app talks to opencode
 

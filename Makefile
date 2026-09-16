@@ -1,4 +1,4 @@
-.PHONY: build release install serve stop clean
+.PHONY: build release install serve stop clean ship
 
 build:
 	./gradlew assembleDebug
@@ -8,6 +8,9 @@ release:
 
 install:
 	adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+ship:
+	./scripts/ship.sh
 
 serve:
 	@OPENCODE_SERVER_PASSWORD=secret opencode serve --port 4199 --hostname 127.0.0.1 > /tmp/opencode-serve.log 2>&1 &
