@@ -58,6 +58,7 @@ class ChatViewModel(
         if (text.isEmpty()) return
         viewModelScope.launch {
             _ui.value = _ui.value.copy(sending = true)
+            var ok = true
             try {
                 val response = api.sendMessageAsync(
                     sessionId,
@@ -65,11 +66,13 @@ class ChatViewModel(
                     projectDir(),
                 )
                 if (!response.isSuccessful) {
+                    ok = false
                     val body = response.errorBody()?.string().orEmpty()
                     throw IOException("Send failed: HTTP ${response.code()} $body")
                 }
                 _input.value = ""
             } catch (e: Exception) {
+                ok = false
                 _ui.value = _ui.value.copy(sending = false, error = e.message ?: "Send failed: unknown error")
             }
             // The server persists async; keep refreshing until the message shows up.
@@ -77,7 +80,7 @@ class ChatViewModel(
                 delay(500)
                 refreshAll()
             }
-            _ui.value = _ui.value.copy(sending = false)
+            _ui.value = if (ok) _ui.value.copy(sending = false, error = null) else _ui.value.copy(sending = false)
         }
     }
 
@@ -122,7 +125,8 @@ class ChatViewModel(
                 val status = runCatching { api.sessionStatus(projectDir())[sessionId] }.getOrNull()
                 val session = runCatching { api.session(sessionId, projectDir()) }.getOrNull()
                 val messages = api.messages(sessionId, directory = projectDir())
-                _ui.value = UiState(messages = messages, session = session, status = status, loading = false)
+                // Preserve existing error so the banner stays visible until dismissed or a send succeeds.
+                _ui.value = _ui.value.copy(messages = messages, session = session, status = status, loading = false)
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(loading = false, error = "Load messages: ${e.message ?: "unknown error"}")
             }
