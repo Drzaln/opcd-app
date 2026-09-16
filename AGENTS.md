@@ -39,6 +39,10 @@ Note: release APK is signed with the debug key unless `keystore.properties` + CI
 
 - Mac runs `opencode serve` (NOT `web` — web opens a browser) bound to `0.0.0.0` or the Tailscale IP,
   with `OPENCODE_SERVER_PASSWORD` set.
+- For real-time two-way sync, run the **TUI itself** on a fixed port instead of a separate serve/web:
+  `OPENCODE_SERVER_PASSWORD=secret opencode --hostname <tailscale-ip> --port 4096`. The TUI IS the
+  server; the app connects to that same server, so app↔TUI updates flow both ways. (A separate
+  `opencode serve` is a different process → its own event bus → no live TUI updates.)
 - App talks plain HTTP(S). Auth = HTTP Basic (`opencode` user + password). Server returns 401 otherwise.
 - **Instance routing:** sessions/files are scoped per project folder. Almost every call passes an optional
   `?directory=<path>` query to select the project instance (sessions, messages, prompt_async, diff, abort,
