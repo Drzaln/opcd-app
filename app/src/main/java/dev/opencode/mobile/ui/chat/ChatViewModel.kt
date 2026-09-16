@@ -66,11 +66,11 @@ class ChatViewModel(
                 )
                 if (!response.isSuccessful) {
                     val body = response.errorBody()?.string().orEmpty()
-                    throw IOException("HTTP ${response.code()} $body")
+                    throw IOException("Send failed: HTTP ${response.code()} $body")
                 }
                 _input.value = ""
             } catch (e: Exception) {
-                _ui.value = _ui.value.copy(sending = false, error = e.message ?: "Failed to send message")
+                _ui.value = _ui.value.copy(sending = false, error = e.message ?: "Send failed: unknown error")
             }
             // The server persists async; keep refreshing until the message shows up.
             repeat(7) {
@@ -91,6 +91,10 @@ class ChatViewModel(
     fun retryOnError() {
         _ui.value = _ui.value.copy(error = null)
         refreshAll()
+    }
+
+    fun dismissError() {
+        _ui.value = _ui.value.copy(error = null)
     }
 
     private fun startEvents(app: OpenCodeApp) {
@@ -120,7 +124,7 @@ class ChatViewModel(
                 val messages = api.messages(sessionId, directory = projectDir())
                 _ui.value = UiState(messages = messages, session = session, status = status, loading = false)
             } catch (e: Exception) {
-                _ui.value = _ui.value.copy(loading = false, error = e.message ?: "Failed to load messages")
+                _ui.value = _ui.value.copy(loading = false, error = "Load messages: ${e.message ?: "unknown error"}")
             }
         }
     }

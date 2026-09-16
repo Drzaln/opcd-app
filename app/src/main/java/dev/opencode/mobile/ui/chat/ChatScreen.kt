@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -147,8 +148,10 @@ fun ChatScreen(
             if (ui.error != null) {
                 Surface(color = RedBg, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
                     Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(ui.error!!, color = Red, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                        TextButton(onClick = { vm.retryOnError() }) { Text("Retry") }
+                        SelectionContainer(modifier = Modifier.weight(1f)) {
+                            Text(ui.error!!, color = Red, style = MaterialTheme.typography.bodySmall)
+                        }
+                        TextButton(onClick = { vm.dismissError() }) { Text("Dismiss") }
                     }
                 }
             }
@@ -208,14 +211,16 @@ private fun MessageList(
             listState.animateScrollToItem(messages.lastIndex)
         }
     }
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        items(messages, key = { it.info.id }) { message ->
-            MessageRow(message = message, onOpenFile = onOpenFile)
+    SelectionContainer {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(messages, key = { it.info.id }) { message ->
+                MessageRow(message = message, onOpenFile = onOpenFile)
+            }
         }
     }
 }
