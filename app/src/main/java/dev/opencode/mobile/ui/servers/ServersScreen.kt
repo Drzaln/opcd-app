@@ -154,8 +154,10 @@ private fun SecurityHint() {
         Column(Modifier.padding(12.dp)) {
             Text("Secure setup", style = MaterialTheme.typography.titleSmall)
             Text(
-                "• Set a password on the Mac: OPENCODE_SERVER_PASSWORD=secret opencode web --hostname 0.0.0.0 --port 4096\n" +
-                    "• Prefer Tailscale Serve for HTTPS: tailscale serve --bg 4096, then connect to https://<mac>.ts.net\n" +
+                "• Mac: OPENCODE_SERVER_PASSWORD=secret opencode serve --hostname 0.0.0.0 --port 4096 --mdns\n" +
+                    "  (use serve, not web — web opens a browser)\n" +
+                    "• mDNS finds the Mac on your LAN. Away from home, use the Tailscale tab below\n" +
+                    "  or tailscale serve --bg 4096 for https://<mac>.ts.net\n" +
                     "• Tailscale encrypts all traffic between your devices; nothing is exposed to the internet.",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary,
@@ -263,17 +265,25 @@ private fun ScanDialog(
             dismissButton = { TextButton(onClick = { selected = null }) { Text("Back") } },
         )
     } else {
+        var remoteHost by remember { mutableStateOf("") }
+        var remotePort by remember { mutableStateOf("4096") }
+        var remotePassword by remember { mutableStateOf("") }
+        var remoteProbing by remember { mutableStateOf(false) }
+        var remoteError by remember { mutableStateOf<String?>(null) }
+
         AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text("Auto-detect") },
+            title = { Text("Connect to server") },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text(
-                        "Scanning for opencode servers via mDNS. Works on the same LAN and over Tailscale.",
+                        "mDNS scans your LAN. Tailscale works anywhere — use the remote field below.",
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary,
                     )
                     Spacer(Modifier.height(12.dp))
+                    Text("mDNS (LAN)", style = MaterialTheme.typography.labelMedium)
+                    Spacer(Modifier.height(4.dp))
                     if (error != null) {
                         Text(error!!, color = Red, style = MaterialTheme.typography.bodySmall)
                         Spacer(Modifier.height(8.dp))
@@ -298,9 +308,73 @@ private fun ScanDialog(
                     }
                     if (found.isEmpty() && !scanning) {
                         Text(
-                            "No opencode server found. Make sure opencode is running with --mdns on the Mac and that your phone is on the same network / tailnet.",
+                            "No server found on the LAN. Make sure opencode runs with --mdns on the Mac and you're on the same network.",
                             style = MaterialTheme.typography.bodySmall,
                         )
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Text("Tailscale (remote)", style = MaterialTheme.typography.labelMedium)
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = remoteHost,
+                        onValueChange = { remoteHost = it },
+                        label = { Text("Mac hostname or IP (e.g. my-mac.ts.net or 100.64.0.1)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row {
+                        OutlinedTextField(
+                            value = remotePort,
+                            onValueChange = { remotePort = it },
+                            label = { Text("Port") },
+                            singleLine = true,
+                            modifier = Modifier.weight(0.4f),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedTextField(
+                            value = remotePassword,
+                            onValueChange = { remotePassword = it },
+                            label = { Text("Server password") },
+                            singleLine = true,
+                            modifier = Modifier.weight(0.6f),
+                        )
+                    }
+                    if (remoteError != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(remoteError!!, color = Red, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        enabled = !remoteProbing && remoteHost.isNotBlank(),
+                        onClick = {
+                            scope.launch {
+                                remoteProbing = true
+                                remoteError = null
+                                val isTsNet = remoteHost.contains(".ts.net")
+                                val scheme = if (isTsNet) "https" else "http"
+                                val base = if (isTsNet) "$scheme://${remoteHost.trim()}" else "$scheme://${remoteHost.trim()}:${remotePort.trim().ifEmpty { "4096" }}"
+                                val config = ServerConfig(
+                                    name = remoteHost.trim(),
+                                    baseUrl = base,
+                                    username = "opencode",
+                                    password = remotePassword,
+                                )
+                                val result = appVm.probe(config)
+                                remoteProbing = false
+                                if (result.ok) {
+                                    onConnect(config)
+                                } else {
+                                    remoteError = "Connection failed: ${result.error.ifEmpty { "unknown" }}"
+                                }
+                            }
+                        },
+                    ) {
+                        if (remoteProbing) {
+                            CircularProgressIndicator(modifier = Modifier.width(16.dp).height(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text("Connect over Tailscale")
+                        }
                     }
                 }
             },

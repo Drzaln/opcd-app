@@ -57,6 +57,7 @@ class DiffViewModel(
     app: OpenCodeApp,
     private val server: ServerConfig,
     private val sessionId: String,
+    private val projectDir: () -> String?,
 ) : ViewModel() {
 
     data class UiState(
@@ -78,7 +79,7 @@ class DiffViewModel(
         viewModelScope.launch {
             _ui.value = _ui.value.copy(loading = true, error = null)
             try {
-                val diffs = api.sessionDiff(sessionId)
+                val diffs = api.sessionDiff(sessionId, directory = projectDir())
                 _ui.value = _ui.value.copy(diffs = diffs, loading = false)
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(loading = false, error = e.message ?: "Failed to load diff")
@@ -107,7 +108,9 @@ fun DiffScreen(
 
     val vm: DiffViewModel = viewModel(
         key = "diff_${serverId}_$sessionId",
-        factory = viewModelFactory { initializer { DiffViewModel(app, server, sessionId) } },
+        factory = viewModelFactory {
+            initializer { DiffViewModel(app, server, sessionId, projectDir = { appVm.currentDirectory.value }) }
+        },
     )
     val ui by vm.ui.collectAsState()
 

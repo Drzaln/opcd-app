@@ -26,6 +26,13 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
         combine(store.activeId, store.servers) { id, list -> list.firstOrNull { it.id == id } }
             .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    private val _currentDirectory = MutableStateFlow<String?>(null)
+    val currentDirectory: StateFlow<String?> = _currentDirectory
+
+    fun setDirectory(directory: String?) {
+        _currentDirectory.value = directory
+    }
+
     fun apiFor(server: ServerConfig) = repository.apiFor(server)
 
     fun events(server: ServerConfig) = repository.events(server)

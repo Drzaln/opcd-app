@@ -48,10 +48,18 @@ class OpenCodeRepository {
         .build()
         .create(OpenCodeApi::class.java)
 
-    fun events(server: ServerConfig): Flow<OcEvent> = callbackFlow {
+    fun events(server: ServerConfig, projectDir: String? = null): Flow<OcEvent> = callbackFlow {
         val client = httpClient(server)
+        val url = buildString {
+            append(baseUrl(server))
+            append("event")
+            if (projectDir != null) {
+                append("?directory=")
+                append(java.net.URLEncoder.encode(projectDir, "UTF-8"))
+            }
+        }
         val request = Request.Builder()
-            .url("${baseUrl(server)}event")
+            .url(url)
             .header("Authorization", Credentials.basic(server.username, server.password))
             .header("Accept", "text/event-stream")
             .build()

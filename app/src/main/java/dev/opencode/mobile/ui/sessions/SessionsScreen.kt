@@ -1,5 +1,6 @@
 package dev.opencode.mobile.ui.sessions
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,11 +18,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -34,6 +39,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -58,10 +65,12 @@ import java.util.Locale
 class SessionsViewModel(
     app: OpenCodeApp,
     private val server: ServerConfig,
+    private val projectDir: () -> String?,
 ) : ViewModel() {
 
     data class UiState(
         val sessions: List<Session> = emptyList(),
+        val projects: List<dev.opencode.mobile.data.model.Project> = emptyList(),
         val loading: Boolean = true,
         val error: String? = null,
         val creating: Boolean = false,
@@ -74,16 +83,26 @@ class SessionsViewModel(
 
     init {
         refresh()
+        refreshProjects()
     }
 
     fun refresh() {
         viewModelScope.launch {
             _ui.value = _ui.value.copy(loading = true, error = null)
             try {
-                val sessions = api.sessions().sortedByDescending { it.time?.updated ?: it.time?.created ?: 0L }
+                val sessions = api.sessions(projectDir())
+                    .sortedByDescending { it.time?.updated ?: it.time?.created ?: 0L }
                 _ui.value = _ui.value.copy(sessions = sessions, loading = false)
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(loading = false, error = e.message ?: "Failed to load sessions")
+            }
+        }
+    }
+
+    fun refreshProjects() {
+        viewModelScope.launch {
+            runCatching { api.projects() }.getOrNull()?.let { projects ->
+                _ui.value = _ui.value.copy(projects = projects)
             }
         }
     }
@@ -92,7 +111,7 @@ class SessionsViewModel(
         viewModelScope.launch {
             _ui.value = _ui.value.copy(creating = true)
             try {
-                api.createSession(dev.opencode.mobile.data.model.CreateSessionBody())
+                api.createSession(dev.opencode.mobile.data.model.CreateSessionBody(), projectDir())
                 refresh()
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(creating = false, error = e.message ?: "Failed to create session")
@@ -102,7 +121,7 @@ class SessionsViewModel(
 
     fun deleteSession(id: String) {
         viewModelScope.launch {
-            runCatching { api.deleteSession(id) }
+            runCatching { api.deleteSession(id, projectDir()) }
             refresh()
         }
     }
@@ -133,9 +152,19 @@ fun SessionsScreen(
 
     val vm: SessionsViewModel = viewModel(
         key = "sessions_$serverId",
-        factory = viewModelFactory { initializer { SessionsViewModel(app, server) } },
+        factory = viewModelFactory {
+            initializer { SessionsViewModel(app, server, projectDir = { appVm.currentDirectory.value }) }
+        },
     )
     val ui by vm.ui.collectAsState()
+    val projectDir by appVm.currentDirectory.collectAsState()
+
+    var showDirPicker by remember { mutableStateOf(false) }
+
+    LaunchedEffect(projectDir) {
+        vm.refresh()
+        vm.refreshProjects()
+    }
 
     Scaffold(
         topBar = {
@@ -153,6 +182,10 @@ fun SessionsScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            DirectoryBar(
+                directory = projectDir,
+                onChange = { showDirPicker = true },
+            )
             if (ui.error != null) {
                 Text(ui.error!!, Modifier.padding(16.dp), color = Red)
             }
@@ -174,6 +207,102 @@ fun SessionsScreen(
             }
         }
     }
+
+    if (showDirPicker) {
+        DirectoryPickerDialog(
+            projects = ui.projects.map { it.worktree }.filter { it.isNotBlank() }.distinct(),
+            current = projectDir,
+            onDismiss = { showDirPicker = false },
+            onSelect = { dir ->
+                showDirPicker = false
+                appVm.setDirectory(dir)
+            },
+        )
+    }
+}
+
+@Composable
+private fun DirectoryBar(directory: String?, onChange: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            directory ?: "Mac default project",
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onChange) { Text("Change") }
+    }
+}
+
+@Composable
+private fun DirectoryPickerDialog(
+    projects: List<String>,
+    current: String?,
+    onDismiss: () -> Unit,
+    onSelect: (String?) -> Unit,
+) {
+    var custom by remember { mutableStateOf(current ?: "") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Project folder") },
+        text = {
+            Column {
+                Text(
+                    "Sessions are stored per folder. Pick which project folder to show.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                )
+                Spacer(Modifier.height(12.dp))
+                Text("Detected projects", style = MaterialTheme.typography.labelMedium)
+                Spacer(Modifier.height(4.dp))
+                if (projects.isEmpty()) {
+                    MutedLabel("None detected yet")
+                }
+                for (path in projects) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(path) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text(path, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = custom,
+                    onValueChange = { custom = it },
+                    label = { Text("Or type an absolute path") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            Row {
+                TextButton(onClick = { onSelect(null) }) { Text("Default") }
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    enabled = custom.isNotBlank(),
+                    onClick = { onSelect(custom.trim()) },
+                ) { Text("Use path") }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable

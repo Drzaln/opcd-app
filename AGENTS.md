@@ -19,12 +19,18 @@ No local.properties needed — `ANDROID_HOME`/SDK on PATH is enough.
 
 ## How the app talks to opencode
 
-- Mac runs `opencode web` (or `serve`) bound to the Tailscale IP with `OPENCODE_SERVER_PASSWORD` set.
+- Mac runs `opencode serve` (NOT `web` — web opens a browser) bound to `0.0.0.0` or the Tailscale IP,
+  with `OPENCODE_SERVER_PASSWORD` set.
 - App talks plain HTTP(S). Auth = HTTP Basic (`opencode` user + password). Server returns 401 otherwise.
-- Endpoints used (see `data/net/OpenCodeApi.kt`): `/global/health`, `/project/current`, `/path`,
+- **Instance routing:** sessions/files are scoped per project folder. Almost every call passes an optional
+  `?directory=<path>` query to select the project instance (sessions, messages, prompt_async, diff, abort,
+  todos, file list/content, session status). The app keeps a global `currentDirectory` in `AppViewModel`
+  (`setDirectory()`); pick a folder from the Sessions screen. `/project` lists known projects.
+- Endpoints used (see `data/net/OpenCodeApi.kt`): `/global/health`, `/project`, `/project/current`, `/path`,
   `/session`, `/session/status`, `/session/{id}/message`, `/session/{id}/prompt_async`,
   `/session/{id}/diff`, `/session/{id}/abort`, `/file`, `/file/content`, `/agent`, `/command`.
-- Live updates come from the `/event` SSE stream.
+- Live updates come from the `/event` SSE stream. The app passes `?directory=` to scope events to the
+  selected project instance.
 - **Quirk:** SSE event type lives in the JSON body (`data: {"type":"message.updated","properties":{...}}`),
   NOT the SSE `event:` field. Parsed in `OpenCodeRepository.ReconnectingListener`.
 - **Quirk:** `/session/{id}/diff` returns `FileDiff[]` where `before`/`after` are FULL FILE CONTENTS,
@@ -38,7 +44,8 @@ Single `:app` module. No DI framework.
 
 - `OpenCodeApp` (Application) owns `ServerStore` (DataStore prefs) + `OpenCodeRepository` (Retrofit/OkHttp/SSE factory).
 - `data/net`: `ServerStore` (server list + active id), `OpenCodeRepository`, `OpenCodeApi` (Retrofit iface),
-  `NsdDiscovery` (mDNS auto-detect of `opencode-<port>` on `_http._tcp`), `ServerConfig`.
+  `NsdDiscovery` (mDNS auto-detect of `opencode-<port>` on `_http._tcp` — resolves the LAN IP, NOT the
+  Tailscale IP; the servers screen has a separate "Tailscale (remote)" field for that), `ServerConfig`.
 - `AppViewModel` (MainActivity): global state — servers list, active server, `probe()` health check.
 - Screens (nav routes in `MainActivity.Routes`): servers → sessions → chat / files / file viewer / diff.
 - Screens fetch their `ServerConfig` from `appVm.servers`; ViewModels are built inline:

@@ -26,65 +26,93 @@ interface OpenCodeApi {
     @GET("global/health")
     suspend fun health(): Health
 
+    @GET("project")
+    suspend fun projects(): List<Project>
+
     @GET("project/current")
-    suspend fun currentProject(): Project
+    suspend fun currentProject(@Query("directory") directory: String? = null): Project
 
     @GET("path")
-    suspend fun currentPath(): JsonObject
+    suspend fun currentPath(@Query("directory") directory: String? = null): JsonObject
 
     @GET("session")
-    suspend fun sessions(): List<Session>
+    suspend fun sessions(@Query("directory") directory: String? = null): List<Session>
 
     @POST("session")
-    suspend fun createSession(@Body body: CreateSessionBody): Session
+    suspend fun createSession(
+        @Body body: CreateSessionBody,
+        @Query("directory") directory: String? = null,
+    ): Session
 
     @GET("session/{id}")
-    suspend fun session(@Path("id") id: String): Session
+    suspend fun session(
+        @Path("id") id: String,
+        @Query("directory") directory: String? = null,
+    ): Session
 
     @DELETE("session/{id}")
-    suspend fun deleteSession(@Path("id") id: String): Boolean
+    suspend fun deleteSession(
+        @Path("id") id: String,
+        @Query("directory") directory: String? = null,
+    ): Boolean
 
     @GET("session/status")
-    suspend fun sessionStatus(): Map<String, SessionStatus>
+    suspend fun sessionStatus(@Query("directory") directory: String? = null): Map<String, SessionStatus>
 
     @GET("session/{id}/message")
     suspend fun messages(
         @Path("id") id: String,
         @Query("limit") limit: Int? = null,
+        @Query("directory") directory: String? = null,
     ): List<MessageData>
 
     @POST("session/{id}/message")
     suspend fun sendMessage(
         @Path("id") id: String,
         @Body body: SendMessageBody,
+        @Query("directory") directory: String? = null,
     ): MessageData
 
     @POST("session/{id}/prompt_async")
     suspend fun sendMessageAsync(
         @Path("id") id: String,
         @Body body: SendMessageBody,
+        @Query("directory") directory: String? = null,
     ): Response<Unit>
 
     @GET("session/{id}/diff")
     suspend fun sessionDiff(
         @Path("id") id: String,
         @Query("messageID") messageId: String? = null,
+        @Query("directory") directory: String? = null,
     ): List<FileDiff>
 
     @POST("session/{id}/abort")
-    suspend fun abort(@Path("id") id: String): Boolean
+    suspend fun abort(
+        @Path("id") id: String,
+        @Query("directory") directory: String? = null,
+    ): Boolean
 
     @GET("session/{id}/todo")
-    suspend fun todos(@Path("id") id: String): List<Todo>
+    suspend fun todos(
+        @Path("id") id: String,
+        @Query("directory") directory: String? = null,
+    ): List<Todo>
 
     @GET("file")
-    suspend fun listFiles(@Query("path") path: String): List<FileNode>
+    suspend fun listFiles(
+        @Query("path") path: String,
+        @Query("directory") directory: String? = null,
+    ): List<FileNode>
 
     @GET("file/content")
-    suspend fun fileContent(@Query("path") path: String): FileContent
+    suspend fun fileContent(
+        @Query("path") path: String,
+        @Query("directory") directory: String? = null,
+    ): FileContent
 
     @GET("file/status")
-    suspend fun fileStatus(): List<FileStatus>
+    suspend fun fileStatus(@Query("directory") directory: String? = null): List<FileStatus>
 
     @GET("agent")
     suspend fun agents(): List<JsonObject>

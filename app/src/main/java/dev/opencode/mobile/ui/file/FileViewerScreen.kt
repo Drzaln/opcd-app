@@ -51,6 +51,7 @@ class FileViewModel(
     app: OpenCodeApp,
     private val server: ServerConfig,
     private val path: String,
+    private val projectDir: () -> String?,
 ) : ViewModel() {
 
     data class UiState(
@@ -72,7 +73,7 @@ class FileViewModel(
         viewModelScope.launch {
             _ui.value = _ui.value.copy(loading = true, error = null)
             try {
-                val content = api.fileContent(path)
+                val content = api.fileContent(path, projectDir())
                 _ui.value = _ui.value.copy(content = content, loading = false)
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(loading = false, error = e.message ?: "Failed to read file")
@@ -101,7 +102,9 @@ fun FileViewerScreen(
 
     val vm: FileViewModel = viewModel(
         key = "file_${serverId}_$path",
-        factory = viewModelFactory { initializer { FileViewModel(app, server, path) } },
+        factory = viewModelFactory {
+            initializer { FileViewModel(app, server, path, projectDir = { appVm.currentDirectory.value }) }
+        },
     )
     val ui by vm.ui.collectAsState()
 

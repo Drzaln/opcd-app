@@ -91,7 +91,11 @@ fun ChatScreen(
 
     val vm: ChatViewModel = viewModel(
         key = "chat_${serverId}_$sessionId",
-        factory = viewModelFactory { initializer { ChatViewModel(app, actualServer, sessionId) } },
+        factory = viewModelFactory {
+            initializer {
+                ChatViewModel(app, actualServer, sessionId, projectDir = { appVm.currentDirectory.value })
+            }
+        },
     )
     val ui by vm.ui.collectAsState()
     val input by vm.input.collectAsState()

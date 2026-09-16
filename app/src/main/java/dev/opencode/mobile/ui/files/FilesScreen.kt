@@ -51,6 +51,7 @@ class FilesViewModel(
     app: OpenCodeApp,
     private val server: ServerConfig,
     private val dir: String,
+    private val projectDir: () -> String?,
 ) : ViewModel() {
 
     data class UiState(
@@ -72,7 +73,7 @@ class FilesViewModel(
         viewModelScope.launch {
             _ui.value = _ui.value.copy(loading = true, error = null)
             try {
-                val files = api.listFiles(dir).sortedWith(compareBy({ it.type != "directory" }, { it.name.lowercase() }))
+                val files = api.listFiles(dir, projectDir()).sortedWith(compareBy({ it.type != "directory" }, { it.name.lowercase() }))
                 _ui.value = _ui.value.copy(files = files, loading = false)
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(loading = false, error = e.message ?: "Failed to list files")
@@ -105,7 +106,9 @@ fun FilesScreen(
 
     val vm: FilesViewModel = viewModel(
         key = "files_${serverId}_$dir",
-        factory = viewModelFactory { initializer { FilesViewModel(app, server, dir) } },
+        factory = viewModelFactory {
+            initializer { FilesViewModel(app, server, dir, projectDir = { appVm.currentDirectory.value }) }
+        },
     )
     val ui by vm.ui.collectAsState()
     val parent = dir.substringBeforeLast('/', "")

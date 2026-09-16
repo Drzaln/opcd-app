@@ -19,6 +19,7 @@ class ChatViewModel(
     app: OpenCodeApp,
     private val server: ServerConfig,
     private val sessionId: String,
+    private val projectDir: () -> String?,
 ) : ViewModel() {
 
     data class UiState(
@@ -58,6 +59,7 @@ class ChatViewModel(
                 api.sendMessageAsync(
                     sessionId,
                     SendMessageBody(parts = listOf(PartInput(type = "text", text = text))),
+                    projectDir(),
                 )
                 _input.value = ""
             } catch (e: Exception) {
@@ -70,7 +72,7 @@ class ChatViewModel(
 
     fun abort() {
         viewModelScope.launch {
-            runCatching { api.abort(sessionId) }
+            runCatching { api.abort(sessionId, projectDir()) }
             refreshAll()
         }
     }
@@ -82,7 +84,7 @@ class ChatViewModel(
 
     private fun startEvents(app: OpenCodeApp) {
         viewModelScope.launch {
-            app.repository.events(server).collectLatest { event ->
+            app.repository.events(server, projectDir()).collectLatest { event ->
                 when (event.type) {
                     "session.status", "session.idle", "session.diff",
                     "message.part.updated", "message.part.removed",
@@ -100,9 +102,9 @@ class ChatViewModel(
     private fun refreshAll() {
         viewModelScope.launch {
             try {
-                val status = runCatching { api.sessionStatus()[sessionId] }.getOrNull()
-                val session = runCatching { api.session(sessionId) }.getOrNull()
-                val messages = api.messages(sessionId)
+                val status = runCatching { api.sessionStatus(projectDir())[sessionId] }.getOrNull()
+                val session = runCatching { api.session(sessionId, projectDir()) }.getOrNull()
+                val messages = api.messages(sessionId, directory = projectDir())
                 _ui.value = UiState(messages = messages, session = session, status = status, loading = false)
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(loading = false, error = e.message ?: "Failed to load messages")
