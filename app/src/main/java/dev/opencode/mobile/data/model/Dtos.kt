@@ -228,9 +228,15 @@ data class PartInput(
 )
 
 @Serializable
+data class ModelRef(
+    val providerID: String = "",
+    val modelID: String = "",
+)
+
+@Serializable
 data class SendMessageBody(
     val messageID: String? = null,
-    val model: String? = null,
+    val model: ModelRef? = null,
     val agent: String? = null,
     val noReply: Boolean? = null,
     val system: String? = null,
@@ -241,4 +247,39 @@ data class SendMessageBody(
 data class CreateSessionBody(
     val parentID: String? = null,
     val title: String? = null,
+)
+
+@Serializable
+data class SessionUpdateBody(
+    val title: String? = null,
+)
+
+@Serializable
+data class Agent(
+    val name: String = "",
+    val description: String? = null,
+    val mode: String = "primary",
+    val builtIn: Boolean = false,
+    val color: String? = null,
+)
+
+@Serializable
+data class ModelInfo(
+    val id: String = "",
+    val name: String = "",
+)
+
+@Serializable
+data class Provider(
+    val id: String = "",
+    val name: String = "",
+    val source: String = "",
+    val models: Map<String, ModelInfo> = emptyMap(),
+)
+
+@Serializable
+data class ProviderList(
+    val all: List<Provider> = emptyList(),
+    val default: Map<String, String> = emptyMap(),
+    val connected: List<String> = emptyList(),
 )

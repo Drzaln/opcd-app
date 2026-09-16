@@ -1,6 +1,7 @@
 package dev.opencode.mobile.data.net
 
 import dev.opencode.mobile.data.model.Project
+import dev.opencode.mobile.data.model.Agent
 import dev.opencode.mobile.data.model.CreateSessionBody
 import dev.opencode.mobile.data.model.FileContent
 import dev.opencode.mobile.data.model.FileDiff
@@ -8,15 +9,18 @@ import dev.opencode.mobile.data.model.FileNode
 import dev.opencode.mobile.data.model.FileStatus
 import dev.opencode.mobile.data.model.Health
 import dev.opencode.mobile.data.model.MessageData
+import dev.opencode.mobile.data.model.ProviderList
 import dev.opencode.mobile.data.model.SendMessageBody
 import dev.opencode.mobile.data.model.Session
 import dev.opencode.mobile.data.model.SessionStatus
+import dev.opencode.mobile.data.model.SessionUpdateBody
 import dev.opencode.mobile.data.model.Todo
 import kotlinx.serialization.json.JsonObject
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -47,6 +51,13 @@ interface OpenCodeApi {
     @GET("session/{id}")
     suspend fun session(
         @Path("id") id: String,
+        @Query("directory") directory: String? = null,
+    ): Session
+
+    @PATCH("session/{id}")
+    suspend fun updateSession(
+        @Path("id") id: String,
+        @Body body: SessionUpdateBody,
         @Query("directory") directory: String? = null,
     ): Session
 
@@ -115,7 +126,10 @@ interface OpenCodeApi {
     suspend fun fileStatus(@Query("directory") directory: String? = null): List<FileStatus>
 
     @GET("agent")
-    suspend fun agents(): List<JsonObject>
+    suspend fun agents(): List<Agent>
+
+    @GET("provider")
+    suspend fun providers(): ProviderList
 
     @GET("command")
     suspend fun commands(): List<JsonObject>

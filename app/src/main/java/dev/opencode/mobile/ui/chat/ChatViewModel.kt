@@ -3,13 +3,16 @@ package dev.opencode.mobile.ui.chat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.opencode.mobile.OpenCodeApp
+import dev.opencode.mobile.data.model.Agent
 import dev.opencode.mobile.data.model.Message
 import dev.opencode.mobile.data.model.MessageData
+import dev.opencode.mobile.data.model.ModelRef
 import dev.opencode.mobile.data.model.Part
 import dev.opencode.mobile.data.model.PartInput
 import dev.opencode.mobile.data.model.SendMessageBody
 import dev.opencode.mobile.data.model.Session
 import dev.opencode.mobile.data.model.SessionStatus
+import dev.opencode.mobile.data.model.Todo
 import dev.opencode.mobile.data.net.OcEvent
 import dev.opencode.mobile.data.net.ServerConfig
 import kotlinx.coroutines.Job
@@ -19,11 +22,18 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.IOException
+
+data class ModelOption(
+    val providerId: String,
+    val modelId: String,
+    val label: String,
+)
 
 class ChatViewModel(
     app: OpenCodeApp,
@@ -37,6 +47,11 @@ class ChatViewModel(
         val messages: List<MessageData> = emptyList(),
         val session: Session? = null,
         val status: SessionStatus? = null,
+        val todos: List<Todo> = emptyList(),
+        val agents: List<Agent> = emptyList(),
+        val models: List<ModelOption> = emptyList(),
+        val selectedAgent: String? = null,
+        val selectedModel: ModelOption? = null,
         val loading: Boolean = true,
         val error: String? = null,
         val sending: Boolean = false,
@@ -57,8 +72,34 @@ class ChatViewModel(
 
     init {
         refreshAll()
+        loadMeta()
         startEvents(app)
         startPolling()
+    }
+
+    fun selectAgent(name: String?) {
+        _ui.update { it.copy(selectedAgent = name) }
+    }
+
+    fun selectModel(model: ModelOption?) {
+        _ui.update { it.copy(selectedModel = model) }
+    }
+
+    private fun loadMeta() {
+        viewModelScope.launch {
+            val agents = runCatching { api.agents() }.getOrDefault(emptyList())
+                .filter { it.mode == "primary" || it.mode == "all" }
+            val providers = runCatching { api.providers() }.getOrNull()
+            val connected = providers?.connected ?: emptyList()
+            val models = providers?.all.orEmpty()
+                .filter { it.id in connected }
+                .flatMap { provider ->
+                    provider.models.values.map { model ->
+                        ModelOption(provider.id, model.id, "${provider.name} · ${model.name}")
+                    }
+                }
+            _ui.update { it.copy(agents = agents, models = models) }
+        }
     }
 
     fun onInputChange(value: String) {
@@ -74,7 +115,11 @@ class ChatViewModel(
             try {
                 val response = api.sendMessageAsync(
                     sessionId,
-                    SendMessageBody(parts = listOf(PartInput(type = "text", text = text))),
+                    SendMessageBody(
+                        agent = _ui.value.selectedAgent,
+                        model = _ui.value.selectedModel?.let { ModelRef(it.providerId, it.modelId) },
+                        parts = listOf(PartInput(type = "text", text = text)),
+                    ),
                     projectDir(),
                 )
                 if (!response.isSuccessful) {
@@ -120,8 +165,9 @@ class ChatViewModel(
                     "message.removed" -> applyMessageRemoved(event)
                     "session.status" -> applyStatus(event)
                     "session.idle" -> _ui.update { it.copy(status = SessionStatus(type = "idle")) }
+                    "todo.updated" -> applyTodos(event)
                     "server.connected" -> scheduleFullRefresh()
-                    "session.updated", "session.diff", "session.compacted", "todo.updated" -> scheduleFullRefresh()
+                    "session.updated", "session.diff", "session.compacted" -> scheduleFullRefresh()
                 }
             }
         }
@@ -196,6 +242,13 @@ class ChatViewModel(
         _ui.update { it.copy(status = status) }
     }
 
+    private fun applyTodos(event: OcEvent) {
+        val properties = event.data as? JsonObject ?: return
+        val todosJson = properties["todos"] as? JsonArray ?: return
+        val todos = runCatching { json.decodeFromJsonElement<List<Todo>>(todosJson) }.getOrNull() ?: return
+        _ui.update { it.copy(todos = todos) }
+    }
+
     private fun scheduleFullRefresh() {
         refreshJob?.cancel()
         refreshJob = viewModelScope.launch {
@@ -226,8 +279,15 @@ class ChatViewModel(
                 val status = runCatching { api.sessionStatus(projectDir())[sessionId] }.getOrNull()
                 val session = runCatching { api.session(sessionId, projectDir()) }.getOrNull()
                 val messages = api.messages(sessionId, directory = projectDir())
+                val todos = runCatching { api.todos(sessionId, projectDir()) }.getOrNull()
                 // Preserve existing error so the banner stays visible until dismissed or a send succeeds.
-                _ui.value = _ui.value.copy(messages = messages, session = session, status = status, loading = false)
+                _ui.value = _ui.value.copy(
+                    messages = messages,
+                    session = session,
+                    status = status,
+                    todos = todos ?: _ui.value.todos,
+                    loading = false,
+                )
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(loading = false, error = "Load messages: ${e.message ?: "unknown error"}")
             }

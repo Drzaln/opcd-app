@@ -2,7 +2,9 @@ package dev.opencode.mobile.ui.sessions
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -50,9 +53,12 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.opencode.mobile.AppViewModel
 import dev.opencode.mobile.OpenCodeApp
 import dev.opencode.mobile.data.model.Session
+import dev.opencode.mobile.data.model.SessionStatus
+import dev.opencode.mobile.data.model.SessionUpdateBody
 import dev.opencode.mobile.data.net.ServerConfig
 import dev.opencode.mobile.ui.common.MutedLabel
 import dev.opencode.mobile.ui.theme.Green
+import dev.opencode.mobile.ui.theme.Orange
 import dev.opencode.mobile.ui.theme.Red
 import dev.opencode.mobile.ui.theme.TextSecondary
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -71,6 +77,7 @@ class SessionsViewModel(
     data class UiState(
         val sessions: List<Session> = emptyList(),
         val projects: List<dev.opencode.mobile.data.model.Project> = emptyList(),
+        val statuses: Map<String, SessionStatus> = emptyMap(),
         val loading: Boolean = true,
         val error: String? = null,
         val creating: Boolean = false,
@@ -92,10 +99,18 @@ class SessionsViewModel(
             try {
                 val sessions = api.sessions(projectDir())
                     .sortedByDescending { it.time?.updated ?: it.time?.created ?: 0L }
-                _ui.value = _ui.value.copy(sessions = sessions, loading = false)
+                val statuses = runCatching { api.sessionStatus(projectDir()) }.getOrDefault(emptyMap())
+                _ui.value = _ui.value.copy(sessions = sessions, statuses = statuses, loading = false)
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(loading = false, error = e.message ?: "Failed to load sessions")
             }
+        }
+    }
+
+    fun updateTitle(id: String, title: String) {
+        viewModelScope.launch {
+            runCatching { api.updateSession(id, SessionUpdateBody(title = title), projectDir()) }
+            refresh()
         }
     }
 
@@ -160,6 +175,8 @@ fun SessionsScreen(
     val projectDir by appVm.currentDirectory.collectAsState()
 
     var showDirPicker by remember { mutableStateOf(false) }
+    var editTarget by remember { mutableStateOf<Session?>(null) }
+    var editTitle by remember { mutableStateOf("") }
 
     LaunchedEffect(projectDir) {
         vm.refresh()
@@ -200,8 +217,10 @@ fun SessionsScreen(
                 items(ui.sessions, key = { it.id }) { session ->
                     SessionCard(
                         session = session,
+                        status = ui.statuses[session.id],
                         onClick = { onChat(session.id) },
                         onDiff = { onDiff(session.id) },
+                        onEditTitle = { editTarget = session },
                     )
                 }
             }
@@ -217,6 +236,33 @@ fun SessionsScreen(
                 showDirPicker = false
                 appVm.setDirectory(dir)
             },
+        )
+    }
+
+    val target = editTarget
+    if (target != null) {
+        AlertDialog(
+            onDismissRequest = { editTarget = null },
+            title = { Text("Rename session") },
+            text = {
+                OutlinedTextField(
+                    value = editTitle.ifEmpty { target.title },
+                    onValueChange = { editTitle = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                Button(
+                    enabled = editTitle.isNotBlank(),
+                    onClick = {
+                        vm.updateTitle(target.id, editTitle.trim())
+                        editTarget = null
+                        editTitle = ""
+                    },
+                ) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { editTarget = null }) { Text("Cancel") } },
         )
     }
 }
@@ -308,16 +354,38 @@ private fun DirectoryPickerDialog(
 @Composable
 private fun SessionCard(
     session: Session,
+    status: SessionStatus?,
     onClick: () -> Unit,
     onDiff: () -> Unit,
+    onEditTitle: () -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onEditTitle),
+    ) {
         Column(Modifier.padding(12.dp)) {
-            Text(
-                session.title.ifEmpty { "Untitled session" },
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 2,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    session.title.ifEmpty { "Untitled session" },
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
+                    modifier = Modifier.weight(1f),
+                )
+                status?.let {
+                    val color = when (it.type) {
+                        "busy" -> Orange
+                        "retry" -> Red
+                        else -> Green
+                    }
+                    Box(
+                        Modifier
+                            .width(8.dp)
+                            .height(8.dp)
+                            .background(color, shape = CircleShape),
+                    )
+                }
+            }
             MutedLabel(session.directory)
             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 MutedLabel(formatTime(session.time?.updated ?: session.time?.created))
