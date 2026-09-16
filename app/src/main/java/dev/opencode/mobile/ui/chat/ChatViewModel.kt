@@ -55,7 +55,7 @@ class ChatViewModel(
 
     fun send() {
         val text = _input.value.trim()
-        if (text.isEmpty() || _ui.value.busy) return
+        if (text.isEmpty()) return
         viewModelScope.launch {
             _ui.value = _ui.value.copy(sending = true)
             try {
