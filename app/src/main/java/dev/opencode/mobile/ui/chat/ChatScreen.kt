@@ -196,6 +196,7 @@ fun ChatScreen(
             TodosPanel(todos = ui.todos)
             MessageList(
                 messages = ui.messages,
+                models = ui.models,
                 onOpenFile = onOpenFile,
             )
         }
@@ -373,6 +374,7 @@ private fun TodosPanel(todos: List<Todo>) {
 @Composable
 private fun MessageList(
     messages: List<MessageData>,
+    models: List<ModelOption>,
     onOpenFile: (String) -> Unit,
 ) {
     val listState = rememberLazyListState()
@@ -389,15 +391,22 @@ private fun MessageList(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(messages, key = { it.info.id }) { message ->
-                MessageRow(message = message, onOpenFile = onOpenFile)
+                MessageRow(message = message, models = models, onOpenFile = onOpenFile)
             }
         }
     }
 }
 
+private fun resolveModelLabel(info: dev.opencode.mobile.data.model.Message, models: List<ModelOption>): String? {
+    if (info.providerID.isNullOrBlank() && info.modelID.isNullOrBlank()) return null
+    val resolved = models.firstOrNull { it.providerId == info.providerID && it.modelId == info.modelID }
+    return resolved?.label ?: (info.modelID?.ifBlank { info.providerID } ?: info.providerID)
+}
+
 @Composable
 private fun MessageRow(
     message: MessageData,
+    models: List<ModelOption>,
     onOpenFile: (String) -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
@@ -445,11 +454,19 @@ private fun MessageRow(
                 }
             }
             val parts = message.parts
-            val modelLabel = listOfNotNull(message.info.providerID, message.info.modelID)
-                .joinToString("/")
-                .ifEmpty { null }
-            for ((index, part) in parts.withIndex()) {
-                PartView(part = part, isFirst = index == 0, modelLabel = modelLabel, onOpenFile = onOpenFile)
+            val agentName = parts.firstOrNull { it.agent.isNotBlank() }?.agent ?: "opencode"
+            val modelLabel = resolveModelLabel(message.info, models)
+            if (parts.isNotEmpty() || modelLabel != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
+                    Text(agentName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    if (modelLabel != null) {
+                        Spacer(Modifier.width(8.dp))
+                        MutedLabel(modelLabel)
+                    }
+                }
+            }
+            for (part in parts) {
+                PartView(part = part, onOpenFile = onOpenFile)
             }
             val tokens = message.info.tokens
             if (tokens != null) {
@@ -466,25 +483,10 @@ private fun MessageRow(
 @Composable
 private fun PartView(
     part: Part,
-    isFirst: Boolean,
-    modelLabel: String?,
     onOpenFile: (String) -> Unit,
 ) {
     when (part.type) {
         "text" -> {
-            if (isFirst) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
-                    Text(
-                        part.agent.ifEmpty { "opencode" },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    if (modelLabel != null) {
-                        Spacer(Modifier.width(8.dp))
-                        MutedLabel(modelLabel)
-                    }
-                }
-            }
             MarkdownText(markdown = part.text, modifier = Modifier.padding(bottom = 6.dp))
         }
         "reasoning" -> {
