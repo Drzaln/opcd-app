@@ -11,8 +11,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -26,6 +30,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -284,11 +289,22 @@ private fun <T> SelectionChip(
             Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(text = { Text(label) }, onClick = { onSelect(null); expanded = false })
+            DropdownMenuItem(
+                text = { Text(label) },
+                onClick = { onSelect(null); expanded = false },
+                leadingIcon = {
+                    if (selected == null) Icon(Icons.Filled.Check, contentDescription = "selected")
+                },
+            )
             for (option in options) {
                 DropdownMenuItem(
                     text = { Text(optionLabel(option), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     onClick = { onSelect(option); expanded = false },
+                    leadingIcon = {
+                        if (option == selected) {
+                            Icon(Icons.Filled.Check, contentDescription = "selected")
+                        }
+                    },
                 )
             }
         }
@@ -298,7 +314,7 @@ private fun <T> SelectionChip(
 @Composable
 private fun TodosPanel(todos: List<Todo>) {
     if (todos.isEmpty()) return
-    var expanded by rememberSaveable { mutableStateOf(true) }
+    var expanded by rememberSaveable { mutableStateOf(false) }
     Surface(
         color = SurfaceVariant,
         shape = RoundedCornerShape(8.dp),
@@ -310,33 +326,43 @@ private fun TodosPanel(todos: List<Todo>) {
                 Spacer(Modifier.width(8.dp))
                 val done = todos.count { it.status == "completed" }
                 MutedLabel("$done/${todos.size}")
+                Spacer(Modifier.weight(1f))
+                Text(if (expanded) "collapse" else "expand", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
             }
             if (expanded) {
-                todos.forEach { todo ->
-                    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        val color = when (todo.status) {
-                            "completed" -> Green
-                            "in_progress" -> MaterialTheme.colorScheme.primary
-                            "cancelled" -> Red
-                            else -> TextSecondary
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 220.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(top = 4.dp),
+                ) {
+                    todos.forEach { todo ->
+                        Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            val color = when (todo.status) {
+                                "completed" -> Green
+                                "in_progress" -> MaterialTheme.colorScheme.primary
+                                "cancelled" -> Red
+                                else -> TextSecondary
+                            }
+                            Text(
+                                when (todo.status) {
+                                    "completed" -> "☑"
+                                    "in_progress" -> "◐"
+                                    "cancelled" -> "✕"
+                                    else -> "○"
+                                },
+                                color = color,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                todo.content,
+                                style = MaterialTheme.typography.bodySmall,
+                                textDecoration = if (todo.status == "completed") TextDecoration.LineThrough else null,
+                                color = if (todo.status == "cancelled") TextSecondary else MaterialTheme.colorScheme.onSurface,
+                            )
                         }
-                        Text(
-                            when (todo.status) {
-                                "completed" -> "☑"
-                                "in_progress" -> "◐"
-                                "cancelled" -> "✕"
-                                else -> "○"
-                            },
-                            color = color,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            todo.content,
-                            style = MaterialTheme.typography.bodySmall,
-                            textDecoration = if (todo.status == "completed") TextDecoration.LineThrough else null,
-                            color = if (todo.status == "cancelled") TextSecondary else MaterialTheme.colorScheme.onSurface,
-                        )
                     }
                 }
             }
