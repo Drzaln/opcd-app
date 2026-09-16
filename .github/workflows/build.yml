@@ -28,7 +28,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Configure release signing
-        if: ${{ secrets.ANDROID_SIGNING_KEY_BASE64 != '' }}
+        env:
+          SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY_BASE64 }}
+        if: env.SIGNING_KEY != ''
         run: |
           echo "${{ secrets.ANDROID_SIGNING_KEY_BASE64 }}" | base64 -d > keystore.jks
           {
