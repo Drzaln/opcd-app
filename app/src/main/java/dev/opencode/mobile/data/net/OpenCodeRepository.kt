@@ -49,7 +49,8 @@ class OpenCodeRepository {
         .create(OpenCodeApi::class.java)
 
     fun events(server: ServerConfig, projectDir: String? = null): Flow<OcEvent> = callbackFlow {
-        val client = httpClient(server)
+        // Dedicated client so cancelling the stream cannot break the shared API client.
+        val client = newHttpClient(server)
         val url = buildString {
             append(baseUrl(server))
             append("event")
@@ -124,19 +125,21 @@ class OpenCodeRepository {
 
     private fun baseUrl(server: ServerConfig): String = server.baseUrl.trimEnd('/') + "/"
 
+    private fun newHttpClient(server: ServerConfig): OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .addInterceptor { chain ->
+            val req = chain.request().newBuilder()
+                .header("Authorization", Credentials.basic(server.username, server.password))
+                .build()
+            chain.proceed(req)
+        }
+        .build()
+
     private fun httpClient(server: ServerConfig): OkHttpClient {
         val cached = synchronized(lock) { clientCache[server.id] }
         if (cached != null) return cached
-        val client = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .addInterceptor { chain ->
-                val req = chain.request().newBuilder()
-                    .header("Authorization", Credentials.basic(server.username, server.password))
-                    .build()
-                chain.proceed(req)
-            }
-            .build()
+        val client = newHttpClient(server)
         synchronized(lock) { clientCache[server.id] = client }
         return client
     }

@@ -12,8 +12,10 @@ import dev.opencode.mobile.data.net.ServerConfig
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+import java.io.IOException
 
 class ChatViewModel(
     app: OpenCodeApp,
@@ -44,6 +46,7 @@ class ChatViewModel(
     init {
         refreshAll()
         startEvents(app)
+        startPolling()
     }
 
     fun onInputChange(value: String) {
@@ -56,16 +59,24 @@ class ChatViewModel(
         viewModelScope.launch {
             _ui.value = _ui.value.copy(sending = true)
             try {
-                api.sendMessageAsync(
+                val response = api.sendMessageAsync(
                     sessionId,
                     SendMessageBody(parts = listOf(PartInput(type = "text", text = text))),
                     projectDir(),
                 )
+                if (!response.isSuccessful) {
+                    val body = response.errorBody()?.string().orEmpty()
+                    throw IOException("HTTP ${response.code()} $body")
+                }
                 _input.value = ""
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(sending = false, error = e.message ?: "Failed to send message")
             }
-            refreshAll()
+            // The server persists async; keep refreshing until the message shows up.
+            repeat(7) {
+                delay(500)
+                refreshAll()
+            }
             _ui.value = _ui.value.copy(sending = false)
         }
     }
@@ -84,17 +95,19 @@ class ChatViewModel(
 
     private fun startEvents(app: OpenCodeApp) {
         viewModelScope.launch {
-            app.repository.events(server, projectDir()).collectLatest { event ->
-                when (event.type) {
-                    "session.status", "session.idle", "session.diff",
-                    "message.part.updated", "message.part.removed",
-                    "message.updated", "message.removed",
-                    "session.compacted", "todo.updated",
-                    -> {
-                        delay(250)
-                        refreshAll()
-                    }
-                }
+            app.repository.events(server, projectDir())
+                .filter { it.type in REFRESH_EVENT_TYPES }
+                .debounce(300)
+                .collect { refreshAll() }
+        }
+    }
+
+    private fun startPolling() {
+        // Poll fallback so the chat stays live even if SSE is down or events are missed.
+        viewModelScope.launch {
+            while (true) {
+                delay(3000)
+                refreshAll()
             }
         }
     }
@@ -110,5 +123,14 @@ class ChatViewModel(
                 _ui.value = _ui.value.copy(loading = false, error = e.message ?: "Failed to load messages")
             }
         }
+    }
+
+    private companion object {
+        val REFRESH_EVENT_TYPES = setOf(
+            "session.status", "session.idle", "session.diff",
+            "message.part.updated", "message.part.removed",
+            "message.updated", "message.removed",
+            "session.compacted", "todo.updated",
+        )
     }
 }
