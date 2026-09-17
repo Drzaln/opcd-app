@@ -90,6 +90,9 @@ after updating this file.
     (`res/font/jetbrains_mono_nerd_{regular,bold}.ttf`, OFL-1.1) so zsh/powerline prompt glyphs
     render instead of tofu; PTYs are created as **login** interactive shells (`-l`, or no command
     → server default `$SHELL`) so dotfiles/aliases/PATH match the local terminal.
+    **Gotcha:** the grid lives in a plain (non-`State`) emulator object, so a `LazyColumn` item
+    that only reads it will be *skipped* by Compose and never redraw — read the `frame` State inside
+    the item scope (or the list stays blank while data is actually arriving).
 
 ## Features done
 

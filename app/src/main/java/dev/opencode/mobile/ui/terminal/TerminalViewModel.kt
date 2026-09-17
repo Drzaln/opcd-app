@@ -100,23 +100,27 @@ class TerminalViewModel(
         val t = OkHttpPtyTransport(server, pty.id, projectDir(), cursor = null)
         transport = t
         connectJob = viewModelScope.launch {
-            t.events.collect { event ->
-                when (event) {
-                    is PtyEvent.Data -> {
-                        emulator.write(event.text)
-                        if (!_ui.value.connected) _ui.value = _ui.value.copy(connected = true, status = "connected")
-                        _frame.value = emulator.version
-                    }
-                    is PtyEvent.Meta -> {
-                        lastCursor = event.cursor
-                    }
-                    is PtyEvent.Closed -> {
-                        _ui.value = _ui.value.copy(connected = false, status = "closed (${event.code})")
-                    }
-                    is PtyEvent.Failed -> {
-                        _ui.value = _ui.value.copy(connected = false, status = event.message)
+            try {
+                t.events.collect { event ->
+                    when (event) {
+                        is PtyEvent.Data -> {
+                            emulator.write(event.text)
+                            if (!_ui.value.connected) _ui.value = _ui.value.copy(connected = true, status = "connected")
+                            _frame.value = emulator.version
+                        }
+                        is PtyEvent.Meta -> {
+                            lastCursor = event.cursor
+                        }
+                        is PtyEvent.Closed -> {
+                            _ui.value = _ui.value.copy(connected = false, status = "closed (${event.code})")
+                        }
+                        is PtyEvent.Failed -> {
+                            _ui.value = _ui.value.copy(connected = false, status = event.message)
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                _ui.value = _ui.value.copy(connected = false, status = e.message ?: "connection error")
             }
         }
     }

@@ -238,7 +238,8 @@ private fun SessionList(
 
 @Composable
 private fun TerminalView(vm: TerminalViewModel) {
-    val frame by vm.frame.collectAsState()
+    val frameState = vm.frame.collectAsState()
+    val frame = frameState.value
     val ui by vm.ui.collectAsState()
     val emulator = vm.emulator
     val context = LocalContext.current
@@ -272,8 +273,10 @@ private fun TerminalView(vm: TerminalViewModel) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val widthPx = with(androidx.compose.ui.platform.LocalDensity.current) { maxWidth.toPx() }
         val heightPx = with(androidx.compose.ui.platform.LocalDensity.current) { maxHeight.toPx() }
-        val cols = (widthPx / cellWidth).toInt().coerceAtLeast(10)
-        val rows = (heightPx / rowHeightPx).toInt().coerceAtLeast(4)
+        val cell = cellWidth.coerceAtLeast(1).toFloat()
+        val lineH = rowHeightPx.coerceAtLeast(1).toFloat()
+        val cols = (widthPx / cell).toInt().coerceIn(10, 500)
+        val rows = (heightPx / lineH).toInt().coerceIn(4, 300)
         LaunchedEffect(cols, rows, ui.active?.id) {
             if (ui.active != null) vm.resize(cols, rows)
         }
@@ -286,6 +289,9 @@ private fun TerminalView(vm: TerminalViewModel) {
             ) {
                 val total = emulator.totalLines()
                 items(total, key = { "line_$it" }) { index ->
+                    // Read the frame State inside the item scope so rows recompose on new output;
+                    // the emulator is a plain object and would otherwise be skipped.
+                    @Suppress("UNUSED_EXPRESSION") frameState.value
                     val cells = emulator.screenLine(index) ?: emptyList()
                     val isCursorRow = index == emulator.cursorRow
                     TerminalRow(
@@ -306,6 +312,21 @@ private fun TerminalView(vm: TerminalViewModel) {
             }
 
             KeyRow(ctrl = ctrl, onCtrlToggle = { ctrl = !ctrl }, onKey = { vm.send(it) })
+
+            if (!ui.connected) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        ui.status,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { ui.active?.let { vm.attach(it) } }) { Text("Reconnect") }
+                }
+            }
 
             Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
                 Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp)) {
