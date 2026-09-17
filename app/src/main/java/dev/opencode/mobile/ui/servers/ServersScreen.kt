@@ -95,6 +95,9 @@ fun ServersScreen(
                 SecurityHint()
             }
             item {
+                NotificationToggle(appVm)
+            }
+            item {
                 OutlinedButton(
                     onClick = { showScan = true },
                     modifier = Modifier.fillMaxWidth(),
@@ -145,6 +148,57 @@ fun ServersScreen(
             },
             appVm = appVm,
         )
+    }
+}
+
+@Composable
+private fun NotificationToggle(appVm: AppViewModel) {
+    val context = LocalContext.current
+    val enabled by appVm.notificationsEnabled.collectAsState()
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            appVm.setNotificationsEnabled(true)
+            dev.opencode.mobile.notify.SessionWatchService.start(context)
+        }
+    }
+
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Notify when a turn finishes", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Keeps a light background connection to the server so you get notified when opencode is done or needs input.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = enabled,
+                onCheckedChange = { want ->
+                    if (want) {
+                        val granted = android.os.Build.VERSION.SDK_INT < 33 ||
+                            androidx.core.content.ContextCompat.checkSelfPermission(
+                                context,
+                                android.Manifest.permission.POST_NOTIFICATIONS,
+                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        if (granted) {
+                            appVm.setNotificationsEnabled(true)
+                            dev.opencode.mobile.notify.SessionWatchService.start(context)
+                        } else {
+                            launcher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    } else {
+                        appVm.setNotificationsEnabled(false)
+                        dev.opencode.mobile.notify.SessionWatchService.stop(context)
+                    }
+                },
+            )
+        }
     }
 }
 

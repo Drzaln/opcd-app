@@ -30,6 +30,7 @@ class ServerStore(private val context: Context) {
     private val activeKey = stringPreferencesKey("active")
     private val selectedModelKey = stringPreferencesKey("selected_model")
     private val selectedAgentKey = stringPreferencesKey("selected_agent")
+    private val notifyKey = androidx.datastore.preferences.core.booleanPreferencesKey("notifications_enabled")
 
     val servers: Flow<List<ServerConfig>> = context.dataStore.data.map { prefs ->
         val raw = prefs[serversKey] ?: "[]"
@@ -44,6 +45,12 @@ class ServerStore(private val context: Context) {
 
     val selectedAgents: Flow<Map<String, String>> = context.dataStore.data.map {
         decodeStringMap(it[selectedAgentKey])
+    }
+
+    val notificationsEnabled: Flow<Boolean> = context.dataStore.data.map { it[notifyKey] ?: false }
+
+    suspend fun setNotificationsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[notifyKey] = enabled }
     }
 
     suspend fun setSelectedModel(serverId: String, value: String?) {

@@ -29,6 +29,13 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
     private val _currentDirectory = MutableStateFlow<String?>(null)
     val currentDirectory: StateFlow<String?> = _currentDirectory
 
+    val notificationsEnabled: StateFlow<Boolean> =
+        store.notificationsEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun setNotificationsEnabled(enabled: Boolean) {
+        viewModelScope.launch { store.setNotificationsEnabled(enabled) }
+    }
+
     fun setDirectory(directory: String?) {
         _currentDirectory.value = directory
     }
