@@ -38,3 +38,84 @@ val CodeInserted = Color(0xFF3FB950)
 val CodeDeleted = Color(0xFFF85149)
 val CodeChanged = Color(0xFFFFA657)
 val CodePlain = TextPrimary
+
+// Light palette (GitHub Light-ish).
+val LightBg = Color(0xFFFFFFFF)
+val LightSurface = Color(0xFFF6F8FA)
+val LightSurfaceVariant = Color(0xFFEFF2F5)
+val LightBorder = Color(0xFFD0D7DE)
+val LightPrimary = Color(0xFF0969DA)
+val LightPrimaryDim = Color(0xFFDDF4FF)
+val LightGreen = Color(0xFF1A7F37)
+val LightGreenBg = Color(0xFFDAFBE1)
+val LightRed = Color(0xFFCF222E)
+val LightRedBg = Color(0xFFFFEBE9)
+val LightOrange = Color(0xFF9A6700)
+val LightPurple = Color(0xFF8250DF)
+val LightTextPrimary = Color(0xFF1F2328)
+val LightTextSecondary = Color(0xFF57606A)
+
+/**
+ * Theme-aware palette. Use `OcTheme.colors.*` instead of the raw `Color.kt` constants in UI code
+ * so a screen works in both dark and light mode.
+ */
+@androidx.compose.runtime.Immutable
+data class OcColors(
+    val bg: Color,
+    val surface: Color,
+    val surfaceVariant: Color,
+    val border: Color,
+    val primary: Color,
+    val primaryDim: Color,
+    val green: Color,
+    val greenBg: Color,
+    val red: Color,
+    val redBg: Color,
+    val orange: Color,
+    val purple: Color,
+    val textPrimary: Color,
+    val textSecondary: Color,
+)
+
+val DarkOcColors = OcColors(
+    bg = Bg,
+    surface = Surface,
+    surfaceVariant = SurfaceVariant,
+    border = Border,
+    primary = Primary,
+    primaryDim = PrimaryDim,
+    green = Green,
+    greenBg = GreenBg,
+    red = Red,
+    redBg = RedBg,
+    orange = Orange,
+    purple = Purple,
+    textPrimary = TextPrimary,
+    textSecondary = TextSecondary,
+)
+
+val LightOcColors = OcColors(
+    bg = LightBg,
+    surface = LightSurface,
+    surfaceVariant = LightSurfaceVariant,
+    border = LightBorder,
+    primary = LightPrimary,
+    primaryDim = LightPrimaryDim,
+    green = LightGreen,
+    greenBg = LightGreenBg,
+    red = LightRed,
+    redBg = LightRedBg,
+    orange = LightOrange,
+    purple = LightPurple,
+    textPrimary = LightTextPrimary,
+    textSecondary = LightTextSecondary,
+)
+
+val LocalOcColors = androidx.compose.runtime.staticCompositionLocalOf { DarkOcColors }
+
+object OcTheme {
+    val colors: OcColors
+        @androidx.compose.runtime.Composable
+        @androidx.compose.runtime.ReadOnlyComposable
+        get() = LocalOcColors.current
+}

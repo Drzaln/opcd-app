@@ -19,6 +19,7 @@ import dev.opencode.mobile.data.model.RevertBody
 import dev.opencode.mobile.data.model.SendMessageBody
 import dev.opencode.mobile.data.model.Session
 import dev.opencode.mobile.data.model.SessionStatus
+import dev.opencode.mobile.data.model.SummarizeBody
 import dev.opencode.mobile.data.model.Todo
 import dev.opencode.mobile.data.net.OcEvent
 import dev.opencode.mobile.data.net.ServerConfig
@@ -341,6 +342,35 @@ class ChatViewModel(
         }
     }
 
+    fun summarize() {
+        val selected = _ui.value.selectedModel
+        val last = _ui.value.messages.lastOrNull { it.info.role == "assistant" }?.info
+        val provider = selected?.providerId ?: last?.providerID
+        val model = selected?.modelId ?: last?.modelID
+        if (provider.isNullOrBlank() || model.isNullOrBlank()) {
+            _ui.update { it.copy(error = "Select a model before summarizing") }
+            return
+        }
+        viewModelScope.launch {
+            val response = runCatching {
+                api.summarizeSession(sessionId, SummarizeBody(provider, model), projectDir())
+            }.getOrNull()
+            if (response != true) {
+                _ui.update { it.copy(error = "Summarize failed") }
+            }
+            refreshAll()
+        }
+    }
+
+    // Messages typed while the session is busy are queued server-side; aborting clears that queue.
+    fun cancelQueued() {
+        viewModelScope.launch {
+            runCatching { api.abort(sessionId, projectDir()) }
+            _ui.update { it.copy(queued = 0) }
+            refreshAll()
+        }
+    }
+
     fun refresh() {
         refreshAll()
     }
@@ -511,9 +541,25 @@ class ChatViewModel(
                     hasMore = nextCursor != null,
                     loading = false,
                 )
+                updateWidget(session, status, _ui.value.messages)
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(loading = false, error = "Load messages: ${e.message ?: "unknown error"}")
             }
+        }
+    }
+
+    private fun updateWidget(session: Session?, status: SessionStatus?, messages: List<MessageData>) {
+        val snippet = messages.lastOrNull { it.info.role == "assistant" }
+            ?.parts?.firstOrNull { it.type == "text" }?.text?.trim()?.take(160)
+        val widget = dev.opencode.mobile.notify.StatusWidget
+        try {
+            widget.update(
+                app,
+                session?.title.orEmpty(),
+                status?.type ?: "idle",
+                snippet ?: "No messages yet",
+            )
+        } catch (_: Throwable) {
         }
     }
 

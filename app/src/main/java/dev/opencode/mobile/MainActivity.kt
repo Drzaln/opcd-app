@@ -6,16 +6,24 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
@@ -58,11 +66,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            OpenCodeTheme {
-                val app = application as OpenCodeApp
-                val appVm: AppViewModel = viewModel(
-                    factory = viewModelFactory { initializer { AppViewModel(app) } },
-                )
+            val app = application as OpenCodeApp
+            val appVm: AppViewModel = viewModel(
+                factory = viewModelFactory { initializer { AppViewModel(app) } },
+            )
+            val themeMode by appVm.themeMode.collectAsState()
+            OpenCodeTheme(mode = themeMode) {
                 val active by appVm.activeServer.collectAsState()
                 val navController = rememberNavController()
 
@@ -109,6 +118,15 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                val wide = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 720
+                var selectedSession by remember { mutableStateOf<String?>(null) }
+                var selectedFile by remember { mutableStateOf<String?>(null) }
+                var selectedLine by remember { mutableStateOf<Int?>(null) }
+                LaunchedEffect(active?.id) {
+                    selectedSession = null
+                    selectedFile = null
+                }
+
                 NavHost(navController = navController, startDestination = Routes.SERVERS) {
                     composable(Routes.SERVERS) {
                         ServersScreen(appVm = appVm, onOpen = { id -> navController.navigate(Routes.sessions(id)) })
@@ -118,14 +136,43 @@ class MainActivity : ComponentActivity() {
                         arguments = listOf(androidx.navigation.navArgument("serverId") { type = androidx.navigation.NavType.StringType }),
                     ) { entry ->
                         val serverId = entry.arguments?.getString("serverId") ?: return@composable
-                        SessionsScreen(
-                            appVm = appVm,
-                            serverId = serverId,
-                            onChat = { sessionId -> navController.navigate(Routes.chat(serverId, sessionId)) },
-                            onFiles = { navController.navigate(Routes.files(serverId, "")) },
-                            onDiff = { sessionId -> navController.navigate(Routes.diff(serverId, sessionId)) },
-                            onBack = { appVm.clearActive(); navController.navigate(Routes.SERVERS) { popUpTo(0) { inclusive = true } } },
-                        )
+                        val sessionsPane: @Composable () -> Unit = {
+                            SessionsScreen(
+                                appVm = appVm,
+                                serverId = serverId,
+                                onChat = { sessionId ->
+                                    if (wide) selectedSession = sessionId
+                                    else navController.navigate(Routes.chat(serverId, sessionId))
+                                },
+                                onFiles = { navController.navigate(Routes.files(serverId, "")) },
+                                onDiff = { sessionId -> navController.navigate(Routes.diff(serverId, sessionId)) },
+                                onBack = { appVm.clearActive(); navController.navigate(Routes.SERVERS) { popUpTo(0) { inclusive = true } } },
+                            )
+                        }
+                        if (wide) {
+                            WideTwoPane(
+                                list = sessionsPane,
+                                detail = {
+                                    val sessionId = selectedSession
+                                    if (sessionId == null) {
+                                        EmptyPane("Pick a session to open it here")
+                                    } else {
+                                        ChatScreen(
+                                            appVm = appVm,
+                                            serverId = serverId,
+                                            sessionId = sessionId,
+                                            onBack = { selectedSession = null },
+                                            onDiff = { navController.navigate(Routes.diff(serverId, sessionId)) },
+                                            onMessageDiff = { messageId -> navController.navigate(Routes.diff(serverId, sessionId, messageId)) },
+                                            onOpenFile = { path -> navController.navigate(Routes.file(serverId, path)) },
+                                            onOpenSession = { selectedSession = it },
+                                        )
+                                    }
+                                },
+                            )
+                        } else {
+                            sessionsPane()
+                        }
                     }
                     composable(
                         route = Routes.CHAT,
@@ -166,14 +213,41 @@ class MainActivity : ComponentActivity() {
                     ) { entry ->
                         val serverId = entry.arguments?.getString("serverId") ?: return@composable
                         val dir = entry.arguments?.getString("dir") ?: ""
-                        FilesScreen(
-                            appVm = appVm,
-                            serverId = serverId,
-                            dir = dir,
-                            onOpenDir = { d -> navController.navigate(Routes.files(serverId, d)) },
-                            onOpenFile = { path, line -> navController.navigate(Routes.file(serverId, path, line)) },
-                            onBack = { navController.popBackStack() },
-                        )
+                        val filesPane: @Composable () -> Unit = {
+                            FilesScreen(
+                                appVm = appVm,
+                                serverId = serverId,
+                                dir = dir,
+                                onOpenDir = { d -> navController.navigate(Routes.files(serverId, d)) },
+                                onOpenFile = { path, line ->
+                                    if (wide) {
+                                        selectedFile = path
+                                        selectedLine = line
+                                    } else {
+                                        navController.navigate(Routes.file(serverId, path, line))
+                                    }
+                                },
+                                onBack = { navController.popBackStack() },
+                            )
+                        }
+                        if (wide) {
+                            WideTwoPane(
+                                list = filesPane,
+                                detail = {
+                                    val path = selectedFile
+                                    if (path == null) EmptyPane("Pick a file to preview it here")
+                                    else FileViewerScreen(
+                                        appVm = appVm,
+                                        serverId = serverId,
+                                        path = path,
+                                        line = selectedLine,
+                                        onBack = { selectedFile = null },
+                                    )
+                                },
+                            )
+                        } else {
+                            filesPane()
+                        }
                     }
                     composable(
                         route = Routes.FILE,
@@ -229,6 +303,30 @@ class MainActivity : ComponentActivity() {
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@androidx.compose.runtime.Composable
+private fun WideTwoPane(
+    list: @Composable () -> Unit,
+    detail: @Composable () -> Unit,
+) {
+    Row(Modifier.fillMaxSize()) {
+        Box(Modifier.weight(0.42f).fillMaxHeight()) { list() }
+        Box(
+            Modifier
+                .width(1.dp)
+                .fillMaxHeight()
+                .background(MaterialTheme.colorScheme.outline),
+        )
+        Box(Modifier.weight(0.58f).fillMaxHeight()) { detail() }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun EmptyPane(message: String) {
+    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+        Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
 @androidx.compose.runtime.Composable
 private fun UpdateDialog(
     state: UpdateState,

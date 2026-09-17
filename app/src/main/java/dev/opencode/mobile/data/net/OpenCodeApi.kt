@@ -24,6 +24,7 @@ import dev.opencode.mobile.data.model.SendMessageBody
 import dev.opencode.mobile.data.model.Session
 import dev.opencode.mobile.data.model.SessionStatus
 import dev.opencode.mobile.data.model.SessionUpdateBody
+import dev.opencode.mobile.data.model.SummarizeBody
 import dev.opencode.mobile.data.model.Todo
 import kotlinx.serialization.json.JsonObject
 import retrofit2.Response
@@ -99,6 +100,13 @@ interface OpenCodeApi {
         @Path("id") id: String,
         @Query("directory") directory: String? = null,
     ): Session
+
+    @POST("session/{id}/summarize")
+    suspend fun summarizeSession(
+        @Path("id") id: String,
+        @Body body: SummarizeBody,
+        @Query("directory") directory: String? = null,
+    ): Boolean
 
     @POST("session/{id}/share")
     suspend fun shareSession(

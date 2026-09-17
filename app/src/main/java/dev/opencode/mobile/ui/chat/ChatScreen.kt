@@ -1,5 +1,7 @@
 package dev.opencode.mobile.ui.chat
 
+import dev.opencode.mobile.ui.theme.OcTheme
+
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -38,6 +40,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.CircularProgressIndicator
@@ -97,13 +100,6 @@ import dev.opencode.mobile.data.model.Todo
 import dev.opencode.mobile.ui.common.JsonUtil
 import dev.opencode.mobile.ui.common.MarkdownText
 import dev.opencode.mobile.ui.common.MutedLabel
-import dev.opencode.mobile.ui.theme.Border
-import dev.opencode.mobile.ui.theme.Green
-import dev.opencode.mobile.ui.theme.Orange
-import dev.opencode.mobile.ui.theme.Red
-import dev.opencode.mobile.ui.theme.RedBg
-import dev.opencode.mobile.ui.theme.SurfaceVariant
-import dev.opencode.mobile.ui.theme.TextSecondary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -129,7 +125,7 @@ fun ChatScreen(
 
     if (actualServer == null) {
         Column(Modifier.fillMaxSize().padding(24.dp)) {
-            Text("Server not found.", color = TextSecondary)
+            Text("Server not found.", color = OcTheme.colors.textSecondary)
             TextButton(onClick = onBack) { Text("Go back") }
         }
         return
@@ -138,6 +134,7 @@ fun ChatScreen(
     var foreground by remember { mutableStateOf(true) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { foreground = true }
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { foreground = false }
+    var showSummarize by remember { mutableStateOf(false) }
 
     val vm: ChatViewModel = viewModel(
         key = "chat_${serverId}_$sessionId",
@@ -191,7 +188,7 @@ fun ChatScreen(
                         )
                         val dir = ui.session?.directory
                         if (!dir.isNullOrEmpty()) {
-                            Text(dir, style = MaterialTheme.typography.labelSmall, color = TextSecondary, maxLines = 1)
+                            Text(dir, style = MaterialTheme.typography.labelSmall, color = OcTheme.colors.textSecondary, maxLines = 1)
                         }
                         val (ctxTokens, ctxPercent, sessionCost) = contextStatus
                         val bits = mutableListOf<String>()
@@ -202,9 +199,9 @@ fun ChatScreen(
                         }
                         if (bits.isNotEmpty()) {
                             val color = when {
-                                (ctxPercent ?: 0) >= 90 -> Red
-                                (ctxPercent ?: 0) >= 70 -> Orange
-                                else -> TextSecondary
+                                (ctxPercent ?: 0) >= 90 -> OcTheme.colors.red
+                                (ctxPercent ?: 0) >= 70 -> OcTheme.colors.orange
+                                else -> OcTheme.colors.textSecondary
                             }
                             Text(bits.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = color, maxLines = 1)
                         }
@@ -219,8 +216,11 @@ fun ChatScreen(
                     }
                     if (ui.busy) {
                         IconButton(onClick = { vm.abort() }) {
-                            Icon(Icons.Filled.Block, contentDescription = "Abort", tint = Red)
+                            Icon(Icons.Filled.Block, contentDescription = "Abort", tint = OcTheme.colors.red)
                         }
+                    }
+                    IconButton(onClick = { showSummarize = true }) {
+                        Icon(Icons.Filled.Compress, contentDescription = "Summarize")
                     }
                     TextButton(onClick = onDiff) { Text("Diff") }
                 },
@@ -232,8 +232,9 @@ fun ChatScreen(
                 onValueChange = { vm.onInputChange(it) },
                 onSend = { vm.send() },
                 busy = ui.busy,
-                enabled = !ui.busy,
+                enabled = true,
                 queued = ui.queued,
+                onCancelQueued = { vm.cancelQueued() },
                 commands = ui.commands,
                 agents = ui.agents,
                 models = ui.models,
@@ -250,10 +251,13 @@ fun ChatScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (ui.error != null) {
-                Surface(color = RedBg, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+                Surface(color = OcTheme.colors.redBg, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
                     Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         SelectionContainer(modifier = Modifier.weight(1f)) {
-                            Text(ui.error!!, color = Red, style = MaterialTheme.typography.bodySmall)
+                            Text(ui.error!!, color = OcTheme.colors.red, style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (input.isNotBlank()) {
+                            TextButton(onClick = { vm.dismissError(); vm.send() }) { Text("Retry") }
                         }
                         TextButton(onClick = { vm.dismissError() }) { Text("Dismiss") }
                     }
@@ -281,6 +285,19 @@ fun ChatScreen(
             )
         }
     }
+    if (showSummarize) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showSummarize = false },
+            title = { Text("Summarize session?") },
+            text = { Text("This compacts the conversation context using the selected model. Older turns are replaced by a summary.") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { showSummarize = false; vm.summarize() }) { Text("Summarize") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showSummarize = false }) { Text("Cancel") }
+            },
+        )
+    }
 }
 
 @Composable
@@ -291,6 +308,7 @@ private fun InputBar(
     busy: Boolean,
     enabled: Boolean,
     queued: Int,
+    onCancelQueued: () -> Unit,
     commands: List<Command>,
     agents: List<Agent>,
     models: List<ModelOption>,
@@ -314,7 +332,7 @@ private fun InputBar(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     for (attachment in attachments) {
-                        Surface(color = SurfaceVariant, shape = RoundedCornerShape(8.dp)) {
+                        Surface(color = OcTheme.colors.surfaceVariant, shape = RoundedCornerShape(8.dp)) {
                             Row(
                                 Modifier.padding(start = 8.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -358,7 +376,17 @@ private fun InputBar(
                         )
                     }
                     Spacer(Modifier.weight(1f))
-                    Text("·", color = TextSecondary)
+                    Text("·", color = OcTheme.colors.textSecondary)
+                }
+            }
+            if (queued > 0) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    MutedLabel("$queued message(s) queued")
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onCancelQueued) { Text("Cancel queued", color = OcTheme.colors.red) }
                 }
             }
             Row(
@@ -430,7 +458,7 @@ private fun CommandMenu(commands: List<Command>, onPick: (String) -> Unit) {
                                 Text(
                                     cmd.description!!,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = TextSecondary,
+                                    color = OcTheme.colors.textSecondary,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -491,20 +519,24 @@ private fun TodosPanel(todos: List<Todo>) {
     if (todos.isEmpty()) return
     var expanded by rememberSaveable { mutableStateOf(false) }
     Surface(
-        color = SurfaceVariant,
+        color = OcTheme.colors.surfaceVariant,
         shape = RoundedCornerShape(8.dp),
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
     ) {
         Column(Modifier.padding(10.dp)) {
             Row(Modifier.fillMaxWidth().clickable { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically) {
-                Text(if (expanded) "▾ Todos" else "▸ Todos", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                Text(if (expanded) "▾ Todos" else "▸ Todos", style = MaterialTheme.typography.labelMedium, color = OcTheme.colors.textSecondary)
                 Spacer(Modifier.width(8.dp))
                 val done = todos.count { it.status == "completed" }
                 MutedLabel("$done/${todos.size}")
                 Spacer(Modifier.weight(1f))
-                Text(if (expanded) "collapse" else "expand", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                Text(if (expanded) "collapse" else "expand", style = MaterialTheme.typography.labelSmall, color = OcTheme.colors.textSecondary)
             }
-            if (expanded) {
+            androidx.compose.animation.AnimatedVisibility(
+                visible = expanded,
+                enter = androidx.compose.animation.expandVertically(),
+                exit = androidx.compose.animation.shrinkVertically(),
+            ) {
                 Column(
                     Modifier
                         .fillMaxWidth()
@@ -515,10 +547,10 @@ private fun TodosPanel(todos: List<Todo>) {
                     todos.forEach { todo ->
                         Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                             val color = when (todo.status) {
-                                "completed" -> Green
+                                "completed" -> OcTheme.colors.green
                                 "in_progress" -> MaterialTheme.colorScheme.primary
-                                "cancelled" -> Red
-                                else -> TextSecondary
+                                "cancelled" -> OcTheme.colors.red
+                                else -> OcTheme.colors.textSecondary
                             }
                             Text(
                                 when (todo.status) {
@@ -535,7 +567,7 @@ private fun TodosPanel(todos: List<Todo>) {
                                 todo.content,
                                 style = MaterialTheme.typography.bodySmall,
                                 textDecoration = if (todo.status == "completed") TextDecoration.LineThrough else null,
-                                color = if (todo.status == "cancelled") TextSecondary else MaterialTheme.colorScheme.onSurface,
+                                color = if (todo.status == "cancelled") OcTheme.colors.textSecondary else MaterialTheme.colorScheme.onSurface,
                             )
                         }
                     }
@@ -617,6 +649,7 @@ private fun MessageList(
                         MessageRow(
                             message = message,
                             models = models,
+                            modifier = Modifier.animateItem(),
                             onOpenFile = onOpenFile,
                             onMessageDiff = onMessageDiff,
                             onFork = { onFork(message.info.id) },
@@ -629,7 +662,7 @@ private fun MessageList(
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
                                 CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
                                 Spacer(Modifier.width(8.dp))
-                                Text("opencode is working…", color = TextSecondary, style = MaterialTheme.typography.labelSmall)
+                                Text("opencode is working…", color = OcTheme.colors.textSecondary, style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }
@@ -665,6 +698,7 @@ private fun MessageRow(
     onFork: () -> Unit,
     onRevert: () -> Unit,
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
@@ -679,7 +713,7 @@ private fun MessageRow(
     }
 
     val isUser = message.info.role == "user"
-    Box(Modifier.fillMaxWidth()) {
+    Box(modifier.fillMaxWidth()) {
     if (isUser) {
         val text = message.parts.joinToString("\n") { it.text }
         Column(
@@ -705,12 +739,12 @@ private fun MessageRow(
             Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = { menu = true }),
         ) {
             if (message.info.error != null) {
-                Surface(color = RedBg, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Surface(color = OcTheme.colors.redBg, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(10.dp)) {
-                        Text("Message failed", color = Red, style = MaterialTheme.typography.labelMedium)
+                        Text("Message failed", color = OcTheme.colors.red, style = MaterialTheme.typography.labelMedium)
                         Text(
                             message.info.error.toString(),
-                            color = Red,
+                            color = OcTheme.colors.red,
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 6,
                             overflow = TextOverflow.Ellipsis,
@@ -766,7 +800,7 @@ private fun MessageRow(
             )
         }
         DropdownMenuItem(
-            text = { Text("Delete message", color = Red) },
+            text = { Text("Delete message", color = OcTheme.colors.red) },
             onClick = { menu = false; onDelete() },
         )
     }
@@ -785,7 +819,7 @@ private fun PartView(
         "reasoning" -> {
             var expanded by rememberSaveable(part.id) { mutableStateOf(false) }
             Surface(
-                color = SurfaceVariant,
+                color = OcTheme.colors.surfaceVariant,
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
             ) {
@@ -793,13 +827,13 @@ private fun PartView(
                     Text(
                         if (expanded) "▾ reasoning" else "▸ reasoning",
                         style = MaterialTheme.typography.labelMedium,
-                        color = TextSecondary,
+                        color = OcTheme.colors.textSecondary,
                     )
                     if (expanded) {
                         Text(
                             part.text,
                             style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
+                            color = OcTheme.colors.textSecondary,
                             modifier = Modifier.padding(top = 4.dp),
                         )
                     }
@@ -809,20 +843,20 @@ private fun PartView(
         "tool" -> ToolCard(part)
         "step-start" -> {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-                Box(Modifier.width(24.dp).height(1.dp).background(Border))
-                Text(" step ", color = TextSecondary, style = MaterialTheme.typography.labelSmall)
-                Box(Modifier.weight(1f).height(1.dp).background(Border))
+                Box(Modifier.width(24.dp).height(1.dp).background(OcTheme.colors.border))
+                Text(" step ", color = OcTheme.colors.textSecondary, style = MaterialTheme.typography.labelSmall)
+                Box(Modifier.weight(1f).height(1.dp).background(OcTheme.colors.border))
             }
         }
         "step-finish" -> {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-                Box(Modifier.width(24.dp).height(1.dp).background(Border))
+                Box(Modifier.width(24.dp).height(1.dp).background(OcTheme.colors.border))
                 Text(
                     " step finished (${part.reason.ifEmpty { "done" }}) ",
-                    color = TextSecondary,
+                    color = OcTheme.colors.textSecondary,
                     style = MaterialTheme.typography.labelSmall,
                 )
-                Box(Modifier.weight(1f).height(1.dp).background(Border))
+                Box(Modifier.weight(1f).height(1.dp).background(OcTheme.colors.border))
             }
         }
         "snapshot" -> MutedLabel("snapshot ${part.snapshot}", modifier = Modifier.padding(vertical = 2.dp))
@@ -909,12 +943,12 @@ private fun ToolCard(part: Part) {
     var expandedInput by rememberSaveable(part.id) { mutableStateOf(false) }
     var expandedOutput by rememberSaveable(part.id) { mutableStateOf(false) }
     val statusColor = when (state.status) {
-        "completed" -> Green
-        "error" -> Red
+        "completed" -> OcTheme.colors.green
+        "error" -> OcTheme.colors.red
         else -> MaterialTheme.colorScheme.primary
     }
     Surface(
-        color = SurfaceVariant,
+        color = OcTheme.colors.surfaceVariant,
         shape = RoundedCornerShape(8.dp),
         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
     ) {
@@ -922,7 +956,7 @@ private fun ToolCard(part: Part) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(part.tool, style = MaterialTheme.typography.labelLarge, color = statusColor)
                 Spacer(Modifier.width(8.dp))
-                Text(state.status, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                Text(state.status, style = MaterialTheme.typography.labelSmall, color = OcTheme.colors.textSecondary)
                 Spacer(Modifier.weight(1f))
                 if (state.status == "running" || state.status == "pending") {
                     CircularProgressIndicator(modifier = Modifier.width(12.dp).height(12.dp), strokeWidth = 2.dp)
@@ -937,7 +971,7 @@ private fun ToolCard(part: Part) {
                     Text(
                         if (expandedInput) "▾ input" else "▸ input",
                         style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary,
+                        color = OcTheme.colors.textSecondary,
                     )
                 }
                 if (expandedInput) {
@@ -958,7 +992,7 @@ private fun ToolCard(part: Part) {
                     Text(
                         if (expandedOutput) "▾ output" else "▸ output",
                         style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary,
+                        color = OcTheme.colors.textSecondary,
                     )
                 }
                 if (expandedOutput) {
@@ -972,7 +1006,7 @@ private fun ToolCard(part: Part) {
                 }
             }
             if (state.status == "error" && state.error.isNotBlank()) {
-                Text(state.error, color = Red, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+                Text(state.error, color = OcTheme.colors.red, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
             }
         }
     }

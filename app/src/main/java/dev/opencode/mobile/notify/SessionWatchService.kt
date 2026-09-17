@@ -82,13 +82,22 @@ class SessionWatchService : Service() {
                     val status = (data?.get("status") as? JsonObject)?.get("type")?.jsonPrimitive?.contentOrNull
                     if (sessionId != null) {
                         when (status) {
-                            "busy", "retry" -> busySessions.add(sessionId)
-                            "idle" -> if (busySessions.remove(sessionId)) notifyDone(api, sessionId)
+                            "busy", "retry" -> {
+                                busySessions.add(sessionId)
+                                updateWidget(api, sessionId, "busy")
+                            }
+                            "idle" -> if (busySessions.remove(sessionId)) {
+                                notifyDone(api, sessionId)
+                                updateWidget(api, sessionId, "idle")
+                            }
                         }
                     }
                 }
                 "session.idle" -> {
-                    if (sessionId != null && busySessions.remove(sessionId)) notifyDone(api, sessionId)
+                    if (sessionId != null && busySessions.remove(sessionId)) {
+                        notifyDone(api, sessionId)
+                        updateWidget(api, sessionId, "idle")
+                    }
                 }
                 "permission.updated" -> {
                     val title = data?.get("title")?.jsonPrimitive?.contentOrNull ?: "Permission requested"
@@ -127,6 +136,18 @@ class SessionWatchService : Service() {
         scope.launch {
             val title = runCatching { api.session(sessionId) }.getOrNull()?.title.orEmpty().ifEmpty { "Session" }
             Notifications.post(this@SessionWatchService, notifyId++, "opencode finished", title)
+        }
+    }
+
+    private fun updateWidget(api: dev.opencode.mobile.data.net.OpenCodeApi, sessionId: String, status: String) {
+        scope.launch {
+            val title = runCatching { api.session(sessionId) }.getOrNull()?.title.orEmpty().ifEmpty { "Session" }
+            StatusWidget.update(
+                this@SessionWatchService,
+                title,
+                status,
+                if (status == "busy") "opencode is working…" else "Turn finished",
+            )
         }
     }
 

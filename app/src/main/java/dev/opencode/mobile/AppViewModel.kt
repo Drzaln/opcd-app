@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -55,6 +56,14 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
 
     private val promptJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
+    val themeMode: StateFlow<dev.opencode.mobile.ui.theme.ThemeMode> =
+        store.theme.map { dev.opencode.mobile.ui.theme.themeModeFrom(it) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, dev.opencode.mobile.ui.theme.ThemeMode.SYSTEM)
+
+    fun setThemeMode(mode: dev.opencode.mobile.ui.theme.ThemeMode) {
+        viewModelScope.launch { store.setTheme(mode.name.lowercase()) }
+    }
+
     init {
         viewModelScope.launch {
             store.currentDirectory.collect { dir ->
@@ -64,6 +73,7 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
         viewModelScope.launch {
             if (store.notificationsEnabled.first()) {
                 dev.opencode.mobile.notify.SessionWatchService.start(app)
+                dev.opencode.mobile.notify.NotifyScheduler.enable(app)
             }
         }
         watchPrompts()
@@ -231,7 +241,14 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
     }
 
     fun setNotificationsEnabled(enabled: Boolean) {
-        viewModelScope.launch { store.setNotificationsEnabled(enabled) }
+        viewModelScope.launch {
+            store.setNotificationsEnabled(enabled)
+            if (enabled) {
+                dev.opencode.mobile.notify.NotifyScheduler.enable(app)
+            } else {
+                dev.opencode.mobile.notify.NotifyScheduler.disable(app)
+            }
+        }
     }
 
     fun setDirectory(directory: String?) {

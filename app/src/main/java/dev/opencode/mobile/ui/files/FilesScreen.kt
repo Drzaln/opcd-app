@@ -1,5 +1,7 @@
 package dev.opencode.mobile.ui.files
 
+import dev.opencode.mobile.ui.theme.OcTheme
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -46,7 +48,6 @@ import dev.opencode.mobile.OpenCodeApp
 import dev.opencode.mobile.data.model.FileNode
 import dev.opencode.mobile.data.model.FindMatch
 import dev.opencode.mobile.data.net.ServerConfig
-import dev.opencode.mobile.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -147,7 +148,7 @@ fun FilesScreen(
 
     if (server == null) {
         Column(Modifier.fillMaxSize().padding(24.dp)) {
-            Text("Server not found.", color = TextSecondary)
+            Text("Server not found.", color = OcTheme.colors.textSecondary)
         }
         return
     }
@@ -201,10 +202,10 @@ fun FilesScreen(
                     if (ui.mode == SearchMode.FILES) {
                         items(ui.fileResults, key = { it }) { path ->
                             Row(
-                                Modifier.fillMaxWidth().clickable { onOpenFile(path, null) }.padding(horizontal = 16.dp, vertical = 12.dp),
+                                Modifier.fillMaxWidth().animateItem().clickable { onOpenFile(path, null) }.padding(horizontal = 16.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Icon(Icons.Filled.Description, contentDescription = null, tint = TextSecondary)
+                                Icon(Icons.Filled.Description, contentDescription = null, tint = OcTheme.colors.textSecondary)
                                 Spacer(Modifier.width(12.dp))
                                 Text(path, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
@@ -212,10 +213,10 @@ fun FilesScreen(
                     } else {
                         items(ui.contentResults, key = { "${it.path.text}:${it.lineNumber}" }) { match ->
                             Row(
-                                Modifier.fillMaxWidth().clickable { onOpenFile(match.path.text, match.lineNumber) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                                Modifier.fillMaxWidth().animateItem().clickable { onOpenFile(match.path.text, match.lineNumber) }.padding(horizontal = 16.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.Top,
                             ) {
-                                Icon(Icons.Filled.Description, contentDescription = null, tint = TextSecondary)
+                                Icon(Icons.Filled.Description, contentDescription = null, tint = OcTheme.colors.textSecondary)
                                 Spacer(Modifier.width(12.dp))
                                 Column {
                                     Text(
@@ -231,7 +232,7 @@ fun FilesScreen(
                         }
                     }
                     if (!ui.searching && ((ui.mode == SearchMode.FILES && ui.fileResults.isEmpty()) || (ui.mode == SearchMode.CONTENT && ui.contentResults.isEmpty()))) {
-                        item { Text("No results", color = TextSecondary, modifier = Modifier.padding(16.dp)) }
+                        item { Text("No results", color = OcTheme.colors.textSecondary, modifier = Modifier.padding(16.dp)) }
                     }
                 }
             } else {
@@ -244,6 +245,7 @@ fun FilesScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .animateItem()
                                 .clickable { if (isDir) onOpenDir(node.path) else onOpenFile(node.path, null) }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -251,7 +253,7 @@ fun FilesScreen(
                             Icon(
                                 if (isDir) Icons.Filled.Folder else Icons.Filled.Description,
                                 contentDescription = null,
-                                tint = if (isDir) MaterialTheme.colorScheme.primary else TextSecondary,
+                                tint = if (isDir) MaterialTheme.colorScheme.primary else OcTheme.colors.textSecondary,
                             )
                             Spacer(Modifier.width(12.dp))
                             Text(
@@ -259,7 +261,7 @@ fun FilesScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                color = if (node.ignored) TextSecondary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface,
+                                color = if (node.ignored) OcTheme.colors.textSecondary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.weight(1f),
                             )
                         }

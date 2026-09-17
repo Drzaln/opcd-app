@@ -169,6 +169,13 @@ data class RevertBody(
 )
 
 @Serializable
+data class SummarizeBody(
+    val providerID: String,
+    val modelID: String,
+    val auto: Boolean? = null,
+)
+
+@Serializable
 data class Session(
     val id: String = "",
     val projectID: String = "",

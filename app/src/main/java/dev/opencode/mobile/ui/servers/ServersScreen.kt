@@ -1,5 +1,7 @@
 package dev.opencode.mobile.ui.servers
 
+import dev.opencode.mobile.ui.theme.OcTheme
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,9 +53,6 @@ import androidx.compose.ui.unit.dp
 import dev.opencode.mobile.AppViewModel
 import dev.opencode.mobile.data.net.DiscoveredServer
 import dev.opencode.mobile.data.net.ServerConfig
-import dev.opencode.mobile.ui.theme.Green
-import dev.opencode.mobile.ui.theme.Red
-import dev.opencode.mobile.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 
 @Composable
@@ -87,7 +86,7 @@ fun ServersScreen(
                     Text(
                         "Connect to opencode running on your Mac over Tailscale",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary,
+                        color = OcTheme.colors.textSecondary,
                     )
                 }
             }
@@ -96,6 +95,9 @@ fun ServersScreen(
             }
             item {
                 NotificationToggle(appVm)
+            }
+            item {
+                ThemeToggle(appVm)
             }
             item {
                 OutlinedButton(
@@ -174,7 +176,7 @@ private fun NotificationToggle(appVm: AppViewModel) {
                 Text(
                     "Keeps a light background connection to the server so you get notified when opencode is done or needs input.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
+                    color = OcTheme.colors.textSecondary,
                 )
             }
             androidx.compose.material3.Switch(
@@ -203,6 +205,35 @@ private fun NotificationToggle(appVm: AppViewModel) {
 }
 
 @Composable
+private fun ThemeToggle(appVm: AppViewModel) {
+    val mode by appVm.themeMode.collectAsState()
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+            Text("Appearance", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Follow the system, or force dark/light.",
+                style = MaterialTheme.typography.bodySmall,
+                color = OcTheme.colors.textSecondary,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for ((label, value) in listOf(
+                    "System" to dev.opencode.mobile.ui.theme.ThemeMode.SYSTEM,
+                    "Dark" to dev.opencode.mobile.ui.theme.ThemeMode.DARK,
+                    "Light" to dev.opencode.mobile.ui.theme.ThemeMode.LIGHT,
+                )) {
+                    androidx.compose.material3.FilterChip(
+                        selected = mode == value,
+                        onClick = { appVm.setThemeMode(value) },
+                        label = { Text(label) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SecurityHint() {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(12.dp)) {
@@ -214,7 +245,7 @@ private fun SecurityHint() {
                     "  or tailscale serve --bg 4096 for https://<mac>.ts.net\n" +
                     "• Tailscale encrypts all traffic between your devices; nothing is exposed to the internet.",
                 style = MaterialTheme.typography.bodySmall,
-                color = TextSecondary,
+                color = OcTheme.colors.textSecondary,
             )
         }
     }
@@ -234,7 +265,7 @@ private fun ServerCard(
                 IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = "Edit") }
                 IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, contentDescription = "Delete") }
             }
-            Text(server.baseUrl, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextSecondary)
+            Text(server.baseUrl, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = OcTheme.colors.textSecondary)
             Spacer(Modifier.height(8.dp))
             Button(onClick = onConnect) { Text("Connect") }
         }
@@ -282,7 +313,7 @@ private fun ScanDialog(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     if (probeError != null) {
-                        Text(probeError!!, color = Red, style = MaterialTheme.typography.bodySmall)
+                        Text(probeError!!, color = OcTheme.colors.red, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             },
@@ -333,13 +364,13 @@ private fun ScanDialog(
                     Text(
                         "mDNS scans your LAN. Tailscale works anywhere — use the remote field below.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
+                        color = OcTheme.colors.textSecondary,
                     )
                     Spacer(Modifier.height(12.dp))
                     Text("mDNS (LAN)", style = MaterialTheme.typography.labelMedium)
                     Spacer(Modifier.height(4.dp))
                     if (error != null) {
-                        Text(error!!, color = Red, style = MaterialTheme.typography.bodySmall)
+                        Text(error!!, color = OcTheme.colors.red, style = MaterialTheme.typography.bodySmall)
                         Spacer(Modifier.height(8.dp))
                     }
                     if (scanning) {
@@ -356,7 +387,7 @@ private fun ScanDialog(
                         ) {
                             Column(Modifier.padding(10.dp)) {
                                 Text(s.name, style = MaterialTheme.typography.titleSmall)
-                                Text(s.baseUrl, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextSecondary)
+                                Text(s.baseUrl, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = OcTheme.colors.textSecondary)
                             }
                         }
                     }
@@ -396,7 +427,7 @@ private fun ScanDialog(
                     }
                     if (remoteError != null) {
                         Spacer(Modifier.height(8.dp))
-                        Text(remoteError!!, color = Red, style = MaterialTheme.typography.bodySmall)
+                        Text(remoteError!!, color = OcTheme.colors.red, style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(Modifier.height(8.dp))
                     Button(
@@ -467,7 +498,7 @@ private fun ServerFormDialog(
                 if (probeResult != null) {
                     Spacer(Modifier.height(8.dp))
                     val ok = probeResult!!.startsWith("OK")
-                    Text(probeResult!!, color = if (ok) Green else Red, style = MaterialTheme.typography.bodySmall)
+                    Text(probeResult!!, color = if (ok) OcTheme.colors.green else OcTheme.colors.red, style = MaterialTheme.typography.bodySmall)
                 }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(

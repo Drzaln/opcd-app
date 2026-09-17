@@ -1,5 +1,7 @@
 package dev.opencode.mobile.ui.diff
 
+import dev.opencode.mobile.ui.theme.OcTheme
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -43,12 +45,6 @@ import dev.opencode.mobile.data.model.FileDiff
 import dev.opencode.mobile.data.net.ServerConfig
 import dev.opencode.mobile.ui.common.DiffKind
 import dev.opencode.mobile.ui.common.DiffLines
-import dev.opencode.mobile.ui.theme.Green
-import dev.opencode.mobile.ui.theme.GreenBg
-import dev.opencode.mobile.ui.theme.Red
-import dev.opencode.mobile.ui.theme.RedBg
-import dev.opencode.mobile.ui.theme.SurfaceVariant
-import dev.opencode.mobile.ui.theme.TextSecondary
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -104,7 +100,7 @@ fun DiffScreen(
     val server = remember(servers, serverId) { servers.firstOrNull { it.id == serverId } }
 
     if (server == null) {
-        Column(Modifier.fillMaxSize().padding(24.dp)) { Text("Server not found.", color = TextSecondary) }
+        Column(Modifier.fillMaxSize().padding(24.dp)) { Text("Server not found.", color = OcTheme.colors.textSecondary) }
         return
     }
 
@@ -133,12 +129,12 @@ fun DiffScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (ui.error != null) {
-                Text(ui.error!!, color = Red, modifier = Modifier.padding(16.dp))
+                Text(ui.error!!, color = OcTheme.colors.red, modifier = Modifier.padding(16.dp))
             }
             if (!ui.loading && ui.diffs.isEmpty()) {
                 Text(
                     "No changes in this session.",
-                    color = TextSecondary,
+                    color = OcTheme.colors.textSecondary,
                     modifier = Modifier.padding(24.dp),
                 )
             }
@@ -168,7 +164,7 @@ private fun DiffHeader(diff: FileDiff) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(SurfaceVariant)
+            .background(OcTheme.colors.surfaceVariant)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -181,35 +177,35 @@ private fun DiffHeader(diff: FileDiff) {
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(8.dp))
-        Text("+${diff.additions}", color = Green, style = MaterialTheme.typography.labelSmall)
+        Text("+${diff.additions}", color = OcTheme.colors.green, style = MaterialTheme.typography.labelSmall)
         Spacer(Modifier.width(6.dp))
-        Text("-${diff.deletions}", color = Red, style = MaterialTheme.typography.labelSmall)
+        Text("-${diff.deletions}", color = OcTheme.colors.red, style = MaterialTheme.typography.labelSmall)
     }
 }
 
 @Composable
 private fun DiffRow(kind: DiffKind, oldNo: Int?, newNo: Int?, text: String) {
     val bg = when (kind) {
-        DiffKind.ADD -> GreenBg
-        DiffKind.DEL -> RedBg
+        DiffKind.ADD -> OcTheme.colors.greenBg
+        DiffKind.DEL -> OcTheme.colors.redBg
         DiffKind.CONTEXT -> androidx.compose.ui.graphics.Color.Transparent
     }
     val fg = when (kind) {
-        DiffKind.ADD -> Green
-        DiffKind.DEL -> Red
+        DiffKind.ADD -> OcTheme.colors.green
+        DiffKind.DEL -> OcTheme.colors.red
         DiffKind.CONTEXT -> MaterialTheme.colorScheme.onSurface
     }
     Row(Modifier.fillMaxWidth().background(bg)) {
         Text(
             (oldNo?.toString() ?: "").padStart(4),
-            color = TextSecondary.copy(alpha = 0.6f),
+            color = OcTheme.colors.textSecondary.copy(alpha = 0.6f),
             fontSize = 12.sp,
             fontFamily = FontFamily.Monospace,
             modifier = Modifier.width(44.dp).padding(vertical = 1.dp),
         )
         Text(
             (newNo?.toString() ?: "").padStart(4),
-            color = TextSecondary.copy(alpha = 0.6f),
+            color = OcTheme.colors.textSecondary.copy(alpha = 0.6f),
             fontSize = 12.sp,
             fontFamily = FontFamily.Monospace,
             modifier = Modifier.width(44.dp).padding(vertical = 1.dp),

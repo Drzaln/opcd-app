@@ -1,5 +1,7 @@
 package dev.opencode.mobile.ui.common
 
+import dev.opencode.mobile.ui.theme.OcTheme
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -29,8 +31,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.opencode.mobile.data.model.PermissionRequest
 import dev.opencode.mobile.data.model.QuestionRequest
-import dev.opencode.mobile.ui.theme.Red
-import dev.opencode.mobile.ui.theme.TextSecondary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,7 +56,7 @@ fun PermissionSheet(
                     command,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
-                    color = TextSecondary,
+                    color = OcTheme.colors.textSecondary,
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
@@ -64,7 +64,7 @@ fun PermissionSheet(
                 Text(
                     request.patterns.joinToString(", ").take(400),
                     style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
+                    color = OcTheme.colors.textSecondary,
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
@@ -72,7 +72,7 @@ fun PermissionSheet(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = { onRespond("once") }) { Text("Allow once") }
                 TextButton(onClick = { onRespond("always") }) { Text("Always allow") }
-                TextButton(onClick = { onRespond("reject") }) { Text("Deny", color = Red) }
+                TextButton(onClick = { onRespond("reject") }) { Text("Deny", color = OcTheme.colors.red) }
             }
         }
     }
@@ -143,7 +143,7 @@ fun QuestionSheet(
                         Column {
                             Text(option.label, style = MaterialTheme.typography.bodyMedium)
                             if (option.description.isNotBlank()) {
-                                Text(option.description, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                Text(option.description, style = MaterialTheme.typography.labelSmall, color = OcTheme.colors.textSecondary)
                             }
                         }
                     }
@@ -160,7 +160,7 @@ fun QuestionSheet(
             }
             Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onDismiss) { Text("Dismiss", color = Red) }
+                TextButton(onClick = onDismiss) { Text("Dismiss", color = OcTheme.colors.red) }
                 TextButton(onClick = { onSubmit(answers) }, enabled = canSubmit) { Text("Submit") }
             }
         }

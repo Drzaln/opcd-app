@@ -1,4 +1,4 @@
-<!-- ship: v0.1.18 (versionCode 19) -->
+<!-- ship: v0.1.19 (versionCode 20) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -94,7 +94,10 @@ in-app update check (launch-time prompt → download → install APK) · session
 unrevert / delete message, from long-press menus) · share/unshare session links · sessions search +
 server switcher · clickable links in chat · file viewer line numbers + jump-to-line + per-line
 LazyColumn virtualization · code blocks with copy button · sticky diff headers · scroll-to-bottom FAB ·
-relative timestamps · empty states · SSE-liveness battery saving.
+relative timestamps · empty states · SSE-liveness battery saving · system/dark/light theme toggle
+(`OcTheme.colors`) · markdown tables + ordered/nested lists · summarize session ·
+retry failed send + cancel queued · WorkManager notification fallback (FGS 6h cap) ·
+home-screen status widget · two-pane layout on wide screens (≥720dp) · shared motion tokens.
 
 ## Gotchas
 
@@ -107,6 +110,19 @@ relative timestamps · empty states · SSE-liveness battery saving.
   (uninstall once to switch).
 - Chat input bar: targetSdk 36 forces edge-to-edge → `imePadding()` on the Scaffold, else keyboard
   hides the input.
+- **Kotlin 2.2.20 IR bug:** `runCatching { SomeObject.method() }` (a top-level `object` referenced
+  inside an inline lambda, from a class with a companion) crashes the compiler with
+  "Backend Internal error ... Parent of this declaration is not a class: CLASS OBJECT [companion]".
+  Hoist the object to a local val or use try/catch instead of `runCatching`. (Hit by
+  `StatusWidget.update`; see `ChatViewModel.updateWidget`.)
+- **Theme:** UI must use `OcTheme.colors.*` (theme-aware palette from
+  `ui/theme/Color.kt` + `LocalOcColors`), not the raw `Color.kt` constants, so light mode works.
+  `ThemeMode` (system/dark/light) is persisted in `ServerStore` ("theme_mode").
+- **Wide screens:** `WideTwoPane` in `MainActivity` (≥720dp) puts the sessions list beside the chat
+  and the file list beside the viewer; narrow keeps the old navigate-to-detail routes.
+- **Notifications fallback:** Android 15 caps dataSync FGS at ~6h/day. `NotifyScheduler`
+  (WorkManager, 15 min) backs up `SessionWatchService` and also refreshes the home-screen
+  `StatusWidgetProvider` (state cached in the `opencode_widget` SharedPreferences).
 - **Blocking prompts (permission + question) are app-wide**, owned by `AppViewModel.prompts` and
   rendered in `MainActivity` — NOT inside `ChatScreen`. They must show on any screen (and when the
   server is the TUI on another port). Two traps that caused "no sheet ever appears":
@@ -127,11 +143,10 @@ relative timestamps · empty states · SSE-liveness battery saving.
 
 ## Open / next ideas
 
-- LazyColumn virtualization for very large diffs, WorkManager notification fallback (FGS has a
-  6h/day limit on Android 15+), incremental refresh for `session.something` events (currently full
-  refetch), image thumbnails/compression before upload, decode remote `http(s)` image parts
-  (currently only `data:` URLs render inline), update check only over Wi-Fi + a manual "Check for
-  updates" button, theme/typography pass + light theme (ticket `024`).
+- Remote `http(s)` image parts (currently only `data:` URLs render inline), image
+  thumbnails/compression before upload, incremental refresh for `session.something` events
+  (currently full refetch), update check only over Wi-Fi + manual "check now" button, widget for
+  multiple sessions, richer wide-screen layout (three panes / list-detail for servers).
 
 ## Verification
 

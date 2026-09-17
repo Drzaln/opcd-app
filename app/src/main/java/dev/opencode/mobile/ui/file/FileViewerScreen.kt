@@ -1,5 +1,7 @@
 package dev.opencode.mobile.ui.file
 
+import dev.opencode.mobile.ui.theme.OcTheme
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
@@ -41,8 +43,6 @@ import dev.opencode.mobile.data.model.FileContent
 import dev.opencode.mobile.data.net.ServerConfig
 import dev.opencode.mobile.ui.common.CodeHighlighter
 import dev.opencode.mobile.ui.common.languageForPath
-import dev.opencode.mobile.ui.theme.SurfaceVariant
-import dev.opencode.mobile.ui.theme.TextSecondary
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -97,7 +97,7 @@ fun FileViewerScreen(
     val server = remember(servers, serverId) { servers.firstOrNull { it.id == serverId } }
 
     if (server == null) {
-        Column(Modifier.fillMaxSize().padding(24.dp)) { Text("Server not found.", color = TextSecondary) }
+        Column(Modifier.fillMaxSize().padding(24.dp)) { Text("Server not found.", color = OcTheme.colors.textSecondary) }
         return
     }
 
@@ -134,7 +134,7 @@ fun FileViewerScreen(
                 if (content.type == "binary") {
                     Text(
                         "Binary file (${content.mimeType ?: "unknown mime"}) — preview not supported.",
-                        color = TextSecondary,
+                        color = OcTheme.colors.textSecondary,
                         modifier = Modifier.padding(16.dp),
                     )
                 } else {
@@ -151,7 +151,7 @@ fun FileViewerScreen(
                             style = MaterialTheme.typography.labelSmall,
                         )
                         Spacer(Modifier.width(12.dp))
-                        Text("$lineCount lines", color = TextSecondary, style = MaterialTheme.typography.labelSmall)
+                        Text("$lineCount lines", color = OcTheme.colors.textSecondary, style = MaterialTheme.typography.labelSmall)
                     }
                     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
                     val codeScroll = rememberScrollState()
@@ -163,7 +163,7 @@ fun FileViewerScreen(
                         state = listState,
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(SurfaceVariant),
+                            .background(OcTheme.colors.surfaceVariant),
                     ) {
                         items(
                             count = lineCount,
@@ -184,7 +184,7 @@ fun FileViewerScreen(
                                     fontFamily = FontFamily.Monospace,
                                     fontSize = 12.sp,
                                     lineHeight = 19.sp,
-                                    color = TextSecondary,
+                                    color = OcTheme.colors.textSecondary,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.End,
                                     modifier = Modifier.width(52.dp).padding(end = 10.dp),
                                 )

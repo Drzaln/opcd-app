@@ -1,5 +1,7 @@
 package dev.opencode.mobile.ui.common
 
+import dev.opencode.mobile.ui.theme.OcTheme
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -31,9 +33,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.opencode.mobile.ui.theme.Border
-import dev.opencode.mobile.ui.theme.SurfaceVariant
-import dev.opencode.mobile.ui.theme.TextSecondary
 
 @Composable
 fun CodeBlock(
@@ -50,19 +49,19 @@ fun CodeBlock(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(SurfaceVariant, RoundedCornerShape(8.dp)),
+            .background(OcTheme.colors.surfaceVariant, RoundedCornerShape(8.dp)),
     ) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(Border.copy(alpha = 0.4f))
+                .background(OcTheme.colors.border.copy(alpha = 0.4f))
                 .padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
                 language?.ifBlank { "code" } ?: "code",
-                color = TextSecondary,
+                color = OcTheme.colors.textSecondary,
                 style = MaterialTheme.typography.labelSmall,
             )
             Row(
@@ -76,11 +75,11 @@ fun CodeBlock(
                 Icon(
                     Icons.Filled.ContentCopy,
                     contentDescription = "Copy code",
-                    tint = if (copied) MaterialTheme.colorScheme.primary else TextSecondary,
+                    tint = if (copied) MaterialTheme.colorScheme.primary else OcTheme.colors.textSecondary,
                     modifier = Modifier.size(14.dp),
                 )
                 Spacer(Modifier.size(4.dp))
-                Text("Copy", color = TextSecondary, style = MaterialTheme.typography.labelSmall)
+                Text("Copy", color = OcTheme.colors.textSecondary, style = MaterialTheme.typography.labelSmall)
             }
         }
         Box(
@@ -104,7 +103,7 @@ fun MutedLabel(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
         style = MaterialTheme.typography.labelSmall,
-        color = TextSecondary,
+        color = OcTheme.colors.textSecondary,
         modifier = modifier,
     )
 }

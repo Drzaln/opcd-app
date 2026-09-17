@@ -33,6 +33,8 @@ class ServerStore(private val context: Context) {
     private val notifyKey = androidx.datastore.preferences.core.booleanPreferencesKey("notifications_enabled")
     private val directoryKey = stringPreferencesKey("current_directory")
     private val skippedUpdateKey = stringPreferencesKey("skipped_update_version")
+    private val themeKey = stringPreferencesKey("theme_mode")
+    private val busySessionsKey = androidx.datastore.preferences.core.stringSetPreferencesKey("busy_sessions")
 
     val servers: Flow<List<ServerConfig>> = context.dataStore.data.map { prefs ->
         val raw = prefs[serversKey] ?: "[]"
@@ -54,6 +56,20 @@ class ServerStore(private val context: Context) {
     val currentDirectory: Flow<String?> = context.dataStore.data.map { it[directoryKey] }
 
     val skippedUpdateVersion: Flow<String?> = context.dataStore.data.map { it[skippedUpdateKey] }
+
+    val theme: Flow<String?> = context.dataStore.data.map { it[themeKey] }
+
+    val busySessions: Flow<Set<String>> = context.dataStore.data.map { it[busySessionsKey] ?: emptySet() }
+
+    suspend fun setBusySessions(ids: Set<String>) {
+        context.dataStore.edit { it[busySessionsKey] = ids }
+    }
+
+    suspend fun setTheme(value: String?) {
+        context.dataStore.edit { prefs ->
+            if (value == null) prefs.remove(themeKey) else prefs[themeKey] = value
+        }
+    }
 
     suspend fun setSkippedUpdateVersion(version: String?) {
         context.dataStore.edit { prefs ->

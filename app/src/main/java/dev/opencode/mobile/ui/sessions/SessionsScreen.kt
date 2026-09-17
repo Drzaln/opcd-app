@@ -1,5 +1,7 @@
 package dev.opencode.mobile.ui.sessions
 
+import dev.opencode.mobile.ui.theme.OcTheme
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -62,10 +64,6 @@ import dev.opencode.mobile.data.model.SessionStatus
 import dev.opencode.mobile.data.model.SessionUpdateBody
 import dev.opencode.mobile.data.net.ServerConfig
 import dev.opencode.mobile.ui.common.MutedLabel
-import dev.opencode.mobile.ui.theme.Green
-import dev.opencode.mobile.ui.theme.Orange
-import dev.opencode.mobile.ui.theme.Red
-import dev.opencode.mobile.ui.theme.TextSecondary
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json as KxJson
@@ -239,7 +237,7 @@ fun SessionsScreen(
 
     if (server == null) {
         Column(Modifier.fillMaxSize().padding(24.dp)) {
-            Text("Server not found.", color = TextSecondary)
+            Text("Server not found.", color = OcTheme.colors.textSecondary)
             TextButton(onClick = onBack) { Text("Go back") }
         }
         return
@@ -285,7 +283,7 @@ fun SessionsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(server.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
-                            Icon(Icons.Filled.ArrowDropDown, contentDescription = "Switch server", tint = TextSecondary)
+                            Icon(Icons.Filled.ArrowDropDown, contentDescription = "Switch server", tint = OcTheme.colors.textSecondary)
                         }
                         DropdownMenu(expanded = serverMenu, onDismissRequest = { serverMenu = false }) {
                             for (s in servers) {
@@ -330,7 +328,7 @@ fun SessionsScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
             )
             if (ui.error != null) {
-                Text(ui.error!!, Modifier.padding(16.dp), color = Red)
+                Text(ui.error!!, Modifier.padding(16.dp), color = OcTheme.colors.red)
             }
             if (ui.loading && ui.sessions.isEmpty()) {
                 androidx.compose.material3.CircularProgressIndicator(Modifier.padding(24.dp))
@@ -343,7 +341,7 @@ fun SessionsScreen(
                 ) {
                     Text(
                         if (ui.query.isBlank()) "No sessions in this folder yet" else "No sessions match \"${ui.query}\"",
-                        color = TextSecondary,
+                        color = OcTheme.colors.textSecondary,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     if (ui.query.isBlank()) {
@@ -359,6 +357,7 @@ fun SessionsScreen(
             ) {
                 items(visible, key = { it.id }) { session ->
                     SessionCard(
+                        modifier = Modifier.animateItem(),
                         session = session,
                         status = ui.statuses[session.id],
                         onClick = { onChat(session.id) },
@@ -470,7 +469,7 @@ private fun DirectoryPickerDialog(
                 Text(
                     "Sessions are stored per folder. Pick which project folder to show.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
+                    color = OcTheme.colors.textSecondary,
                 )
                 Spacer(Modifier.height(12.dp))
                 Text("Detected projects", style = MaterialTheme.typography.labelMedium)
@@ -517,6 +516,7 @@ private fun DirectoryPickerDialog(
 
 @Composable
 private fun SessionCard(
+    modifier: Modifier = Modifier,
     session: Session,
     status: SessionStatus?,
     onClick: () -> Unit,
@@ -531,7 +531,7 @@ private fun SessionCard(
     var menu by remember { mutableStateOf(false) }
     Box {
         Card(
-            modifier = Modifier
+            modifier = modifier
                 .fillMaxWidth()
                 .combinedClickable(onClick = onClick, onLongClick = { menu = true }),
         ) {
@@ -548,9 +548,9 @@ private fun SessionCard(
                 }
                 status?.let {
                     val color = when (it.type) {
-                        "busy" -> Orange
-                        "retry" -> Red
-                        else -> Green
+                        "busy" -> OcTheme.colors.orange
+                        "retry" -> OcTheme.colors.red
+                        else -> OcTheme.colors.green
                     }
                     Box(
                         Modifier
@@ -566,9 +566,9 @@ private fun SessionCard(
                 Spacer(Modifier.width(12.dp))
                 val summary = session.summary
                 if (summary != null && (summary.additions > 0 || summary.deletions > 0)) {
-                    Text("+${summary.additions} -${summary.deletions}", color = Green, style = MaterialTheme.typography.labelSmall)
+                    Text("+${summary.additions} -${summary.deletions}", color = OcTheme.colors.green, style = MaterialTheme.typography.labelSmall)
                     Spacer(Modifier.width(8.dp))
-                    Text("${summary.files} files", color = TextSecondary, style = MaterialTheme.typography.labelSmall)
+                    Text("${summary.files} files", color = OcTheme.colors.textSecondary, style = MaterialTheme.typography.labelSmall)
                 }
                 Spacer(Modifier.weight(1f))
                 Text("Diff", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable(onClick = onDiff))
@@ -598,7 +598,7 @@ private fun SessionCard(
                 DropdownMenuItem(text = { Text("Unshare") }, onClick = { menu = false; onUnshare() })
             }
             DropdownMenuItem(
-                text = { Text("Delete", color = Red) },
+                text = { Text("Delete", color = OcTheme.colors.red) },
                 onClick = { menu = false; onDelete() },
             )
         }
