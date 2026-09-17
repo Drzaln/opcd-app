@@ -54,6 +54,7 @@ class ChatViewModel(
         val models: List<ModelOption> = emptyList(),
         val selectedAgent: String? = null,
         val selectedModel: ModelOption? = null,
+        val queued: Int = 0,
         val loading: Boolean = true,
         val error: String? = null,
         val sending: Boolean = false,
@@ -130,8 +131,9 @@ class ChatViewModel(
     fun send() {
         val text = _input.value.trim()
         if (text.isEmpty()) return
+        val wasBusy = _ui.value.busy
         viewModelScope.launch {
-            _ui.value = _ui.value.copy(sending = true)
+            _ui.update { it.copy(sending = true, queued = if (wasBusy) it.queued + 1 else it.queued) }
             var ok = true
             try {
                 val response = api.sendMessageAsync(
@@ -185,7 +187,7 @@ class ChatViewModel(
                     "message.part.removed" -> applyPartRemoved(event)
                     "message.removed" -> applyMessageRemoved(event)
                     "session.status" -> applyStatus(event)
-                    "session.idle" -> _ui.update { it.copy(status = SessionStatus(type = "idle")) }
+                    "session.idle" -> _ui.update { it.copy(status = SessionStatus(type = "idle"), queued = 0) }
                     "todo.updated" -> applyTodos(event)
                     "server.connected" -> scheduleFullRefresh()
                     "session.updated", "session.diff", "session.compacted" -> scheduleFullRefresh()
@@ -260,7 +262,7 @@ class ChatViewModel(
         val properties = event.data as? JsonObject ?: return
         val statusJson = properties["status"] ?: return
         val status = runCatching { json.decodeFromJsonElement<SessionStatus>(statusJson) }.getOrNull() ?: return
-        _ui.update { it.copy(status = status) }
+        _ui.update { it.copy(status = status, queued = if (status.type == "idle") 0 else it.queued) }
     }
 
     private fun applyTodos(event: OcEvent) {

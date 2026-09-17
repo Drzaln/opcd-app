@@ -80,6 +80,7 @@ import dev.opencode.mobile.ui.common.MarkdownText
 import dev.opencode.mobile.ui.common.MutedLabel
 import dev.opencode.mobile.ui.theme.Border
 import dev.opencode.mobile.ui.theme.Green
+import dev.opencode.mobile.ui.theme.Orange
 import dev.opencode.mobile.ui.theme.Red
 import dev.opencode.mobile.ui.theme.RedBg
 import dev.opencode.mobile.ui.theme.SurfaceVariant
@@ -130,6 +131,17 @@ fun ChatScreen(
     val ui by vm.ui.collectAsState()
     val input by vm.input.collectAsState()
 
+    val contextPct = remember(ui.messages, ui.models) {
+        val last = ui.messages.lastOrNull { it.info.role == "assistant" && it.info.tokens != null }?.info
+        val tokens = last?.tokens
+        if (last != null && tokens != null) {
+            val limit = ui.models.firstOrNull {
+                it.providerId == last.providerID && it.modelId == last.modelID
+            }?.contextLimit ?: 0L
+            if (limit > 0) (tokens.input + tokens.output) * 100.0 / limit else null
+        } else null
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize().imePadding(),
         topBar = {
@@ -145,6 +157,15 @@ fun ChatScreen(
                         val dir = ui.session?.directory
                         if (!dir.isNullOrEmpty()) {
                             Text(dir, style = MaterialTheme.typography.labelSmall, color = TextSecondary, maxLines = 1)
+                        }
+                        if (contextPct != null) {
+                            val pct = contextPct
+                            val color = when {
+                                pct >= 90 -> Red
+                                pct >= 70 -> Orange
+                                else -> TextSecondary
+                            }
+                            Text("ctx ${"%.0f".format(pct)}%", style = MaterialTheme.typography.labelSmall, color = color, maxLines = 1)
                         }
                     }
                 },
@@ -168,6 +189,7 @@ fun ChatScreen(
                 onSend = { vm.send() },
                 busy = ui.busy,
                 enabled = !ui.busy,
+                queued = ui.queued,
                 agents = ui.agents,
                 models = ui.models,
                 selectedAgent = ui.selectedAgent,
@@ -210,6 +232,7 @@ private fun InputBar(
     onSend: () -> Unit,
     busy: Boolean,
     enabled: Boolean,
+    queued: Int,
     agents: List<Agent>,
     models: List<ModelOption>,
     selectedAgent: String?,
@@ -253,7 +276,7 @@ private fun InputBar(
                 OutlinedTextField(
                     value = value,
                     onValueChange = onValueChange,
-                    placeholder = { Text(if (busy) "opencode is working…" else "Message opencode") },
+                    placeholder = { Text(if (busy) "opencode is working…" + (if (queued > 0) " ($queued queued)" else "") else "Message opencode") },
                     modifier = Modifier.weight(1f),
                     maxLines = 6,
                 )

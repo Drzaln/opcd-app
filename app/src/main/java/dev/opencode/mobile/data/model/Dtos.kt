@@ -156,6 +156,8 @@ data class Session(
     val version: String = "",
     val time: SessionTime? = null,
     val share: JsonObject? = null,
+    val cost: Double? = null,
+    val tokens: Tokens? = null,
 )
 
 @Serializable

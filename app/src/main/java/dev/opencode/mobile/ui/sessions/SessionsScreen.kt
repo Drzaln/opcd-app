@@ -399,6 +399,19 @@ private fun SessionCard(
                 Spacer(Modifier.weight(1f))
                 Text("Diff", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable(onClick = onDiff))
             }
+            val tokens = session.tokens
+            val cost = session.cost
+            if ((tokens != null && (tokens.input + tokens.output) > 0) || (cost != null && cost > 0)) {
+                Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (tokens != null) {
+                        MutedLabel("${"%,d".format(tokens.input + tokens.output)} tok")
+                        Spacer(Modifier.width(12.dp))
+                    }
+                    if (cost != null && cost > 0) {
+                        MutedLabel("$" + if (cost >= 0.01) "%.2f".format(cost) else "%.4f".format(cost))
+                    }
+                }
+            }
         }
     }
 }
