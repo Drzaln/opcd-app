@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "opencode_android_app",
+  "project_id": "f6b1b266-ea67-44a5-8537-901529677e4c"
+}
