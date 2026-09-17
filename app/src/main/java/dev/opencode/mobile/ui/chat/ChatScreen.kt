@@ -72,6 +72,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.opencode.mobile.AppViewModel
 import dev.opencode.mobile.OpenCodeApp
 import dev.opencode.mobile.data.model.Agent
+import dev.opencode.mobile.data.model.Command
 import dev.opencode.mobile.data.model.MessageData
 import dev.opencode.mobile.data.model.Part
 import dev.opencode.mobile.data.model.Todo
@@ -190,6 +191,7 @@ fun ChatScreen(
                 busy = ui.busy,
                 enabled = !ui.busy,
                 queued = ui.queued,
+                commands = ui.commands,
                 agents = ui.agents,
                 models = ui.models,
                 selectedAgent = ui.selectedAgent,
@@ -233,6 +235,7 @@ private fun InputBar(
     busy: Boolean,
     enabled: Boolean,
     queued: Int,
+    commands: List<Command>,
     agents: List<Agent>,
     models: List<ModelOption>,
     selectedAgent: String?,
@@ -281,6 +284,11 @@ private fun InputBar(
                     maxLines = 6,
                 )
                 Spacer(Modifier.width(6.dp))
+                if (commands.isNotEmpty()) {
+                    CommandMenu(commands = commands, onPick = { cmd ->
+                        onValueChange("/${cmd} ")
+                    })
+                }
                 IconButton(
                     onClick = onSend,
                     enabled = enabled && value.isNotBlank(),
@@ -288,6 +296,37 @@ private fun InputBar(
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CommandMenu(commands: List<Command>, onPick: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Text("/", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            for (cmd in commands) {
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text("/${cmd.name}", style = MaterialTheme.typography.bodyMedium)
+                            if (!cmd.description.isNullOrBlank()) {
+                                Text(
+                                    cmd.description!!,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondary,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    },
+                    onClick = { onPick(cmd.name); expanded = false },
+                )
             }
         }
     }

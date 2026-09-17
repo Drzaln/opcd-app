@@ -29,8 +29,9 @@ Always do ALL of these, in order:
 2. If the user asked for a specific bump type, pass it (e.g. `make ship minor`); otherwise default to `patch`.
 3. **Verify**: confirm the CI run on the tag completes and a GitHub Release with `app-release.apk` exists
    (check via `curl https://api.github.com/repos/Drzaln/opcd-app/releases` or the Actions tab).
-4. If the CI release step 403s, the repo Actions token is read-only — ask the user to enable
-   Settings → Actions → General → Workflow permissions → "Read and write permissions", then re-run.
+4. If the CI release step 403s despite the workflow's `permissions: contents: write`, the repo-level
+   default may still be read-only — ask the user to enable Settings → Actions → General → Workflow
+   permissions → "Read and write permissions", then re-run.
 5. Never create a version bump commit or tag without the user asking to ship (or saying ship/push/release).
 
 Note: release APK is signed with the debug key unless `keystore.properties` + CI signing secrets exist.
@@ -49,8 +50,10 @@ Note: release APK is signed with the debug key unless `keystore.properties` + CI
   todos, file list/content, session status). The app keeps a global `currentDirectory` in `AppViewModel`
   (`setDirectory()`); pick a folder from the Sessions screen. `/project` lists known projects.
 - Endpoints used (see `data/net/OpenCodeApi.kt`): `/global/health`, `/project`, `/project/current`, `/path`,
-  `/session`, `/session/status`, `/session/{id}/message`, `/session/{id}/prompt_async`,
-  `/session/{id}/diff`, `/session/{id}/abort`, `/file`, `/file/content`, `/agent`, `/command`.
+  `/session` (GET list + POST create + GET/PATCH/DELETE by id), `/session/status`,
+  `/session/{id}/message` (GET + POST), `/session/{id}/prompt_async`, `/session/{id}/command`,
+  `/session/{id}/diff`, `/session/{id}/abort`, `/session/{id}/todo`, `/file`, `/file/content`,
+  `/file/status`, `/agent`, `/provider`, `/command`.
 - Live updates come from the `/event` SSE stream. The app passes `?directory=` to scope events to the
   selected project instance.
 - **Quirk:** SSE event type lives in the JSON body (`data: {"type":"message.updated","properties":{...}}`),
@@ -84,7 +87,14 @@ Single `:app` module. No DI framework.
 - Kotlin, Jetpack Compose (Material3), dark theme only. Colors in `ui/theme/Color.kt`.
 - No comments unless they explain a non-obvious decision.
 - Chat renders messages by `part.type` in `PartView` (ChatScreen.kt). Add new part types there.
-- Chat refresh strategy: on SSE events re-fetch `/session/{id}/message`, debounced 250ms (`ChatViewModel`).
+- Chat has slash-command support: input matching `/<name> args` where `<name>` is a known `/command`
+  is routed to `session/{id}/command` (with the selected agent/model); otherwise it goes to `prompt_async`.
+  Agent + model selectors are persisted per server via `ServerStore`.
+- Chat message flow: SSE `message.part.updated` (with `delta` for text streaming) is patched
+  incrementally in `ChatViewModel`; `message.updated`/`part.removed`/`message.removed`/`todo.updated`
+  apply the same way. Fallback: debounced 400ms full refetch (`scheduleFullRefresh`), plus adaptive
+  polling (3s while busy / 15s foreground / 60s background). A `send()` also re-fetches ~400ms later
+  to pick up the persisted user message.
 - `formatTime`, diff line keys, and DTO defaults follow existing patterns — mirror, don't invent.
 
 ## Gotchas
@@ -116,7 +126,9 @@ curl -u opencode:secret http://127.0.0.1:4199/file/content?path=settings.gradle.
 
 ## Status / next ideas
 
-- Chat refetches full message list on events; incremental part patching would be cheaper/faster.
+- SSE handling is incremental; the remaining cost is that `scheduleFullRefresh` still refetches the
+  full message list on non-part events (session/diff/compact).
 - File viewer truncates >5000 lines; virtualized line rendering (LazyColumn) is the upgrade path.
-- Not yet built: todos/commands/agents screens, share-session links, offline cache.
+- Not yet built: dedicated todos/commands/agents screens (todos already render in chat), share-session
+  links, offline cache, `/file/status` usage in the UI.
 - Verified against opencode 1.18.31 live server (sessions, messages, prompt_async, diff, SSE, file list/content).

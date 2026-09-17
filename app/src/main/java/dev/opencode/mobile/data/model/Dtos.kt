@@ -257,6 +257,25 @@ data class SessionUpdateBody(
 )
 
 @Serializable
+data class Command(
+    val name: String = "",
+    val description: String? = null,
+    val agent: String? = null,
+    val model: String? = null,
+    val template: String = "",
+    val subtask: Boolean = false,
+)
+
+@Serializable
+data class CommandBody(
+    val messageID: String? = null,
+    val agent: String? = null,
+    val model: String? = null,
+    val command: String,
+    val arguments: String = "",
+)
+
+@Serializable
 data class Agent(
     val name: String = "",
     val description: String? = null,

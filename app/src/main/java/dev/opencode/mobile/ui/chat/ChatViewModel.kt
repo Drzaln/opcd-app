@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.opencode.mobile.OpenCodeApp
 import dev.opencode.mobile.data.model.Agent
+import dev.opencode.mobile.data.model.Command
+import dev.opencode.mobile.data.model.CommandBody
 import dev.opencode.mobile.data.model.Message
 import dev.opencode.mobile.data.model.MessageData
 import dev.opencode.mobile.data.model.ModelRef
@@ -52,6 +54,7 @@ class ChatViewModel(
         val todos: List<Todo> = emptyList(),
         val agents: List<Agent> = emptyList(),
         val models: List<ModelOption> = emptyList(),
+        val commands: List<Command> = emptyList(),
         val selectedAgent: String? = null,
         val selectedModel: ModelOption? = null,
         val queued: Int = 0,
@@ -96,6 +99,7 @@ class ChatViewModel(
         viewModelScope.launch {
             val agents = runCatching { api.agents() }.getOrDefault(emptyList())
                 .filter { it.mode == "primary" || it.mode == "all" }
+            val commands = runCatching { api.commands() }.getOrDefault(emptyList())
             val providers = runCatching { api.providers() }.getOrNull()
             val connected = providers?.connected ?: emptyList()
             val models = providers?.all.orEmpty()
@@ -119,7 +123,7 @@ class ChatViewModel(
                 } else null
             }
             _ui.update {
-                it.copy(agents = agents, models = models, selectedAgent = storedAgent, selectedModel = selectedModel)
+                it.copy(agents = agents, models = models, commands = commands, selectedAgent = storedAgent, selectedModel = selectedModel)
             }
         }
     }
@@ -132,23 +136,40 @@ class ChatViewModel(
         val text = _input.value.trim()
         if (text.isEmpty()) return
         val wasBusy = _ui.value.busy
+        val match = Regex("^/([A-Za-z0-9_-]+)\\s*(.*)$", RegexOption.DOT_MATCHES_ALL).find(text)
+        val commandName = match?.groupValues?.get(1)
+        val commandArgs = match?.groupValues?.get(2)?.trim().orEmpty()
+        val isCommand = commandName != null && _ui.value.commands.any { it.name == commandName }
         viewModelScope.launch {
             _ui.update { it.copy(sending = true, queued = if (wasBusy) it.queued + 1 else it.queued) }
             var ok = true
             try {
-                val response = api.sendMessageAsync(
-                    sessionId,
-                    SendMessageBody(
-                        agent = _ui.value.selectedAgent,
-                        model = _ui.value.selectedModel?.let { ModelRef(it.providerId, it.modelId) },
-                        parts = listOf(PartInput(type = "text", text = text)),
-                    ),
-                    projectDir(),
-                )
-                if (!response.isSuccessful) {
-                    ok = false
-                    val body = response.errorBody()?.string().orEmpty()
-                    throw IOException("Send failed: HTTP ${response.code()} $body")
+                if (isCommand && commandName != null) {
+                    api.command(
+                        sessionId,
+                        CommandBody(
+                            agent = _ui.value.selectedAgent,
+                            model = _ui.value.selectedModel?.modelId,
+                            command = commandName,
+                            arguments = commandArgs,
+                        ),
+                        projectDir(),
+                    )
+                } else {
+                    val response = api.sendMessageAsync(
+                        sessionId,
+                        SendMessageBody(
+                            agent = _ui.value.selectedAgent,
+                            model = _ui.value.selectedModel?.let { ModelRef(it.providerId, it.modelId) },
+                            parts = listOf(PartInput(type = "text", text = text)),
+                        ),
+                        projectDir(),
+                    )
+                    if (!response.isSuccessful) {
+                        ok = false
+                        val body = response.errorBody()?.string().orEmpty()
+                        throw IOException("Send failed: HTTP ${response.code()} $body")
+                    }
                 }
                 _input.value = ""
             } catch (e: Exception) {

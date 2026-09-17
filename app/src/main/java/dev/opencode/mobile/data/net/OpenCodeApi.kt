@@ -2,6 +2,8 @@ package dev.opencode.mobile.data.net
 
 import dev.opencode.mobile.data.model.Project
 import dev.opencode.mobile.data.model.Agent
+import dev.opencode.mobile.data.model.Command
+import dev.opencode.mobile.data.model.CommandBody
 import dev.opencode.mobile.data.model.CreateSessionBody
 import dev.opencode.mobile.data.model.FileContent
 import dev.opencode.mobile.data.model.FileDiff
@@ -91,6 +93,13 @@ interface OpenCodeApi {
         @Query("directory") directory: String? = null,
     ): Response<Unit>
 
+    @POST("session/{id}/command")
+    suspend fun command(
+        @Path("id") id: String,
+        @Body body: CommandBody,
+        @Query("directory") directory: String? = null,
+    ): MessageData
+
     @GET("session/{id}/diff")
     suspend fun sessionDiff(
         @Path("id") id: String,
@@ -132,5 +141,5 @@ interface OpenCodeApi {
     suspend fun providers(): ProviderList
 
     @GET("command")
-    suspend fun commands(): List<JsonObject>
+    suspend fun commands(): List<Command>
 }
