@@ -1,4 +1,4 @@
-<!-- ship: v0.1.21 (versionCode 22) -->
+<!-- ship: v0.1.22 (versionCode 23) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -79,6 +79,13 @@ after updating this file.
     **Quirk:** on 1.18.31 `unshare` returns 200 but `session.share` stays populated — mask it locally.
 14. **Battery:** polling is skipped while the SSE stream is live (any event, incl. `server.heartbeat`,
     within 45 s), with a 5-minute safety reconcile. Sessions/files screens are on-demand only.
+15. **Terminal (PTY):** `GET/POST /pty` (create body `{command?,args?,cwd?,title?,env?}` → default
+    shell when empty), `DELETE /pty/{id}`, `PUT /pty/{id}` `{size:{rows,cols}}`, `GET /pty/shells`.
+    Live I/O is a WebSocket: `ws(s)://<host>/pty/{id}/connect?directory=&cursor=` — Basic auth header
+    works (or `?auth_token=<base64(user:pass)>`; `POST /pty/{id}/connect-token` issues a 60 s ticket).
+    Server→client frames are raw UTF-8; one control frame is `0x00` + JSON `{"cursor":N}` (end of
+    replay). Client→server frames are UTF-8 input. The emulator lives in `terminal/`
+    (`TerminalEmulator` + `OkHttpPtyTransport`); resize goes over REST, not the socket.
 
 ## Features done
 
@@ -101,7 +108,8 @@ home-screen status widget · two-pane layout on wide screens (≥720dp) · share
 Material 3 pass: full color-role set (surfaceContainer*, inverse, outlineVariant) so M3 components
 match the custom palette, Settings screen (Appearance / Notifications / About / Security),
 bottom `NavigationBar` on Sessions, `ListItem` rows, Extended FABs, chat overflow menu,
-consistent `TopAppBar` colors. Markdown / code blocks / diffs stay custom-rendered.
+consistent `TopAppBar` colors. Markdown / code blocks / diffs stay custom-rendered ·
+**in-app terminal** (full PTY + ANSI/xterm emulator, bottom-nav item).
 
 ## Gotchas
 

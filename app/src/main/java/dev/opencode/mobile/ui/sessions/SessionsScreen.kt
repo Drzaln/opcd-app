@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -232,6 +233,7 @@ fun SessionsScreen(
     onChat: (String) -> Unit,
     onFiles: () -> Unit,
     onSettings: () -> Unit,
+    onTerminal: () -> Unit,
     onDiff: (String) -> Unit,
     onBack: () -> Unit,
 ) {

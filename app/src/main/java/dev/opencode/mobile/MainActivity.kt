@@ -49,6 +49,7 @@ import dev.opencode.mobile.update.UpdateState
 object Routes {
     const val SERVERS = "servers"
     const val SETTINGS = "settings"
+    const val TERMINAL = "terminal/{serverId}"
     const val SESSIONS = "sessions/{serverId}"
     const val CHAT = "chat/{serverId}/{sessionId}"
     const val FILES = "files/{serverId}?dir={dir}"
@@ -56,6 +57,7 @@ object Routes {
     const val DIFF = "diff/{serverId}/{sessionId}?messageID={messageID}"
 
     fun sessions(serverId: String) = "sessions/$serverId"
+    fun terminal(serverId: String) = "terminal/$serverId"
     fun chat(serverId: String, sessionId: String) = "chat/$serverId/$sessionId"
     fun files(serverId: String, dir: String) = "files/$serverId?dir=${java.net.URLEncoder.encode(dir, "UTF-8")}"
     fun file(serverId: String, path: String, line: Int? = null) = "file/$serverId?path=${java.net.URLEncoder.encode(path, "UTF-8")}&line=${line ?: -1}"
@@ -143,6 +145,17 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     composable(
+                        route = Routes.TERMINAL,
+                        arguments = listOf(androidx.navigation.navArgument("serverId") { type = androidx.navigation.NavType.StringType }),
+                    ) { entry ->
+                        val serverId = entry.arguments?.getString("serverId") ?: return@composable
+                        dev.opencode.mobile.ui.terminal.TerminalScreen(
+                            appVm = appVm,
+                            serverId = serverId,
+                            onBack = { navController.popBackStack() },
+                        )
+                    }
+                    composable(
                         route = Routes.SESSIONS,
                         arguments = listOf(androidx.navigation.navArgument("serverId") { type = androidx.navigation.NavType.StringType }),
                     ) { entry ->
@@ -157,6 +170,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onFiles = { navController.navigate(Routes.files(serverId, "")) },
                                 onSettings = { navController.navigate(Routes.SETTINGS) },
+                                onTerminal = { navController.navigate(Routes.terminal(serverId)) },
                                 onDiff = { sessionId -> navController.navigate(Routes.diff(serverId, sessionId)) },
                                 onBack = { appVm.clearActive(); navController.navigate(Routes.SERVERS) { popUpTo(0) { inclusive = true } } },
                             )

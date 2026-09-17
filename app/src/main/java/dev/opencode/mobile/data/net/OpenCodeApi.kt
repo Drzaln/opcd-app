@@ -17,6 +17,10 @@ import dev.opencode.mobile.data.model.PermissionReplyBody
 import dev.opencode.mobile.data.model.PermissionReplyV2Body
 import dev.opencode.mobile.data.model.PermissionRequest
 import dev.opencode.mobile.data.model.ProviderList
+import dev.opencode.mobile.data.model.PtyCreateBody
+import dev.opencode.mobile.data.model.PtyInfo
+import dev.opencode.mobile.data.model.PtyShell
+import dev.opencode.mobile.data.model.PtyUpdateBody
 import dev.opencode.mobile.data.model.QuestionReplyBody
 import dev.opencode.mobile.data.model.QuestionRequest
 import dev.opencode.mobile.data.model.RevertBody
@@ -32,6 +36,7 @@ import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.PATCH
+import retrofit2.http.PUT
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -219,6 +224,32 @@ interface OpenCodeApi {
     @GET("command")
     suspend fun commands(): List<Command>
 
+    // --- pty (terminal) ---
+    @GET("pty")
+    suspend fun ptyList(@Query("directory") directory: String? = null): List<PtyInfo>
+
+    @POST("pty")
+    suspend fun ptyCreate(
+        @Body body: PtyCreateBody,
+        @Query("directory") directory: String? = null,
+    ): PtyInfo
+
+    @GET("pty/{id}")
+    suspend fun ptyGet(@Path("id") id: String, @Query("directory") directory: String? = null): PtyInfo
+
+    @PUT("pty/{id}")
+    suspend fun ptyUpdate(
+        @Path("id") id: String,
+        @Body body: PtyUpdateBody,
+        @Query("directory") directory: String? = null,
+    ): PtyInfo
+
+    @DELETE("pty/{id}")
+    suspend fun ptyDelete(@Path("id") id: String, @Query("directory") directory: String? = null): Boolean
+
+    @GET("pty/shells")
+    suspend fun ptyShells(@Query("directory") directory: String? = null): List<PtyShell>
+
     // --- permissions ---
     // Legacy (opencode <= ~1.18.14): session-scoped reply with `response`.
     @POST("session/{id}/permissions/{permissionID}")
@@ -238,9 +269,7 @@ interface OpenCodeApi {
     ): Response<Unit>
 
     @GET("permission")
-    suspend fun pendingPermissions(@Query("directory") directory: String? = null): List<PermissionRequest>
-
-    // --- questions (the agent's ask tool) ---
+    suspend fun pendingPermissions(@Query("directory") directory: String? = null): List<PermissionRequest>    // --- questions (the agent's ask tool) ---
     @GET("question")
     suspend fun pendingQuestions(@Query("directory") directory: String? = null): List<QuestionRequest>
 

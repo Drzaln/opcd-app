@@ -176,6 +176,46 @@ data class SummarizeBody(
 )
 
 @Serializable
+data class PtyInfo(
+    val id: String = "",
+    val title: String = "",
+    val command: String = "",
+    val args: List<String> = emptyList(),
+    val cwd: String = "",
+    val status: String = "",
+    val pid: Int = 0,
+    val exitCode: Int? = null,
+)
+
+@Serializable
+data class PtyCreateBody(
+    val command: String? = null,
+    val args: List<String>? = null,
+    val cwd: String? = null,
+    val title: String? = null,
+    val env: Map<String, String>? = null,
+)
+
+@Serializable
+data class PtySize(
+    val rows: Int,
+    val cols: Int,
+)
+
+@Serializable
+data class PtyUpdateBody(
+    val title: String? = null,
+    val size: PtySize? = null,
+)
+
+@Serializable
+data class PtyShell(
+    val path: String = "",
+    val name: String = "",
+    val acceptable: Boolean = false,
+)
+
+@Serializable
 data class Session(
     val id: String = "",
     val projectID: String = "",
