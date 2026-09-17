@@ -341,6 +341,12 @@ fun SessionsScreen(
                 )
                 NavigationBarItem(
                     selected = false,
+                    onClick = onTerminal,
+                    icon = { Icon(Icons.Filled.Terminal, contentDescription = null) },
+                    label = { Text("Terminal") },
+                )
+                NavigationBarItem(
+                    selected = false,
                     onClick = onSettings,
                     icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
                     label = { Text("Settings") },
