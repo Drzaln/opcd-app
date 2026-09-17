@@ -9,6 +9,7 @@ import dev.opencode.mobile.data.model.FileContent
 import dev.opencode.mobile.data.model.FileDiff
 import dev.opencode.mobile.data.model.FileNode
 import dev.opencode.mobile.data.model.FileStatus
+import dev.opencode.mobile.data.model.FindMatch
 import dev.opencode.mobile.data.model.Health
 import dev.opencode.mobile.data.model.MessageData
 import dev.opencode.mobile.data.model.ProviderList
@@ -133,6 +134,19 @@ interface OpenCodeApi {
 
     @GET("file/status")
     suspend fun fileStatus(@Query("directory") directory: String? = null): List<FileStatus>
+
+    @GET("find")
+    suspend fun findText(
+        @Query("pattern") pattern: String,
+        @Query("directory") directory: String? = null,
+    ): List<FindMatch>
+
+    @GET("find/file")
+    suspend fun findFiles(
+        @Query("query") query: String,
+        @Query("limit") limit: Int? = null,
+        @Query("directory") directory: String? = null,
+    ): List<String>
 
     @GET("agent")
     suspend fun agents(): List<Agent>

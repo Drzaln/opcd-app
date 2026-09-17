@@ -217,6 +217,25 @@ data class FileStatus(
 )
 
 @Serializable
+data class FindText(val text: String = "")
+
+@Serializable
+data class FindSubmatch(
+    val match: FindText = FindText(),
+    val start: Int = 0,
+    val end: Int = 0,
+)
+
+@Serializable
+data class FindMatch(
+    val path: FindText = FindText(),
+    val lines: FindText = FindText(),
+    @SerialName("line_number") val lineNumber: Int = 0,
+    @SerialName("absolute_offset") val absoluteOffset: Long = 0,
+    val submatches: List<FindSubmatch> = emptyList(),
+)
+
+@Serializable
 data class Health(
     val healthy: Boolean = false,
     val version: String = "",
