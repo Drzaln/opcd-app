@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -77,10 +78,23 @@ class ChatViewModel(
     private var refreshJob: Job? = null
 
     init {
+        loadCached()
         refreshAll()
         loadMeta()
         startEvents(app)
         startPolling()
+    }
+
+    private val messagesKey: String get() = "messages:${server.id}:$sessionId"
+
+    private fun loadCached() {
+        viewModelScope.launch {
+            val cached = app.cacheStore.get(messagesKey) ?: return@launch
+            val messages = runCatching { json.decodeFromString<List<MessageData>>(cached) }.getOrNull() ?: return@launch
+            if (messages.isNotEmpty()) {
+                _ui.update { it.copy(messages = messages, loading = false) }
+            }
+        }
     }
 
     fun selectAgent(name: String?) {
@@ -324,6 +338,7 @@ class ChatViewModel(
                 val session = runCatching { api.session(sessionId, projectDir()) }.getOrNull()
                 val messages = api.messages(sessionId, directory = projectDir())
                 val todos = runCatching { api.todos(sessionId, projectDir()) }.getOrNull()
+                runCatching { app.cacheStore.put(messagesKey, json.encodeToString(messages)) }
                 // Preserve existing error so the banner stays visible until dismissed or a send succeeds.
                 _ui.value = _ui.value.copy(
                     messages = messages,

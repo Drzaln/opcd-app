@@ -62,6 +62,8 @@ import dev.opencode.mobile.ui.theme.Orange
 import dev.opencode.mobile.ui.theme.Red
 import dev.opencode.mobile.ui.theme.TextSecondary
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json as KxJson
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -69,7 +71,7 @@ import java.util.Date
 import java.util.Locale
 
 class SessionsViewModel(
-    app: OpenCodeApp,
+    private val app: OpenCodeApp,
     private val server: ServerConfig,
     private val projectDir: () -> String?,
 ) : ViewModel() {
@@ -89,8 +91,22 @@ class SessionsViewModel(
     private val api = app.repository.apiFor(server)
 
     init {
+        loadCached()
         refresh()
         refreshProjects()
+    }
+
+    private val jsonCache = KxJson { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
+    private val sessionsKey: String get() = "sessions:${server.id}:${projectDir() ?: ""}"
+
+    private fun loadCached() {
+        viewModelScope.launch {
+            val cached = app.cacheStore.get(sessionsKey) ?: return@launch
+            val sessions = runCatching { jsonCache.decodeFromString<List<Session>>(cached) }.getOrNull() ?: return@launch
+            if (sessions.isNotEmpty()) {
+                _ui.value = _ui.value.copy(sessions = sessions, loading = false)
+            }
+        }
     }
 
     fun refresh() {
@@ -100,6 +116,7 @@ class SessionsViewModel(
                 val sessions = api.sessions(projectDir())
                     .sortedByDescending { it.time?.updated ?: it.time?.created ?: 0L }
                 val statuses = runCatching { api.sessionStatus(projectDir()) }.getOrDefault(emptyMap())
+                runCatching { app.cacheStore.put(sessionsKey, jsonCache.encodeToString(sessions)) }
                 _ui.value = _ui.value.copy(sessions = sessions, statuses = statuses, loading = false)
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(loading = false, error = e.message ?: "Failed to load sessions")
