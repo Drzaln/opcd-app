@@ -1,4 +1,4 @@
-<!-- ship: v0.1.13 (versionCode 14) -->
+<!-- ship: v0.1.14 (versionCode 15) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -44,11 +44,14 @@ after updating this file.
    (`ui/common/DiffLines.kt`). `messageID` must be a **user** message (server requires `role==="user"`).
 5. **Realtime both ways:** the Mac must run the **TUI on a fixed port**
    (`OPENCODE_SERVER_PASSWORD=… opencode --hostname <ip> --port 4096`). A separate `opencode serve`
-   is a different process/event-bus → no live TUI↔app sync.
+   is a different process/event-bus → no live TUI↔app sync. (Linux box: see `README.linux.md`.)
 6. **Auth:** HTTP Basic (`opencode` user + password). 401 otherwise.
 7. **Totals formula** (matches TUI `sidebar/context.tsx`): tokens = last assistant message
    `input+output+reasoning+cache.read+cache.write`; % = tokens / model `limit.context`;
    $ = `session.cost`.
+8. **Polymorphic fields:** an assistant message's `summary` is a **boolean** (`true`), a user
+   message's is an object — the DTO types it as `JsonElement`. Messages are also decoded
+   **per-item** (bad entries skipped) so one mismatch can't break the whole chat.
 
 ## Features done
 
