@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -123,6 +124,15 @@ fun FileViewerScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                },
+                actions = {
+                    val text = ui.content?.takeIf { it.type != "binary" }?.content
+                    if (!text.isNullOrBlank()) {
+                        IconButton(onClick = {
+                            val fenced = "```" + (languageForPath(path) ?: "") + "\n" + text + "\n```"
+                            dev.opencode.mobile.ui.common.shareText(context, fenced, path)
+                        }) { Icon(Icons.Filled.Share, contentDescription = "Share file") }
+                    }
                 },
                 colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,

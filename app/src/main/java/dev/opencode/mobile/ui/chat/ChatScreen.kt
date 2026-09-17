@@ -99,6 +99,7 @@ import dev.opencode.mobile.data.model.MessageData
 import dev.opencode.mobile.data.model.Part
 import dev.opencode.mobile.data.model.Todo
 import dev.opencode.mobile.ui.common.JsonUtil
+import dev.opencode.mobile.ui.common.shareText
 import dev.opencode.mobile.ui.common.MarkdownText
 import dev.opencode.mobile.ui.common.MutedLabel
 import kotlinx.coroutines.Dispatchers
@@ -642,13 +643,14 @@ private fun MessageList(
             },
             modifier = Modifier.fillMaxSize(),
         ) {
-            SelectionContainer {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
+            // No SelectionContainer around the list: selection over a lazy list is undefined and it
+            // steals the long-press that opens the message menu. Copy/Share live in that menu.
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                     if (hasMore || loadingOlder) {
                         item(key = "load-older") {
                             Row(
@@ -686,7 +688,6 @@ private fun MessageList(
                         }
                     }
                 }
-            }
         }
         if (!atBottom && messages.isNotEmpty()) {
             FloatingActionButton(
@@ -810,6 +811,10 @@ private fun MessageRow(
     }
     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
         DropdownMenuItem(text = { Text("Copy") }, onClick = { menu = false; copy() })
+        DropdownMenuItem(
+            text = { Text("Share") },
+            onClick = { menu = false; if (fullText.isNotBlank()) shareText(context, fullText) },
+        )
         if (isUser) {
             DropdownMenuItem(text = { Text("Fork from here") }, onClick = { menu = false; onFork() })
             DropdownMenuItem(text = { Text("Revert to here") }, onClick = { menu = false; onRevert() })

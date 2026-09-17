@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -80,6 +81,22 @@ fun CodeBlock(
                 )
                 Spacer(Modifier.size(4.dp))
                 Text("Copy", color = OcTheme.colors.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+            Row(
+                Modifier.clickable {
+                    val fenced = "```" + (language?.ifBlank { null } ?: "") + "\n" + code + "\n```"
+                    shareText(context, fenced)
+                }.padding(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.Share,
+                    contentDescription = "Share code",
+                    tint = OcTheme.colors.textSecondary,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.size(4.dp))
+                Text("Share", color = OcTheme.colors.textSecondary, style = MaterialTheme.typography.labelSmall)
             }
         }
         Box(
