@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -194,6 +196,7 @@ fun SessionsScreen(
     var showDirPicker by remember { mutableStateOf(false) }
     var editTarget by remember { mutableStateOf<Session?>(null) }
     var editTitle by remember { mutableStateOf("") }
+    var deleteTarget by remember { mutableStateOf<Session?>(null) }
 
     LaunchedEffect(projectDir) {
         vm.refresh()
@@ -237,7 +240,8 @@ fun SessionsScreen(
                         status = ui.statuses[session.id],
                         onClick = { onChat(session.id) },
                         onDiff = { onDiff(session.id) },
-                        onEditTitle = { editTarget = session },
+                        onRename = { editTarget = session },
+                        onDelete = { deleteTarget = session },
                     )
                 }
             }
@@ -280,6 +284,22 @@ fun SessionsScreen(
                 ) { Text("Save") }
             },
             dismissButton = { TextButton(onClick = { editTarget = null }) { Text("Cancel") } },
+        )
+    }
+
+    val del = deleteTarget
+    if (del != null) {
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("Delete session?") },
+            text = { Text(del.title.ifEmpty { "Untitled session" }) },
+            confirmButton = {
+                Button(onClick = {
+                    vm.deleteSession(del.id)
+                    deleteTarget = null
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } },
         )
     }
 }
@@ -374,13 +394,16 @@ private fun SessionCard(
     status: SessionStatus?,
     onClick: () -> Unit,
     onDiff: () -> Unit,
-    onEditTitle: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onEditTitle),
-    ) {
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(onClick = onClick, onLongClick = { menu = true }),
+        ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -429,6 +452,14 @@ private fun SessionCard(
                     }
                 }
             }
+        }
+        }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename() })
+            DropdownMenuItem(
+                text = { Text("Delete", color = Red) },
+                onClick = { menu = false; onDelete() },
+            )
         }
     }
 }
