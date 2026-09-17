@@ -126,9 +126,15 @@ curl -u opencode:secret http://127.0.0.1:4199/file/content?path=settings.gradle.
 
 ## Status / next ideas
 
-- SSE handling is incremental; the remaining cost is that `scheduleFullRefresh` still refetches the
-  full message list on non-part events (session/diff/compact).
-- File viewer truncates >5000 lines; virtualized line rendering (LazyColumn) is the upgrade path.
-- Not yet built: dedicated todos/commands/agents screens (todos already render in chat), share-session
-  links, offline cache, `/file/status` usage in the UI.
-- Verified against opencode 1.18.31 live server (sessions, messages, prompt_async, diff, SSE, file list/content).
+- Done: incremental SSE part patching, adaptive power-aware polling, todos panel, agent/model
+  switcher (persisted per server), copy message, session status dots, rename, per-message
+  model/tokens/context/cost meta, session totals, queued indicator, slash commands, per-message diff,
+  project search (`/find` + `/find/file`), offline cache (Room), local notifications (foreground
+  watch service, toggle in Servers screen).
+- Chat header shows session totals using the TUI's exact formula (`packages/tui/src/feature-plugins/sidebar/context.tsx`):
+  tokens = last assistant message `input + output + reasoning + cache.read + cache.write`;
+  % = tokens / model context limit; $ = `session.cost`.
+- Remaining ideas: image attachments (image/* file parts), share-session links, LazyColumn line
+  virtualization for very large files, WorkManager/notification fallback instead of a foreground service.
+- Verified against opencode 1.18.31 live server (sessions, messages, prompt_async, command, diff,
+  SSE, file list/content, find/find-file, provider/agent lists).
