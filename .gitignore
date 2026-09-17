@@ -14,6 +14,9 @@ captures/
 *.iml
 .vscode/
 
+# Kotlin compiler artifacts
+.kotlin/
+
 # OS
 .DS_Store
 

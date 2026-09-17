@@ -31,12 +31,15 @@ Always do ALL of these, in order:
    builds `assembleRelease`, commits, pushes `main`, tags `v<versionName>`, and pushes the tag.
    The tag triggers CI (`.github/workflows/build.yml`) which builds the APK and creates a GitHub Release.
 2. If the user asked for a specific bump type, pass it (e.g. `make ship minor`); otherwise default to `patch`.
-3. **Verify**: confirm the CI run on the tag completes and a GitHub Release with `app-release.apk` exists
-   (check via `curl https://api.github.com/repos/Drzaln/opcd-app/releases` or the Actions tab).
+3. **Do NOT poll the GitHub API to verify** (rate limits — the user has said so explicitly). No
+   `curl https://api.github.com/repos/.../releases` and no Actions-run polling. After `ship.sh`
+   prints "Shipped vX.Y.Z", you are done: report the version, commit and tag that were pushed, and
+   tell the user to check the Actions/Releases tab in the browser if they want to watch CI.
 4. If the CI release step 403s despite the workflow's `permissions: contents: write`, the repo-level
    default may still be read-only — ask the user to enable Settings → Actions → General → Workflow
    permissions → "Read and write permissions", then re-run.
 5. Never create a version bump commit or tag without the user asking to ship (or saying ship/push/release).
+6. `ship.sh` does `git add -A`; keep build artifacts (`.kotlin/`, logs) out of the tree first.
 
 Note: release APK is signed with the debug key unless `keystore.properties` + CI signing secrets exist.
 
