@@ -28,6 +28,8 @@ Kotlin · Jetpack Compose · Material 3 · dark theme · minSdk 26.
 
 ## 1. Mac side — run opencode as a server
 
+> Running the server on **Linux** instead? See **[README.linux.md](README.linux.md)**.
+
 The phone talks to the same server the terminal TUI uses. The simplest way is to make the **TUI
 itself** listen on a fixed port — then terminal and phone update each other in real time.
 
