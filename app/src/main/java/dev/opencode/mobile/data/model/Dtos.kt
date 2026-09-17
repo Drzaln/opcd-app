@@ -2,6 +2,7 @@ package dev.opencode.mobile.data.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 @Serializable
@@ -69,7 +70,8 @@ data class Message(
     val providerID: String? = null,
     val mode: String? = null,
     val path: MessagePath? = null,
-    val summary: MessageSummary? = null,
+    // user messages carry an object here; assistant messages carry a boolean — accept anything.
+    val summary: JsonElement? = null,
     val agent: String? = null,
     val model: MessageModel? = null,
     val error: JsonObject? = null,

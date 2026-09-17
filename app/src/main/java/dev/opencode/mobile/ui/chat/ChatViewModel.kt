@@ -336,7 +336,10 @@ class ChatViewModel(
             try {
                 val status = runCatching { api.sessionStatus(projectDir())[sessionId] }.getOrNull()
                 val session = runCatching { api.session(sessionId, projectDir()) }.getOrNull()
-                val messages = api.messages(sessionId, directory = projectDir())
+                val raw = api.messages(sessionId, directory = projectDir())
+                val messages = raw.mapNotNull { element ->
+                    runCatching { json.decodeFromJsonElement<MessageData>(element) }.getOrNull()
+                }
                 val todos = runCatching { api.todos(sessionId, projectDir()) }.getOrNull()
                 runCatching { app.cacheStore.put(messagesKey, json.encodeToString(messages)) }
                 // Preserve existing error so the banner stays visible until dismissed or a send succeeds.

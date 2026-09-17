@@ -78,7 +78,7 @@ interface OpenCodeApi {
         @Path("id") id: String,
         @Query("limit") limit: Int? = null,
         @Query("directory") directory: String? = null,
-    ): List<MessageData>
+    ): kotlinx.serialization.json.JsonArray
 
     @POST("session/{id}/message")
     suspend fun sendMessage(
