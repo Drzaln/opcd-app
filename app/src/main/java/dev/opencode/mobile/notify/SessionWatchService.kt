@@ -94,6 +94,31 @@ class SessionWatchService : Service() {
                     val title = data?.get("title")?.jsonPrimitive?.contentOrNull ?: "Permission requested"
                     Notifications.post(this@SessionWatchService, notifyId++, "opencode needs you", title)
                 }
+                "permission.asked" -> {
+                    val label = data?.get("permission")?.jsonPrimitive?.contentOrNull
+                        ?: data?.get("title")?.jsonPrimitive?.contentOrNull
+                        ?: "Permission requested"
+                    val command = (data?.get("metadata") as? JsonObject)
+                        ?.get("command")?.jsonPrimitive?.contentOrNull
+                    Notifications.post(
+                        this@SessionWatchService,
+                        notifyId++,
+                        "opencode needs permission",
+                        command?.let { "$label · $it" } ?: label,
+                    )
+                }
+                "question.asked", "question.v2.asked" -> {
+                    val first = (data?.get("questions") as? kotlinx.serialization.json.JsonArray)
+                        ?.firstOrNull() as? JsonObject
+                    val header = first?.get("header")?.jsonPrimitive?.contentOrNull
+                    val question = first?.get("question")?.jsonPrimitive?.contentOrNull
+                    Notifications.post(
+                        this@SessionWatchService,
+                        notifyId++,
+                        "opencode has a question",
+                        listOfNotNull(header, question).firstOrNull { it.isNotBlank() } ?: "Question requested",
+                    )
+                }
             }
         }
     }

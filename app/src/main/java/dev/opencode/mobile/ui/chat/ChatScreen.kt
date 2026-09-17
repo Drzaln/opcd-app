@@ -1,8 +1,14 @@
 package dev.opencode.mobile.ui.chat
 
+import android.graphics.BitmapFactory
+import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,24 +20,26 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -39,22 +47,30 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -63,6 +79,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.net.Uri
 import android.widget.Toast
 import kotlin.math.roundToInt
 import androidx.lifecycle.Lifecycle
@@ -76,6 +93,8 @@ import dev.opencode.mobile.data.model.Agent
 import dev.opencode.mobile.data.model.Command
 import dev.opencode.mobile.data.model.MessageData
 import dev.opencode.mobile.data.model.Part
+import dev.opencode.mobile.data.model.PermissionRequest
+import dev.opencode.mobile.data.model.QuestionRequest
 import dev.opencode.mobile.data.model.Todo
 import dev.opencode.mobile.ui.common.JsonUtil
 import dev.opencode.mobile.ui.common.MarkdownText
@@ -87,6 +106,9 @@ import dev.opencode.mobile.ui.theme.Red
 import dev.opencode.mobile.ui.theme.RedBg
 import dev.opencode.mobile.ui.theme.SurfaceVariant
 import dev.opencode.mobile.ui.theme.TextSecondary
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -133,6 +155,14 @@ fun ChatScreen(
     )
     val ui by vm.ui.collectAsState()
     val input by vm.input.collectAsState()
+    val attachments by vm.attachments.collectAsState()
+
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let { vm.addAttachment(it.toString()) }
+    }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { vm.addAttachment(it.toString()) }
+    }
 
     val contextStatus = remember(ui.messages, ui.models, ui.session) {
         val last = ui.messages.lastOrNull {
@@ -208,6 +238,10 @@ fun ChatScreen(
                 selectedModel = ui.selectedModel,
                 onSelectAgent = { vm.selectAgent(it) },
                 onSelectModel = { vm.selectModel(it) },
+                attachments = attachments,
+                onRemoveAttachment = { vm.removeAttachment(it) },
+                onPickPhoto = { photoPicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onPickFile = { filePicker.launch(arrayOf("*/*")) },
             )
         },
     ) { padding ->
@@ -231,9 +265,166 @@ fun ChatScreen(
             MessageList(
                 messages = ui.messages,
                 models = ui.models,
+                loadingOlder = ui.loadingOlder,
+                hasMore = ui.hasMore,
+                onLoadOlder = { vm.loadOlder() },
+                onRefresh = { vm.refresh() },
                 onOpenFile = onOpenFile,
                 onMessageDiff = onMessageDiff,
             )
+        }
+    }
+
+    ui.permissions.firstOrNull()?.let { permission ->
+        PermissionSheet(
+            request = permission,
+            pending = ui.permissions.size,
+            onRespond = { response -> vm.respondPermission(permission, response) },
+        )
+    }
+
+    ui.questions.firstOrNull()?.let { question ->
+        QuestionSheet(
+            request = question,
+            pending = ui.questions.size,
+            onSubmit = { answers -> vm.answerQuestion(question, answers) },
+            onDismiss = { vm.rejectQuestion(question) },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun QuestionSheet(
+    request: QuestionRequest,
+    pending: Int,
+    onSubmit: (List<List<String>>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val selections = remember(request.id) { mutableStateListOf(*Array(request.questions.size) { emptySet<String>() }) }
+    val customs = remember(request.id) { mutableStateListOf(*Array(request.questions.size) { "" }) }
+    val answers = request.questions.indices.map { i ->
+        val chosen = selections[i].toMutableSet()
+        if (request.questions[i].custom && customs[i].isNotBlank()) chosen.add(customs[i].trim())
+        chosen.toList()
+    }
+    val canSubmit = answers.isNotEmpty() && answers.all { it.isNotEmpty() }
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Question from opencode", style = MaterialTheme.typography.titleMedium)
+                if (pending > 1) {
+                    Spacer(Modifier.width(8.dp))
+                    MutedLabel("+${pending - 1} more")
+                }
+            }
+            for ((i, q) in request.questions.withIndex()) {
+                Spacer(Modifier.height(12.dp))
+                if (q.header.isNotBlank()) {
+                    Text(q.header, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                }
+                Text(q.question, style = MaterialTheme.typography.bodyMedium)
+                if (q.multiple) {
+                    MutedLabel("select one or more", modifier = Modifier.padding(top = 2.dp))
+                }
+                for (option in q.options) {
+                    val selected = option.label in selections[i]
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val current = selections[i]
+                                selections[i] = if (q.multiple) {
+                                    if (selected) current - option.label else current + option.label
+                                } else {
+                                    setOf(option.label)
+                                }
+                            }
+                            .padding(top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (q.multiple) {
+                            Checkbox(checked = selected, onCheckedChange = null)
+                        } else {
+                            RadioButton(selected = selected, onClick = null)
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        Column {
+                            Text(option.label, style = MaterialTheme.typography.bodyMedium)
+                            if (option.description.isNotBlank()) {
+                                Text(option.description, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                            }
+                        }
+                    }
+                }
+                if (q.custom) {
+                    OutlinedTextField(
+                        value = customs[i],
+                        onValueChange = { customs[i] = it },
+                        placeholder = { Text("Or type your own") },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        maxLines = 3,
+                    )
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onDismiss) { Text("Dismiss", color = Red) }
+                TextButton(onClick = { onSubmit(answers) }, enabled = canSubmit) { Text("Submit") }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PermissionSheet(
+    request: PermissionRequest,
+    pending: Int,
+    onRespond: (String) -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = {}) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Permission requested", style = MaterialTheme.typography.titleMedium)
+                if (pending > 1) {
+                    Spacer(Modifier.width(8.dp))
+                    MutedLabel("+${pending - 1} more")
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(request.label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+            val command = request.metadata?.get("command")?.toString()?.trim('"')
+            if (!command.isNullOrBlank()) {
+                Text(
+                    command,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+            val detail = request.patterns
+            if (detail.isNotEmpty()) {
+                Text(
+                    detail.joinToString(", ").take(400),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { onRespond("once") }) { Text("Allow once") }
+                TextButton(onClick = { onRespond("always") }) { Text("Always allow") }
+                TextButton(onClick = { onRespond("reject") }) { Text("Deny", color = Red) }
+            }
         }
     }
 }
@@ -253,9 +444,42 @@ private fun InputBar(
     selectedModel: ModelOption?,
     onSelectAgent: (String?) -> Unit,
     onSelectModel: (ModelOption?) -> Unit,
+    attachments: List<Attachment>,
+    onRemoveAttachment: (String) -> Unit,
+    onPickPhoto: () -> Unit,
+    onPickFile: () -> Unit,
 ) {
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp, modifier = Modifier.navigationBarsPadding()) {
         Column {
+            if (attachments.isNotEmpty()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    for (attachment in attachments) {
+                        Surface(color = SurfaceVariant, shape = RoundedCornerShape(8.dp)) {
+                            Row(
+                                Modifier.padding(start = 8.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    attachment.name,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.width(120.dp),
+                                )
+                                IconButton(onClick = { onRemoveAttachment(attachment.uri) }, modifier = Modifier.size(24.dp)) {
+                                    Icon(Icons.Filled.Close, contentDescription = "Remove attachment", modifier = Modifier.size(14.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if (agents.isNotEmpty() || models.isNotEmpty()) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
@@ -300,14 +524,37 @@ private fun InputBar(
                         onValueChange("/${cmd} ")
                     })
                 }
+                AttachMenu(
+                    enabled = enabled,
+                    onPickPhoto = onPickPhoto,
+                    onPickFile = onPickFile,
+                )
                 IconButton(
                     onClick = onSend,
-                    enabled = enabled && value.isNotBlank(),
+                    enabled = enabled && (value.isNotBlank() || attachments.isNotEmpty()),
                     modifier = Modifier.padding(bottom = 4.dp),
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AttachMenu(
+    enabled: Boolean,
+    onPickPhoto: () -> Unit,
+    onPickFile: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }, enabled = enabled, modifier = Modifier.padding(bottom = 4.dp)) {
+            Icon(Icons.Filled.AttachFile, contentDescription = "Attach")
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(text = { Text("Photo") }, onClick = { expanded = false; onPickPhoto() })
+            DropdownMenuItem(text = { Text("File") }, onClick = { expanded = false; onPickFile() })
         }
     }
 }
@@ -444,31 +691,70 @@ private fun TodosPanel(todos: List<Todo>) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MessageList(
     messages: List<MessageData>,
     models: List<ModelOption>,
+    loadingOlder: Boolean,
+    hasMore: Boolean,
+    onLoadOlder: () -> Unit,
+    onRefresh: () -> Unit,
     onOpenFile: (String) -> Unit,
     onMessageDiff: (String) -> Unit,
 ) {
     val listState = rememberLazyListState()
-    LaunchedEffect(messages.size, messages.lastOrNull()?.parts?.size) {
+    var refreshing by remember { mutableStateOf(false) }
+    // Only follow new messages appended at the end; loading older ones must not yank the viewport.
+    LaunchedEffect(messages.lastOrNull()?.info?.id, messages.lastOrNull()?.parts?.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.lastIndex)
         }
     }
-    SelectionContainer {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            items(messages, key = { it.info.id }) { message ->
-                MessageRow(message = message, models = models, onOpenFile = onOpenFile, onMessageDiff = onMessageDiff)
+    LaunchedEffect(listState, hasMore, loadingOlder) {
+        if (!hasMore || loadingOlder) return@LaunchedEffect
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { if (it <= 1) onLoadOlder() }
+    }
+    PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = {
+            refreshing = true
+            onRefresh()
+        },
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        SelectionContainer {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                if (hasMore || loadingOlder) {
+                    item(key = "load-older") {
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (loadingOlder) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else {
+                                TextButton(onClick = onLoadOlder) { Text("Load older messages") }
+                            }
+                        }
+                    }
+                }
+                items(messages, key = { it.info.id }) { message ->
+                    MessageRow(message = message, models = models, onOpenFile = onOpenFile, onMessageDiff = onMessageDiff)
+                }
             }
         }
     }
+    // Clear the pull-to-refresh indicator once the refresh round-trip settles.
+    LaunchedEffect(messages, loadingOlder) { refreshing = false }
 }
 
 private fun resolveModelLabel(info: dev.opencode.mobile.data.model.Message, models: List<ModelOption>): String? {
@@ -640,25 +926,67 @@ private fun PartView(
         "file" -> {
             val sourcePath = part.source?.get("path")?.let { it.toString().trim('"') }
             val display = part.filename ?: sourcePath ?: part.url
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable {
-                    sourcePath?.let { onOpenFile(it) }
-                },
-            ) {
-                Icon(Icons.Filled.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.width(16.dp).height(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    display,
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            if (part.mime.startsWith("image/") && part.url.startsWith("data:")) {
+                ImagePart(url = part.url, filename = display, sourcePath = sourcePath, onOpenFile = onOpenFile)
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable {
+                        sourcePath?.let { onOpenFile(it) }
+                    },
+                ) {
+                    Icon(Icons.Filled.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.width(16.dp).height(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        display,
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
         "retry" -> MutedLabel("retry attempt ${part.attempt}", modifier = Modifier.padding(vertical = 2.dp))
     }
+}
+
+@Composable
+private fun ImagePart(
+    url: String,
+    filename: String,
+    sourcePath: String?,
+    onOpenFile: (String) -> Unit,
+) {
+    val bitmap by produceState<android.graphics.Bitmap?>(initialValue = null, url) {
+        value = withContext(Dispatchers.IO) { decodeDataUrl(url) }
+    }
+    val image = bitmap
+    if (image != null) {
+        Image(
+            bitmap = image.asImageBitmap(),
+            contentDescription = filename,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .clickable { sourcePath?.let(onOpenFile) },
+        )
+    } else {
+        MutedLabel(filename, modifier = Modifier.padding(vertical = 2.dp))
+    }
+}
+
+private fun decodeDataUrl(url: String): android.graphics.Bitmap? {
+    val comma = url.indexOf(',')
+    if (comma <= 0) return null
+    val bytes = runCatching { Base64.decode(url.substring(comma + 1), Base64.DEFAULT) }.getOrNull() ?: return null
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    var sample = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 1600) sample *= 2
+    val options = BitmapFactory.Options().apply { inSampleSize = sample }
+    return runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) }.getOrNull()
 }
 
 @Composable

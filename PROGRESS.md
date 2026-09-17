@@ -1,4 +1,4 @@
-<!-- ship: v0.1.15 (versionCode 16) -->
+<!-- ship: v0.1.16 (versionCode 17) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -52,6 +52,26 @@ after updating this file.
 8. **Polymorphic fields:** an assistant message's `summary` is a **boolean** (`true`), a user
    message's is an object — the DTO types it as `JsonElement`. Messages are also decoded
    **per-item** (bad entries skipped) so one mismatch can't break the whole chat.
+9. **Message pagination:** `GET /session/{id}/message?limit=N` returns the newest N messages
+   (ascending) and sets `X-Next-Cursor` (+ `Link rel=next`) when older ones exist. Next page:
+   `?limit=N&before=<cursor>` (opaque base64 cursor; **`before` requires `limit` or → 400**).
+   Cursor is a message id+timestamp; `X-Next-Cursor` is absent when there's no more. Chat loads
+   PAGE_SIZE=50 and keeps already-loaded older pages when refreshing.
+10. **Permissions:** live event is `permission.asked` on 1.18.31 (older servers emit
+    `permission.updated` with a different shape: `title`/`pattern` instead of
+    `permission`/`patterns`). Reply: legacy `POST /session/{id}/permissions/{permissionID}`
+    `{"response":"once"|"always"|"reject"}` (works on 1.18.31, primary) → fallback
+    `POST /permission/{requestID}/reply` `{"reply":…}`. Pending list: `GET /permission`
+    (404s on older servers → ignored). Replied event: `permission.replied`.
+11. **File/attachment parts:** `{"type":"file","mime","filename","url"}` with a
+    `data:<mime>;base64,…` URL for phone-local files — accepted by `prompt_async` and persisted.
+    Server-side file parts come back with `source.path` (openable) or a `data:` URL (rendered).
+12. **Questions (the agent's `ask` tool):** live event `question.asked` with
+    `{id, sessionID, questions:[{question, header, options:[{label,description}], multiple?, custom?}],
+    tool}`. Pending: `GET /question`. Answer: `POST /question/{id}/reply {"answers":[["label",…],…]}`
+    (one string-array per question, in order). Dismiss: `POST /question/{id}/reject` (no body).
+    Events `question.replied` / `question.rejected` carry `requestID`. (Perms and questions are
+    separate blocking prompts — the app renders whichever arrives first.)
 
 ## Features done
 
@@ -59,7 +79,10 @@ Incremental SSE part patching · adaptive power-aware polling (3s busy / 15s fg 
 panel · agent+model switcher (persisted per server) · slash commands (`/command`) · copy message ·
 session status dots · rename session · per-message model/tokens/ctx/$ · session totals · queued
 indicator · per-message diff · project search (`/find`, `/find/file`) · offline cache (Room) ·
-notifications (foreground service toggle) · mDNS scan + Tailscale remote field · directory/folder picker.
+notifications (foreground service toggle) · mDNS scan + Tailscale remote field · directory/folder picker ·
+message pagination (load-older on scroll + pull-to-refresh) · in-app permission prompts
+(Allow once / Always / Deny) · image + file attachments from the phone (rendered inline) ·
+agent questions in-app (single/multi-select + custom text, answer or dismiss).
 
 ## Gotchas
 
@@ -77,9 +100,10 @@ notifications (foreground service toggle) · mDNS scan + Tailscale remote field 
 
 ## Open / next ideas
 
-- Image attachments (`image/*` file parts), share-session links, LazyColumn line virtualization for
-  very large files, WorkManager notification fallback (FGS has a 6h/day limit on Android 15+),
-  incremental refresh for `session.something` events (currently full refetch).
+- Share-session links, LazyColumn line virtualization for very large files, WorkManager
+  notification fallback (FGS has a 6h/day limit on Android 15+), incremental refresh for
+  `session.something` events (currently full refetch), image thumbnails/compression before
+  upload, decode remote `http(s)` image parts (currently only `data:` URLs render inline).
 
 ## Verification
 

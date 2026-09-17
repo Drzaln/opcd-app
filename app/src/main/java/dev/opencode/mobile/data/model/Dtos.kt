@@ -248,6 +248,84 @@ data class PartInput(
     val type: String = "text",
     val text: String = "",
     val synthetic: Boolean? = null,
+    val mime: String? = null,
+    val filename: String? = null,
+    val url: String? = null,
+    val source: JsonObject? = null,
+)
+
+@Serializable
+data class PermissionTool(
+    val messageID: String? = null,
+    val callID: String? = null,
+)
+
+@Serializable
+data class PermissionTime(
+    val created: Long = 0,
+)
+
+// Accepts both legacy `permission.updated` and newer `permission.asked` payloads.
+@Serializable
+data class PermissionRequest(
+    val id: String = "",
+    val sessionID: String = "",
+    val type: String = "",
+    val permission: String = "",
+    val title: String = "",
+    val patterns: List<String> = emptyList(),
+    val always: List<String> = emptyList(),
+    val metadata: JsonObject? = null,
+    val tool: PermissionTool? = null,
+    val messageID: String? = null,
+    val callID: String? = null,
+    val time: PermissionTime? = null,
+) {
+    val label: String get() = title.ifBlank { permission }.ifBlank { type }.ifBlank { "Permission requested" }
+}
+
+@Serializable
+data class PermissionReplyBody(
+    val response: String,
+)
+
+@Serializable
+data class PermissionReplyV2Body(
+    val reply: String,
+)
+
+@Serializable
+data class QuestionOption(
+    val label: String = "",
+    val description: String = "",
+)
+
+@Serializable
+data class QuestionInfo(
+    val question: String = "",
+    val header: String = "",
+    val options: List<QuestionOption> = emptyList(),
+    val multiple: Boolean = false,
+    val custom: Boolean = false,
+)
+
+@Serializable
+data class QuestionTool(
+    val messageID: String? = null,
+    val callID: String? = null,
+)
+
+@Serializable
+data class QuestionRequest(
+    val id: String = "",
+    val sessionID: String = "",
+    val questions: List<QuestionInfo> = emptyList(),
+    val tool: QuestionTool? = null,
+)
+
+@Serializable
+data class QuestionReplyBody(
+    val answers: List<List<String>>,
 )
 
 @Serializable

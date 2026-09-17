@@ -12,7 +12,12 @@ import dev.opencode.mobile.data.model.FileStatus
 import dev.opencode.mobile.data.model.FindMatch
 import dev.opencode.mobile.data.model.Health
 import dev.opencode.mobile.data.model.MessageData
+import dev.opencode.mobile.data.model.PermissionReplyBody
+import dev.opencode.mobile.data.model.PermissionReplyV2Body
+import dev.opencode.mobile.data.model.PermissionRequest
 import dev.opencode.mobile.data.model.ProviderList
+import dev.opencode.mobile.data.model.QuestionReplyBody
+import dev.opencode.mobile.data.model.QuestionRequest
 import dev.opencode.mobile.data.model.SendMessageBody
 import dev.opencode.mobile.data.model.Session
 import dev.opencode.mobile.data.model.SessionStatus
@@ -79,6 +84,14 @@ interface OpenCodeApi {
         @Query("limit") limit: Int? = null,
         @Query("directory") directory: String? = null,
     ): kotlinx.serialization.json.JsonArray
+
+    @GET("session/{id}/message")
+    suspend fun messagesPage(
+        @Path("id") id: String,
+        @Query("limit") limit: Int,
+        @Query("before") before: String? = null,
+        @Query("directory") directory: String? = null,
+    ): Response<kotlinx.serialization.json.JsonArray>
 
     @POST("session/{id}/message")
     suspend fun sendMessage(
@@ -156,4 +169,42 @@ interface OpenCodeApi {
 
     @GET("command")
     suspend fun commands(): List<Command>
+
+    // --- permissions ---
+    // Legacy (opencode <= ~1.18.14): session-scoped reply with `response`.
+    @POST("session/{id}/permissions/{permissionID}")
+    suspend fun replyPermission(
+        @Path("id") id: String,
+        @Path("permissionID") permissionID: String,
+        @Body body: PermissionReplyBody,
+        @Query("directory") directory: String? = null,
+    ): Response<Unit>
+
+    // Newer (opencode 1.18.31+): global reply with `reply`.
+    @POST("permission/{requestID}/reply")
+    suspend fun replyPermissionV2(
+        @Path("requestID") requestID: String,
+        @Body body: PermissionReplyV2Body,
+        @Query("directory") directory: String? = null,
+    ): Response<Unit>
+
+    @GET("permission")
+    suspend fun pendingPermissions(@Query("directory") directory: String? = null): List<PermissionRequest>
+
+    // --- questions (the agent's ask tool) ---
+    @GET("question")
+    suspend fun pendingQuestions(@Query("directory") directory: String? = null): List<QuestionRequest>
+
+    @POST("question/{requestID}/reply")
+    suspend fun replyQuestion(
+        @Path("requestID") requestID: String,
+        @Body body: QuestionReplyBody,
+        @Query("directory") directory: String? = null,
+    ): Response<Unit>
+
+    @POST("question/{requestID}/reject")
+    suspend fun rejectQuestion(
+        @Path("requestID") requestID: String,
+        @Query("directory") directory: String? = null,
+    ): Response<Unit>
 }
