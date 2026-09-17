@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -29,6 +30,19 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
     private val _currentDirectory = MutableStateFlow<String?>(null)
     val currentDirectory: StateFlow<String?> = _currentDirectory
 
+    init {
+        viewModelScope.launch {
+            store.currentDirectory.collect { dir ->
+                if (_currentDirectory.value != dir) _currentDirectory.value = dir
+            }
+        }
+        viewModelScope.launch {
+            if (store.notificationsEnabled.first()) {
+                dev.opencode.mobile.notify.SessionWatchService.start(app)
+            }
+        }
+    }
+
     val notificationsEnabled: StateFlow<Boolean> =
         store.notificationsEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
@@ -38,6 +52,7 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
 
     fun setDirectory(directory: String?) {
         _currentDirectory.value = directory
+        viewModelScope.launch { store.setCurrentDirectory(directory) }
     }
 
     fun apiFor(server: ServerConfig) = repository.apiFor(server)

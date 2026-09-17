@@ -16,6 +16,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
@@ -63,26 +64,44 @@ class SessionWatchService : Service() {
                     app.serverStore.servers.map { list -> list.firstOrNull { it.id == id } }
                 }
                 .filterNotNull()
+                .combine(app.serverStore.currentDirectory) { server, dir -> server to dir }
                 .distinctUntilChanged()
-                .collectLatest { server -> watchServer(app, server) }
+                .collectLatest { (server, dir) -> watchServer(app, server, dir) }
         }
     }
 
-    private suspend fun watchServer(app: OpenCodeApp, server: ServerConfig) {
+    private val busySessions = mutableSetOf<String>()
+
+    private suspend fun watchServer(app: OpenCodeApp, server: ServerConfig, directory: String?) {
         val api = app.repository.apiFor(server)
-        app.repository.events(server).collect { event ->
+        app.repository.events(server, directory).collect { event ->
+            val data = event.data as? JsonObject
+            val sessionId = data?.get("sessionID")?.jsonPrimitive?.contentOrNull
             when (event.type) {
+                "session.status" -> {
+                    val status = (data?.get("status") as? JsonObject)?.get("type")?.jsonPrimitive?.contentOrNull
+                    if (sessionId != null) {
+                        when (status) {
+                            "busy", "retry" -> busySessions.add(sessionId)
+                            "idle" -> if (busySessions.remove(sessionId)) notifyDone(api, sessionId)
+                        }
+                    }
+                }
                 "session.idle" -> {
-                    val sessionId = (event.data as? JsonObject)?.get("sessionID")?.jsonPrimitive?.contentOrNull
-                    val title = sessionId?.let { runCatching { api.session(it) }.getOrNull()?.title }.orEmpty().ifEmpty { "Session" }
-                    Notifications.post(this@SessionWatchService, notifyId++, "opencode finished", title)
+                    if (sessionId != null && busySessions.remove(sessionId)) notifyDone(api, sessionId)
                 }
                 "permission.updated" -> {
-                    val data = event.data as? JsonObject
                     val title = data?.get("title")?.jsonPrimitive?.contentOrNull ?: "Permission requested"
                     Notifications.post(this@SessionWatchService, notifyId++, "opencode needs you", title)
                 }
             }
+        }
+    }
+
+    private fun notifyDone(api: dev.opencode.mobile.data.net.OpenCodeApi, sessionId: String) {
+        scope.launch {
+            val title = runCatching { api.session(sessionId) }.getOrNull()?.title.orEmpty().ifEmpty { "Session" }
+            Notifications.post(this@SessionWatchService, notifyId++, "opencode finished", title)
         }
     }
 

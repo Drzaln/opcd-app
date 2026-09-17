@@ -31,6 +31,7 @@ class ServerStore(private val context: Context) {
     private val selectedModelKey = stringPreferencesKey("selected_model")
     private val selectedAgentKey = stringPreferencesKey("selected_agent")
     private val notifyKey = androidx.datastore.preferences.core.booleanPreferencesKey("notifications_enabled")
+    private val directoryKey = stringPreferencesKey("current_directory")
 
     val servers: Flow<List<ServerConfig>> = context.dataStore.data.map { prefs ->
         val raw = prefs[serversKey] ?: "[]"
@@ -48,6 +49,14 @@ class ServerStore(private val context: Context) {
     }
 
     val notificationsEnabled: Flow<Boolean> = context.dataStore.data.map { it[notifyKey] ?: false }
+
+    val currentDirectory: Flow<String?> = context.dataStore.data.map { it[directoryKey] }
+
+    suspend fun setCurrentDirectory(directory: String?) {
+        context.dataStore.edit { prefs ->
+            if (directory == null) prefs.remove(directoryKey) else prefs[directoryKey] = directory
+        }
+    }
 
     suspend fun setNotificationsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[notifyKey] = enabled }
