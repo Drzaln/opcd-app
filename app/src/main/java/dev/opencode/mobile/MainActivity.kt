@@ -27,13 +27,14 @@ object Routes {
     const val CHAT = "chat/{serverId}/{sessionId}"
     const val FILES = "files/{serverId}?dir={dir}"
     const val FILE = "file/{serverId}?path={path}"
-    const val DIFF = "diff/{serverId}/{sessionId}"
+    const val DIFF = "diff/{serverId}/{sessionId}?messageID={messageID}"
 
     fun sessions(serverId: String) = "sessions/$serverId"
     fun chat(serverId: String, sessionId: String) = "chat/$serverId/$sessionId"
     fun files(serverId: String, dir: String) = "files/$serverId?dir=${java.net.URLEncoder.encode(dir, "UTF-8")}"
     fun file(serverId: String, path: String) = "file/$serverId?path=${java.net.URLEncoder.encode(path, "UTF-8")}"
-    fun diff(serverId: String, sessionId: String) = "diff/$serverId/$sessionId"
+    fun diff(serverId: String, sessionId: String, messageId: String? = null) =
+        "diff/$serverId/$sessionId?messageID=${messageId ?: ""}"
 }
 
 class MainActivity : ComponentActivity() {
@@ -89,6 +90,7 @@ class MainActivity : ComponentActivity() {
                             sessionId = sessionId,
                             onBack = { navController.popBackStack() },
                             onDiff = { navController.navigate(Routes.diff(serverId, sessionId)) },
+                            onMessageDiff = { messageId -> navController.navigate(Routes.diff(serverId, sessionId, messageId)) },
                             onOpenFile = { path ->
                                 navController.navigate(Routes.file(serverId, path))
                             },
@@ -139,14 +141,20 @@ class MainActivity : ComponentActivity() {
                         arguments = listOf(
                             androidx.navigation.navArgument("serverId") { type = androidx.navigation.NavType.StringType },
                             androidx.navigation.navArgument("sessionId") { type = androidx.navigation.NavType.StringType },
+                            androidx.navigation.navArgument("messageID") {
+                                type = androidx.navigation.NavType.StringType
+                                defaultValue = ""
+                            },
                         ),
                     ) { entry ->
                         val serverId = entry.arguments?.getString("serverId") ?: return@composable
                         val sessionId = entry.arguments?.getString("sessionId") ?: return@composable
+                        val messageID = entry.arguments?.getString("messageID")?.ifBlank { null }
                         DiffScreen(
                             appVm = appVm,
                             serverId = serverId,
                             sessionId = sessionId,
+                            messageId = messageID,
                             onBack = { navController.popBackStack() },
                         )
                     }

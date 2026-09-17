@@ -95,6 +95,7 @@ fun ChatScreen(
     sessionId: String,
     onBack: () -> Unit,
     onDiff: () -> Unit,
+    onMessageDiff: (String) -> Unit,
     onOpenFile: (String) -> Unit,
 ) {
     val context = LocalContext.current
@@ -222,6 +223,7 @@ fun ChatScreen(
                 messages = ui.messages,
                 models = ui.models,
                 onOpenFile = onOpenFile,
+                onMessageDiff = onMessageDiff,
             )
         }
     }
@@ -438,6 +440,7 @@ private fun MessageList(
     messages: List<MessageData>,
     models: List<ModelOption>,
     onOpenFile: (String) -> Unit,
+    onMessageDiff: (String) -> Unit,
 ) {
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size, messages.lastOrNull()?.parts?.size) {
@@ -453,7 +456,7 @@ private fun MessageList(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(messages, key = { it.info.id }) { message ->
-                MessageRow(message = message, models = models, onOpenFile = onOpenFile)
+                MessageRow(message = message, models = models, onOpenFile = onOpenFile, onMessageDiff = onMessageDiff)
             }
         }
     }
@@ -470,6 +473,7 @@ private fun MessageRow(
     message: MessageData,
     models: List<ModelOption>,
     onOpenFile: (String) -> Unit,
+    onMessageDiff: (String) -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
@@ -485,9 +489,9 @@ private fun MessageRow(
     val isUser = message.info.role == "user"
     if (isUser) {
         val text = message.parts.joinToString("\n") { it.text }
-        Row(
+        Column(
             Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = ::copy),
-            horizontalArrangement = Arrangement.End,
+            horizontalAlignment = Alignment.End,
         ) {
             Surface(
                 shape = RoundedCornerShape(14.dp),
@@ -496,6 +500,12 @@ private fun MessageRow(
             ) {
                 MarkdownText(markdown = text.ifEmpty { "…" }, modifier = Modifier.padding(12.dp), bodySize = 15.sp)
             }
+            Text(
+                "± diff",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 2.dp).clickable { onMessageDiff(message.info.id) },
+            )
         }
     } else {
         Column(

@@ -57,6 +57,7 @@ class DiffViewModel(
     app: OpenCodeApp,
     private val server: ServerConfig,
     private val sessionId: String,
+    private val messageId: String?,
     private val projectDir: () -> String?,
 ) : ViewModel() {
 
@@ -79,7 +80,7 @@ class DiffViewModel(
         viewModelScope.launch {
             _ui.value = _ui.value.copy(loading = true, error = null)
             try {
-                val diffs = api.sessionDiff(sessionId, directory = projectDir())
+                val diffs = api.sessionDiff(sessionId, messageId = messageId, directory = projectDir())
                 _ui.value = _ui.value.copy(diffs = diffs, loading = false)
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(loading = false, error = e.message ?: "Failed to load diff")
@@ -94,6 +95,7 @@ fun DiffScreen(
     appVm: AppViewModel,
     serverId: String,
     sessionId: String,
+    messageId: String?,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -107,9 +109,11 @@ fun DiffScreen(
     }
 
     val vm: DiffViewModel = viewModel(
-        key = "diff_${serverId}_$sessionId",
+        key = "diff_${serverId}_${sessionId}_${messageId ?: "all"}",
         factory = viewModelFactory {
-            initializer { DiffViewModel(app, server, sessionId, projectDir = { appVm.currentDirectory.value }) }
+            initializer {
+                DiffViewModel(app, server, sessionId, messageId, projectDir = { appVm.currentDirectory.value })
+            }
         },
     )
     val ui by vm.ui.collectAsState()
@@ -117,7 +121,7 @@ fun DiffScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Changes") },
+                title = { Text(if (messageId != null) "Changes · this message" else "Changes") },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
