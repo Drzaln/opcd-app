@@ -9,16 +9,13 @@ import dev.opencode.mobile.OpenCodeApp
 import dev.opencode.mobile.data.model.Agent
 import dev.opencode.mobile.data.model.Command
 import dev.opencode.mobile.data.model.CommandBody
+import dev.opencode.mobile.data.model.ForkBody
 import dev.opencode.mobile.data.model.Message
 import dev.opencode.mobile.data.model.MessageData
 import dev.opencode.mobile.data.model.ModelRef
 import dev.opencode.mobile.data.model.Part
 import dev.opencode.mobile.data.model.PartInput
-import dev.opencode.mobile.data.model.PermissionReplyBody
-import dev.opencode.mobile.data.model.PermissionReplyV2Body
-import dev.opencode.mobile.data.model.PermissionRequest
-import dev.opencode.mobile.data.model.QuestionReplyBody
-import dev.opencode.mobile.data.model.QuestionRequest
+import dev.opencode.mobile.data.model.RevertBody
 import dev.opencode.mobile.data.model.SendMessageBody
 import dev.opencode.mobile.data.model.Session
 import dev.opencode.mobile.data.model.SessionStatus
@@ -30,6 +27,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -78,8 +77,6 @@ class ChatViewModel(
         val loading: Boolean = true,
         val loadingOlder: Boolean = false,
         val hasMore: Boolean = false,
-        val permissions: List<PermissionRequest> = emptyList(),
-        val questions: List<QuestionRequest> = emptyList(),
         val error: String? = null,
         val sending: Boolean = false,
     ) {
@@ -100,6 +97,8 @@ class ChatViewModel(
 
     private var refreshJob: Job? = null
     private var nextCursor: String? = null
+    @Volatile private var lastEventAt = 0L
+    @Volatile private var lastRefreshAt = 0L
 
     init {
         loadCached()
@@ -213,50 +212,6 @@ class ChatViewModel(
         )
     }
 
-    fun respondPermission(request: PermissionRequest, response: String) {
-        viewModelScope.launch {
-            _ui.update { state -> state.copy(permissions = state.permissions.filterNot { it.id == request.id }) }
-            val ok = runCatching { replyPermission(request, response) }.getOrDefault(false)
-            if (!ok) {
-                _ui.update { it.copy(error = "Failed to reply to permission request", permissions = it.permissions + request) }
-            }
-        }
-    }
-
-    private suspend fun replyPermission(request: PermissionRequest, response: String): Boolean {
-        val legacy = runCatching {
-            api.replyPermission(request.sessionID, request.id, PermissionReplyBody(response), projectDir())
-        }.getOrNull()
-        if (legacy?.isSuccessful == true) return true
-        // Newer servers replaced this with /permission/{id}/reply.
-        val current = runCatching {
-            api.replyPermissionV2(request.id, PermissionReplyV2Body(response), projectDir())
-        }.getOrNull()
-        return current?.isSuccessful == true
-    }
-
-    fun answerQuestion(request: QuestionRequest, answers: List<List<String>>) {
-        viewModelScope.launch {
-            _ui.update { state -> state.copy(questions = state.questions.filterNot { it.id == request.id }) }
-            val ok = runCatching {
-                api.replyQuestion(request.id, QuestionReplyBody(answers), projectDir()).isSuccessful
-            }.getOrDefault(false)
-            if (!ok) {
-                _ui.update { it.copy(error = "Failed to send answer", questions = it.questions + request) }
-            }
-        }
-    }
-
-    fun rejectQuestion(request: QuestionRequest) {
-        viewModelScope.launch {
-            _ui.update { state -> state.copy(questions = state.questions.filterNot { it.id == request.id }) }
-            val ok = runCatching { api.rejectQuestion(request.id, projectDir()).isSuccessful }.getOrDefault(false)
-            if (!ok) {
-                _ui.update { it.copy(error = "Failed to dismiss question", questions = it.questions + request) }
-            }
-        }
-    }
-
     fun loadOlder() {
         val cursor = nextCursor ?: return
         if (_ui.value.loadingOlder) return
@@ -354,6 +309,38 @@ class ChatViewModel(
         refreshAll()
     }
 
+    fun deleteMessage(messageId: String) {
+        viewModelScope.launch {
+            runCatching { api.deleteMessage(sessionId, messageId, projectDir()) }
+            refreshAll()
+        }
+    }
+
+    fun revertTo(messageId: String) {
+        viewModelScope.launch {
+            runCatching { api.revertSession(sessionId, RevertBody(messageId), projectDir()) }
+            refreshAll()
+        }
+    }
+
+    fun unrevert() {
+        viewModelScope.launch {
+            runCatching { api.unrevertSession(sessionId, projectDir()) }
+            refreshAll()
+        }
+    }
+
+    fun forkFrom(messageId: String?, onForked: (String) -> Unit) {
+        viewModelScope.launch {
+            val forked = runCatching { api.forkSession(sessionId, ForkBody(messageId), projectDir()) }.getOrNull()
+            if (forked == null) {
+                _ui.update { it.copy(error = "Fork failed") }
+            } else {
+                onForked(forked.id)
+            }
+        }
+    }
+
     fun refresh() {
         refreshAll()
     }
@@ -364,24 +351,28 @@ class ChatViewModel(
 
     private fun startEvents(app: OpenCodeApp) {
         viewModelScope.launch {
-            app.repository.events(server, projectDir()).collect { event ->
-                when (event.type) {
-                    "message.part.updated" -> applyPartUpdated(event)
-                    "message.updated" -> applyMessageUpdated(event)
-                    "message.part.removed" -> applyPartRemoved(event)
-                    "message.removed" -> applyMessageRemoved(event)
-                    "session.status" -> applyStatus(event)
-                    "session.idle" -> _ui.update { it.copy(status = SessionStatus(type = "idle"), queued = 0) }
-                    "todo.updated" -> applyTodos(event)
-                    "permission.updated", "permission.asked" -> applyPermissionAsked(event)
-                    "permission.replied" -> applyPermissionReplied(event)
-                    "question.asked", "question.v2.asked" -> applyQuestionAsked(event)
-                    "question.replied", "question.v2.replied", "question.rejected", "question.v2.rejected" ->
-                        applyQuestionResolved(event)
-                    "server.connected" -> scheduleFullRefresh()
-                    "session.updated", "session.diff", "session.compacted" -> scheduleFullRefresh()
+            // Resubscribe when the project folder changes: the SSE stream is scoped by directory,
+            // so capturing it once (possibly before it loads) would silently miss every event.
+            app.serverStore.currentDirectory
+                .distinctUntilChanged()
+                .collectLatest { dir ->
+                    app.repository.events(server, dir).collect { event ->
+                        // Heartbeats alone must not suppress polling — only chat-relevant traffic proves
+                        // this stream is actually delivering for our instance.
+                        if (event.type != "server.heartbeat") lastEventAt = System.currentTimeMillis()
+                        when (event.type) {
+                            "message.part.updated" -> applyPartUpdated(event)
+                            "message.updated" -> applyMessageUpdated(event)
+                            "message.part.removed" -> applyPartRemoved(event)
+                            "message.removed" -> applyMessageRemoved(event)
+                            "session.status" -> applyStatus(event)
+                            "session.idle" -> _ui.update { it.copy(status = SessionStatus(type = "idle"), queued = 0) }
+                            "todo.updated" -> applyTodos(event)
+                            "server.connected" -> scheduleFullRefresh()
+                            "session.updated", "session.diff", "session.compacted" -> scheduleFullRefresh()
+                        }
+                    }
                 }
-            }
         }
     }
 
@@ -461,38 +452,6 @@ class ChatViewModel(
         _ui.update { it.copy(todos = todos) }
     }
 
-    private fun applyPermissionAsked(event: OcEvent) {
-        val properties = event.data as? JsonObject ?: return
-        val request = runCatching { json.decodeFromJsonElement<PermissionRequest>(properties) }.getOrNull() ?: return
-        if (request.id.isEmpty() || request.sessionID != sessionId) return
-        if (_ui.value.permissions.any { it.id == request.id }) return
-        _ui.update { it.copy(permissions = it.permissions + request) }
-    }
-
-    private fun applyPermissionReplied(event: OcEvent) {
-        val properties = event.data as? JsonObject ?: return
-        val id = properties["requestID"]?.jsonPrimitive?.contentOrNull
-            ?: properties["permissionID"]?.jsonPrimitive?.contentOrNull
-        _ui.update { state ->
-            if (id == null) state.copy(permissions = emptyList())
-            else state.copy(permissions = state.permissions.filterNot { it.id == id })
-        }
-    }
-
-    private fun applyQuestionAsked(event: OcEvent) {
-        val properties = event.data as? JsonObject ?: return
-        val request = runCatching { json.decodeFromJsonElement<QuestionRequest>(properties) }.getOrNull() ?: return
-        if (request.id.isEmpty() || request.sessionID != sessionId) return
-        if (_ui.value.questions.any { it.id == request.id }) return
-        _ui.update { it.copy(questions = it.questions + request) }
-    }
-
-    private fun applyQuestionResolved(event: OcEvent) {
-        val properties = event.data as? JsonObject ?: return
-        val id = properties["requestID"]?.jsonPrimitive?.contentOrNull ?: return
-        _ui.update { state -> state.copy(questions = state.questions.filterNot { it.id == id }) }
-    }
-
     private fun scheduleFullRefresh() {
         refreshJob?.cancel()
         refreshJob = viewModelScope.launch {
@@ -512,13 +471,25 @@ class ChatViewModel(
                     else -> 60_000L
                 }
                 delay(interval)
+                // The SSE stream (including server.heartbeat) already keeps us live — skip the
+                // network round-trip while it is healthy. Resume polling after a heartbeat gap.
+                if (sseLive()) continue
                 refreshAll()
             }
         }
     }
 
+    private fun sseLive(): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - lastEventAt > SSE_TIMEOUT_MS) return false
+        // Safety net: reconcile once every few minutes even while connected.
+        if (now - lastRefreshAt > 5 * 60_000L) return false
+        return true
+    }
+
     private fun refreshAll() {
         viewModelScope.launch {
+            lastRefreshAt = System.currentTimeMillis()
             try {
                 val status = runCatching { api.sessionStatus(projectDir())[sessionId] }.getOrNull()
                 val session = runCatching { api.session(sessionId, projectDir()) }.getOrNull()
@@ -530,10 +501,6 @@ class ChatViewModel(
                 val cursor = page.headers()["X-Next-Cursor"]
                 if (nextCursor == null) nextCursor = cursor
                 val todos = runCatching { api.todos(sessionId, projectDir()) }.getOrNull()
-                val permissions = runCatching { api.pendingPermissions(projectDir()) }.getOrNull()
-                    ?.filter { it.sessionID == sessionId }
-                val questions = runCatching { api.pendingQuestions(projectDir()) }.getOrNull()
-                    ?.filter { it.sessionID == sessionId }
                 runCatching { app.cacheStore.put(messagesKey, json.encodeToString(messages)) }
                 // Preserve existing error so the banner stays visible until dismissed or a send succeeds.
                 _ui.value = _ui.value.copy(
@@ -541,8 +508,6 @@ class ChatViewModel(
                     session = session,
                     status = status,
                     todos = todos ?: _ui.value.todos,
-                    permissions = permissions ?: _ui.value.permissions,
-                    questions = questions ?: _ui.value.questions,
                     hasMore = nextCursor != null,
                     loading = false,
                 )
@@ -564,5 +529,6 @@ class ChatViewModel(
     companion object {
         private const val PAGE_SIZE = 50
         private const val MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024
+        private const val SSE_TIMEOUT_MS = 45_000L
     }
 }

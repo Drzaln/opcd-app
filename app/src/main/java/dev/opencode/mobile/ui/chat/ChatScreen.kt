@@ -39,17 +39,16 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material3.Checkbox
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -59,11 +58,12 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -93,8 +93,6 @@ import dev.opencode.mobile.data.model.Agent
 import dev.opencode.mobile.data.model.Command
 import dev.opencode.mobile.data.model.MessageData
 import dev.opencode.mobile.data.model.Part
-import dev.opencode.mobile.data.model.PermissionRequest
-import dev.opencode.mobile.data.model.QuestionRequest
 import dev.opencode.mobile.data.model.Todo
 import dev.opencode.mobile.ui.common.JsonUtil
 import dev.opencode.mobile.ui.common.MarkdownText
@@ -108,6 +106,7 @@ import dev.opencode.mobile.ui.theme.SurfaceVariant
 import dev.opencode.mobile.ui.theme.TextSecondary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -120,6 +119,7 @@ fun ChatScreen(
     onDiff: () -> Unit,
     onMessageDiff: (String) -> Unit,
     onOpenFile: (String) -> Unit,
+    onOpenSession: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as OpenCodeApp
@@ -214,6 +214,9 @@ fun ChatScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
                 actions = {
+                    if (ui.session?.revert != null) {
+                        TextButton(onClick = { vm.unrevert() }) { Text("Undo revert") }
+                    }
                     if (ui.busy) {
                         IconButton(onClick = { vm.abort() }) {
                             Icon(Icons.Filled.Block, contentDescription = "Abort", tint = Red)
@@ -265,166 +268,17 @@ fun ChatScreen(
             MessageList(
                 messages = ui.messages,
                 models = ui.models,
+                busy = ui.busy,
                 loadingOlder = ui.loadingOlder,
                 hasMore = ui.hasMore,
                 onLoadOlder = { vm.loadOlder() },
                 onRefresh = { vm.refresh() },
                 onOpenFile = onOpenFile,
                 onMessageDiff = onMessageDiff,
+                onFork = { messageId -> vm.forkFrom(messageId, onOpenSession) },
+                onRevert = { messageId -> vm.revertTo(messageId) },
+                onDelete = { messageId -> vm.deleteMessage(messageId) },
             )
-        }
-    }
-
-    ui.permissions.firstOrNull()?.let { permission ->
-        PermissionSheet(
-            request = permission,
-            pending = ui.permissions.size,
-            onRespond = { response -> vm.respondPermission(permission, response) },
-        )
-    }
-
-    ui.questions.firstOrNull()?.let { question ->
-        QuestionSheet(
-            request = question,
-            pending = ui.questions.size,
-            onSubmit = { answers -> vm.answerQuestion(question, answers) },
-            onDismiss = { vm.rejectQuestion(question) },
-        )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun QuestionSheet(
-    request: QuestionRequest,
-    pending: Int,
-    onSubmit: (List<List<String>>) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val selections = remember(request.id) { mutableStateListOf(*Array(request.questions.size) { emptySet<String>() }) }
-    val customs = remember(request.id) { mutableStateListOf(*Array(request.questions.size) { "" }) }
-    val answers = request.questions.indices.map { i ->
-        val chosen = selections[i].toMutableSet()
-        if (request.questions[i].custom && customs[i].isNotBlank()) chosen.add(customs[i].trim())
-        chosen.toList()
-    }
-    val canSubmit = answers.isNotEmpty() && answers.all { it.isNotEmpty() }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Question from opencode", style = MaterialTheme.typography.titleMedium)
-                if (pending > 1) {
-                    Spacer(Modifier.width(8.dp))
-                    MutedLabel("+${pending - 1} more")
-                }
-            }
-            for ((i, q) in request.questions.withIndex()) {
-                Spacer(Modifier.height(12.dp))
-                if (q.header.isNotBlank()) {
-                    Text(q.header, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                }
-                Text(q.question, style = MaterialTheme.typography.bodyMedium)
-                if (q.multiple) {
-                    MutedLabel("select one or more", modifier = Modifier.padding(top = 2.dp))
-                }
-                for (option in q.options) {
-                    val selected = option.label in selections[i]
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                val current = selections[i]
-                                selections[i] = if (q.multiple) {
-                                    if (selected) current - option.label else current + option.label
-                                } else {
-                                    setOf(option.label)
-                                }
-                            }
-                            .padding(top = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (q.multiple) {
-                            Checkbox(checked = selected, onCheckedChange = null)
-                        } else {
-                            RadioButton(selected = selected, onClick = null)
-                        }
-                        Spacer(Modifier.width(4.dp))
-                        Column {
-                            Text(option.label, style = MaterialTheme.typography.bodyMedium)
-                            if (option.description.isNotBlank()) {
-                                Text(option.description, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                            }
-                        }
-                    }
-                }
-                if (q.custom) {
-                    OutlinedTextField(
-                        value = customs[i],
-                        onValueChange = { customs[i] = it },
-                        placeholder = { Text("Or type your own") },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        maxLines = 3,
-                    )
-                }
-            }
-            Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onDismiss) { Text("Dismiss", color = Red) }
-                TextButton(onClick = { onSubmit(answers) }, enabled = canSubmit) { Text("Submit") }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun PermissionSheet(
-    request: PermissionRequest,
-    pending: Int,
-    onRespond: (String) -> Unit,
-) {
-    ModalBottomSheet(onDismissRequest = {}) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Permission requested", style = MaterialTheme.typography.titleMedium)
-                if (pending > 1) {
-                    Spacer(Modifier.width(8.dp))
-                    MutedLabel("+${pending - 1} more")
-                }
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(request.label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-            val command = request.metadata?.get("command")?.toString()?.trim('"')
-            if (!command.isNullOrBlank()) {
-                Text(
-                    command,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    color = TextSecondary,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
-            val detail = request.patterns
-            if (detail.isNotEmpty()) {
-                Text(
-                    detail.joinToString(", ").take(400),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { onRespond("once") }) { Text("Allow once") }
-                TextButton(onClick = { onRespond("always") }) { Text("Always allow") }
-                TextButton(onClick = { onRespond("reject") }) { Text("Deny", color = Red) }
-            }
         }
     }
 }
@@ -696,15 +550,26 @@ private fun TodosPanel(todos: List<Todo>) {
 private fun MessageList(
     messages: List<MessageData>,
     models: List<ModelOption>,
+    busy: Boolean,
     loadingOlder: Boolean,
     hasMore: Boolean,
     onLoadOlder: () -> Unit,
     onRefresh: () -> Unit,
     onOpenFile: (String) -> Unit,
     onMessageDiff: (String) -> Unit,
+    onFork: (String) -> Unit,
+    onRevert: (String) -> Unit,
+    onDelete: (String) -> Unit,
 ) {
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     var refreshing by remember { mutableStateOf(false) }
+    val atBottom by remember {
+        derivedStateOf {
+            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            last >= listState.layoutInfo.totalItemsCount - 1
+        }
+    }
     // Only follow new messages appended at the end; loading older ones must not yank the viewport.
     LaunchedEffect(messages.lastOrNull()?.info?.id, messages.lastOrNull()?.parts?.size) {
         if (messages.isNotEmpty()) {
@@ -717,39 +582,67 @@ private fun MessageList(
             .distinctUntilChanged()
             .collect { if (it <= 1) onLoadOlder() }
     }
-    PullToRefreshBox(
-        isRefreshing = refreshing,
-        onRefresh = {
-            refreshing = true
-            onRefresh()
-        },
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        SelectionContainer {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                if (hasMore || loadingOlder) {
-                    item(key = "load-older") {
-                        Row(
-                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (loadingOlder) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            } else {
-                                TextButton(onClick = onLoadOlder) { Text("Load older messages") }
+    Box(Modifier.fillMaxSize()) {
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = {
+                refreshing = true
+                onRefresh()
+            },
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            SelectionContainer {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (hasMore || loadingOlder) {
+                        item(key = "load-older") {
+                            Row(
+                                Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (loadingOlder) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                } else {
+                                    TextButton(onClick = onLoadOlder) { Text("Load older messages") }
+                                }
+                            }
+                        }
+                    }
+                    items(messages, key = { it.info.id }) { message ->
+                        MessageRow(
+                            message = message,
+                            models = models,
+                            onOpenFile = onOpenFile,
+                            onMessageDiff = onMessageDiff,
+                            onFork = { onFork(message.info.id) },
+                            onRevert = { onRevert(message.info.id) },
+                            onDelete = { onDelete(message.info.id) },
+                        )
+                    }
+                    if (busy) {
+                        item(key = "streaming") {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp))
+                                Text("opencode is working…", color = TextSecondary, style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }
                 }
-                items(messages, key = { it.info.id }) { message ->
-                    MessageRow(message = message, models = models, onOpenFile = onOpenFile, onMessageDiff = onMessageDiff)
-                }
+            }
+        }
+        if (!atBottom && messages.isNotEmpty()) {
+            FloatingActionButton(
+                onClick = { scope.launch { listState.animateScrollToItem(messages.lastIndex) } },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+            ) {
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Scroll to bottom")
             }
         }
     }
@@ -769,10 +662,14 @@ private fun MessageRow(
     models: List<ModelOption>,
     onOpenFile: (String) -> Unit,
     onMessageDiff: (String) -> Unit,
+    onFork: () -> Unit,
+    onRevert: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     val fullText = message.parts.joinToString("\n") { it.text }.trim()
+    var menu by remember { mutableStateOf(false) }
 
     fun copy() {
         if (fullText.isNotBlank()) {
@@ -782,10 +679,11 @@ private fun MessageRow(
     }
 
     val isUser = message.info.role == "user"
+    Box(Modifier.fillMaxWidth()) {
     if (isUser) {
         val text = message.parts.joinToString("\n") { it.text }
         Column(
-            Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = ::copy),
+            Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = { menu = true }),
             horizontalAlignment = Alignment.End,
         ) {
             Surface(
@@ -804,7 +702,7 @@ private fun MessageRow(
         }
     } else {
         Column(
-            Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = ::copy),
+            Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = { menu = true }),
         ) {
             if (message.info.error != null) {
                 Surface(color = RedBg, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
@@ -856,6 +754,22 @@ private fun MessageRow(
                 MutedLabel(bits.joinToString(" · "), modifier = Modifier.padding(top = 2.dp))
             }
         }
+    }
+    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+        DropdownMenuItem(text = { Text("Copy") }, onClick = { menu = false; copy() })
+        if (isUser) {
+            DropdownMenuItem(text = { Text("Fork from here") }, onClick = { menu = false; onFork() })
+            DropdownMenuItem(text = { Text("Revert to here") }, onClick = { menu = false; onRevert() })
+            DropdownMenuItem(
+                text = { Text("± Diff this message") },
+                onClick = { menu = false; onMessageDiff(message.info.id) },
+            )
+        }
+        DropdownMenuItem(
+            text = { Text("Delete message", color = Red) },
+            onClick = { menu = false; onDelete() },
+        )
+    }
     }
 }
 

@@ -148,6 +148,27 @@ data class SessionSummary(
 )
 
 @Serializable
+data class SessionShare(
+    val url: String = "",
+)
+
+@Serializable
+data class SessionRevert(
+    val messageID: String = "",
+    val partID: String? = null,
+)
+
+@Serializable
+data class ForkBody(
+    val messageID: String? = null,
+)
+
+@Serializable
+data class RevertBody(
+    val messageID: String,
+)
+
+@Serializable
 data class Session(
     val id: String = "",
     val projectID: String = "",
@@ -157,7 +178,8 @@ data class Session(
     val title: String = "",
     val version: String = "",
     val time: SessionTime? = null,
-    val share: JsonObject? = null,
+    val share: SessionShare? = null,
+    val revert: SessionRevert? = null,
     val cost: Double? = null,
     val tokens: Tokens? = null,
 )

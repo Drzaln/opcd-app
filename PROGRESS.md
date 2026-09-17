@@ -1,4 +1,4 @@
-<!-- ship: v0.1.17 (versionCode 18) -->
+<!-- ship: v0.1.18 (versionCode 19) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -72,6 +72,13 @@ after updating this file.
     (one string-array per question, in order). Dismiss: `POST /question/{id}/reject` (no body).
     Events `question.replied` / `question.rejected` carry `requestID`. (Perms and questions are
     separate blocking prompts — the app renders whichever arrives first.)
+13. **Session actions:** `POST /session/{id}/fork` `{messageID?}` → new `Session`;
+    `POST /session/{id}/revert` `{messageID}` and `POST /session/{id}/unrevert` → `Session`
+    (a non-null `session.revert` means a revert is staged); `DELETE /session/{id}/message/{messageID}`.
+    Share: `POST/DELETE /session/{id}/share` → `Session.share = {url}` (host `opncd.ai`).
+    **Quirk:** on 1.18.31 `unshare` returns 200 but `session.share` stays populated — mask it locally.
+14. **Battery:** polling is skipped while the SSE stream is live (any event, incl. `server.heartbeat`,
+    within 45 s), with a 5-minute safety reconcile. Sessions/files screens are on-demand only.
 
 ## Features done
 
@@ -83,7 +90,11 @@ notifications (foreground service toggle) · mDNS scan + Tailscale remote field 
 message pagination (load-older on scroll + pull-to-refresh) · in-app permission prompts
 (Allow once / Always / Deny) · image + file attachments from the phone (rendered inline) ·
 agent questions in-app (single/multi-select + custom text, answer or dismiss) ·
-in-app update check (launch-time prompt → download → install APK).
+in-app update check (launch-time prompt → download → install APK) · session actions (fork / revert /
+unrevert / delete message, from long-press menus) · share/unshare session links · sessions search +
+server switcher · clickable links in chat · file viewer line numbers + jump-to-line + per-line
+LazyColumn virtualization · code blocks with copy button · sticky diff headers · scroll-to-bottom FAB ·
+relative timestamps · empty states · SSE-liveness battery saving.
 
 ## Gotchas
 
@@ -96,6 +107,13 @@ in-app update check (launch-time prompt → download → install APK).
   (uninstall once to switch).
 - Chat input bar: targetSdk 36 forces edge-to-edge → `imePadding()` on the Scaffold, else keyboard
   hides the input.
+- **Blocking prompts (permission + question) are app-wide**, owned by `AppViewModel.prompts` and
+  rendered in `MainActivity` — NOT inside `ChatScreen`. They must show on any screen (and when the
+  server is the TUI on another port). Two traps that caused "no sheet ever appears":
+  (1) the SSE stream is directory-scoped, so subscribing with a `projectDir()` captured at VM init
+  (often still `null`) silently misses every event — always resubscribe on `currentDirectory` change
+  (`collectLatest`); (2) `server.heartbeat` arrives even when the stream is NOT delivering for the
+  selected instance, so heartbeats must not count as liveness or the poll fallback is suppressed.
 - mDNS resolves the **LAN IP**, not Tailscale; use the "Tailscale (remote)" field (`100.x.y.z` or
   `<mac>.ts.net`, https if `.ts.net`).
 - **Update check avoids the GitHub REST API** (rate limit): `GET /releases/latest` 302-redirects to
@@ -109,11 +127,11 @@ in-app update check (launch-time prompt → download → install APK).
 
 ## Open / next ideas
 
-- Share-session links, LazyColumn line virtualization for very large files, WorkManager
-  notification fallback (FGS has a 6h/day limit on Android 15+), incremental refresh for
-  `session.something` events (currently full refetch), image thumbnails/compression before
-  upload, decode remote `http(s)` image parts (currently only `data:` URLs render inline),
-  update check only over Wi-Fi + a manual "Check for updates" button.
+- LazyColumn virtualization for very large diffs, WorkManager notification fallback (FGS has a
+  6h/day limit on Android 15+), incremental refresh for `session.something` events (currently full
+  refetch), image thumbnails/compression before upload, decode remote `http(s)` image parts
+  (currently only `data:` URLs render inline), update check only over Wi-Fi + a manual "Check for
+  updates" button, theme/typography pass + light theme (ticket `024`).
 
 ## Verification
 

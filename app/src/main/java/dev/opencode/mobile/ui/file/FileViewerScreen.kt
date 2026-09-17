@@ -88,6 +88,7 @@ fun FileViewerScreen(
     appVm: AppViewModel,
     serverId: String,
     path: String,
+    line: Int?,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -138,44 +139,69 @@ fun FileViewerScreen(
                     )
                 } else {
                     val code = content.content
-                    val lineCount = code.count { it == '\n' } + 1
+                    val lines = remember(code) { code.split('\n') }
+                    val lineCount = lines.size
+                    val language = languageForPath(path)
                     Row(
                         Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     ) {
                         Text(
-                            languageForPath(path) ?: "plain",
+                            language ?: "plain",
                             color = MaterialTheme.colorScheme.primary,
                             style = MaterialTheme.typography.labelSmall,
                         )
                         Spacer(Modifier.width(12.dp))
                         Text("$lineCount lines", color = TextSecondary, style = MaterialTheme.typography.labelSmall)
                     }
-                    val highlighted = remember(path, code) { CodeHighlighter.highlight(code, languageForPath(path)) }
-                    val maxLines = 5000
-                    val display = if (lineCount > maxLines) {
-                        code.lines().take(maxLines).joinToString("\n") + "\n… (truncated, ${lineCount - maxLines} more lines)"
-                    } else {
-                        code
+                    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+                    val codeScroll = rememberScrollState()
+                    LaunchedEffect(code, line, lineCount) {
+                        val target = (line ?: return@LaunchedEffect) - 1
+                        if (target in 0 until lineCount) listState.scrollToItem(target)
                     }
-                    androidx.compose.foundation.layout.Box(
-                        Modifier
+                    androidx.compose.foundation.lazy.LazyColumn(
+                        state = listState,
+                        modifier = Modifier
                             .fillMaxSize()
-                            .background(SurfaceVariant)
-                            .horizontalScroll(rememberScrollState())
-                            .verticalScroll(rememberScrollState()),
+                            .background(SurfaceVariant),
                     ) {
-                        Text(
-                            text = if (lineCount > maxLines) {
-                                CodeHighlighter.highlight(display, languageForPath(path))
-                            } else {
-                                highlighted
-                            },
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 13.sp,
-                            lineHeight = 19.sp,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(12.dp),
-                        )
+                        items(
+                            count = lineCount,
+                            key = { it },
+                        ) { index ->
+                            val isTarget = line != null && index == line - 1
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        if (isTarget) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                        else androidx.compose.ui.graphics.Color.Transparent,
+                                    )
+                                    .padding(vertical = 1.dp),
+                            ) {
+                                Text(
+                                    "${index + 1}",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    lineHeight = 19.sp,
+                                    color = TextSecondary,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                                    modifier = Modifier.width(52.dp).padding(end = 10.dp),
+                                )
+                                val highlighted = remember(language, lines[index]) {
+                                    CodeHighlighter.highlight(lines[index], language)
+                                }
+                                Text(
+                                    text = highlighted,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 13.sp,
+                                    lineHeight = 19.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    softWrap = false,
+                                    modifier = Modifier.horizontalScroll(codeScroll, enabled = true).padding(end = 16.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }

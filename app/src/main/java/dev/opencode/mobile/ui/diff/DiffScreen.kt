@@ -151,7 +151,7 @@ fun DiffScreen(
                 verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
                 for ((diff, lines) in computed) {
-                    item(key = "header_${diff.file}") {
+                    stickyHeader(key = "header_${diff.file}") {
                         DiffHeader(diff)
                     }
                     items(lines, key = { "${diff.file}_${it.hashCode()}" }) { line ->

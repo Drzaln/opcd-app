@@ -19,8 +19,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -85,12 +88,22 @@ class SessionsViewModel(
         val loading: Boolean = true,
         val error: String? = null,
         val creating: Boolean = false,
-    )
+        val query: String = "",
+        val shareUrl: String? = null,
+    ) {
+        val visibleSessions: List<Session>
+            get() = if (query.isBlank()) sessions else sessions.filter { session ->
+                session.title.contains(query, ignoreCase = true) ||
+                    session.directory.contains(query, ignoreCase = true) ||
+                    session.id.contains(query, ignoreCase = true)
+            }
+    }
 
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui
 
     private val api = app.repository.apiFor(server)
+    private val unshared = mutableSetOf<String>()
 
     init {
         loadCached()
@@ -117,6 +130,7 @@ class SessionsViewModel(
             try {
                 val sessions = api.sessions(projectDir())
                     .sortedByDescending { it.time?.updated ?: it.time?.created ?: 0L }
+                    .map { if (it.id in unshared) it.copy(share = null) else it }
                 val statuses = runCatching { api.sessionStatus(projectDir()) }.getOrDefault(emptyMap())
                 runCatching { app.cacheStore.put(sessionsKey, jsonCache.encodeToString(sessions)) }
                 _ui.value = _ui.value.copy(sessions = sessions, statuses = statuses, loading = false)
@@ -159,6 +173,53 @@ class SessionsViewModel(
             refresh()
         }
     }
+
+    fun setQuery(query: String) {
+        _ui.value = _ui.value.copy(query = query)
+    }
+
+    fun shareSession(id: String) {
+        viewModelScope.launch {
+            val session = runCatching { api.shareSession(id, projectDir()) }.getOrNull()
+            val url = session?.share?.url
+            if (url.isNullOrBlank()) {
+                _ui.value = _ui.value.copy(error = "Could not create share link")
+            } else {
+                _ui.value = _ui.value.copy(shareUrl = url)
+            }
+            refresh()
+        }
+    }
+
+    fun unshareSession(id: String) {
+        viewModelScope.launch {
+            runCatching { api.unshareSession(id, projectDir()) }
+            // 1.18.31 keeps `session.share` populated after unshare, so mask it locally too.
+            unshared.add(id)
+            refresh()
+        }
+    }
+
+    fun copyShareUrl(session: Session) {
+        val url = session.share?.url
+        if (!url.isNullOrBlank()) _ui.value = _ui.value.copy(shareUrl = url)
+    }
+
+    fun consumeSharedUrl() {
+        _ui.value = _ui.value.copy(shareUrl = null)
+    }
+
+    fun forkSession(id: String, onForked: (String) -> Unit) {
+        viewModelScope.launch {
+            val forked = runCatching { api.forkSession(id, directory = projectDir()) }.getOrNull()
+            if (forked == null) {
+                _ui.value = _ui.value.copy(error = "Fork failed")
+            } else {
+                refresh()
+                onForked(forked.id)
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -197,16 +258,48 @@ fun SessionsScreen(
     var editTarget by remember { mutableStateOf<Session?>(null) }
     var editTitle by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<Session?>(null) }
+    var serverMenu by remember { mutableStateOf(false) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
 
     LaunchedEffect(projectDir) {
         vm.refresh()
         vm.refreshProjects()
     }
 
+    val sharedUrl = ui.shareUrl
+    LaunchedEffect(sharedUrl) {
+        if (!sharedUrl.isNullOrBlank()) {
+            clipboard.setText(androidx.compose.ui.text.AnnotatedString(sharedUrl))
+            android.widget.Toast.makeText(context, "Share link copied", android.widget.Toast.LENGTH_SHORT).show()
+            vm.consumeSharedUrl()
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(server.name) },
+                title = {
+                    Box {
+                        Row(
+                            Modifier.clickable { serverMenu = true },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(server.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                            Icon(Icons.Filled.ArrowDropDown, contentDescription = "Switch server", tint = TextSecondary)
+                        }
+                        DropdownMenu(expanded = serverMenu, onDismissRequest = { serverMenu = false }) {
+                            for (s in servers) {
+                                DropdownMenuItem(
+                                    text = { Text(s.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    onClick = {
+                                        serverMenu = false
+                                        if (s.id != serverId) appVm.setActive(s.id)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
@@ -223,18 +316,48 @@ fun SessionsScreen(
                 directory = projectDir,
                 onChange = { showDirPicker = true },
             )
+            OutlinedTextField(
+                value = ui.query,
+                onValueChange = { vm.setQuery(it) },
+                placeholder = { Text("Filter sessions") },
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (ui.query.isNotEmpty()) {
+                        IconButton(onClick = { vm.setQuery("") }) { Icon(Icons.Filled.Close, contentDescription = "Clear") }
+                    }
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            )
             if (ui.error != null) {
                 Text(ui.error!!, Modifier.padding(16.dp), color = Red)
             }
             if (ui.loading && ui.sessions.isEmpty()) {
                 androidx.compose.material3.CircularProgressIndicator(Modifier.padding(24.dp))
             }
+            val visible = ui.visibleSessions
+            if (!ui.loading && visible.isEmpty()) {
+                Column(
+                    Modifier.fillMaxWidth().padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        if (ui.query.isBlank()) "No sessions in this folder yet" else "No sessions match \"${ui.query}\"",
+                        color = TextSecondary,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (ui.query.isBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = { vm.createSession() }) { Text("New session") }
+                    }
+                }
+            }
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(ui.sessions, key = { it.id }) { session ->
+                items(visible, key = { it.id }) { session ->
                     SessionCard(
                         session = session,
                         status = ui.statuses[session.id],
@@ -242,6 +365,10 @@ fun SessionsScreen(
                         onDiff = { onDiff(session.id) },
                         onRename = { editTarget = session },
                         onDelete = { deleteTarget = session },
+                        onShare = { vm.shareSession(session.id) },
+                        onCopyLink = { vm.copyShareUrl(session) },
+                        onUnshare = { vm.unshareSession(session.id) },
+                        onFork = { vm.forkSession(session.id) { newId -> onChat(newId) } },
                     )
                 }
             }
@@ -396,6 +523,10 @@ private fun SessionCard(
     onDiff: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
+    onShare: () -> Unit,
+    onCopyLink: () -> Unit,
+    onUnshare: () -> Unit,
+    onFork: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     Box {
@@ -412,6 +543,9 @@ private fun SessionCard(
                     maxLines = 2,
                     modifier = Modifier.weight(1f),
                 )
+                if (!session.share?.url.isNullOrBlank()) {
+                    MutedLabel("shared", modifier = Modifier.padding(end = 8.dp))
+                }
                 status?.let {
                     val color = when (it.type) {
                         "busy" -> Orange
@@ -428,7 +562,7 @@ private fun SessionCard(
             }
             MutedLabel(session.directory)
             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                MutedLabel(formatTime(session.time?.updated ?: session.time?.created))
+                MutedLabel(relativeTime(session.time?.updated ?: session.time?.created))
                 Spacer(Modifier.width(12.dp))
                 val summary = session.summary
                 if (summary != null && (summary.additions > 0 || summary.deletions > 0)) {
@@ -456,11 +590,30 @@ private fun SessionCard(
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename() })
+            DropdownMenuItem(text = { Text("Fork session") }, onClick = { menu = false; onFork() })
+            if (session.share?.url.isNullOrBlank()) {
+                DropdownMenuItem(text = { Text("Share link") }, onClick = { menu = false; onShare() })
+            } else {
+                DropdownMenuItem(text = { Text("Copy share link") }, onClick = { menu = false; onCopyLink() })
+                DropdownMenuItem(text = { Text("Unshare") }, onClick = { menu = false; onUnshare() })
+            }
             DropdownMenuItem(
                 text = { Text("Delete", color = Red) },
                 onClick = { menu = false; onDelete() },
             )
         }
+    }
+}
+
+private fun relativeTime(epochMillis: Long?): String {
+    if (epochMillis == null) return ""
+    val diff = System.currentTimeMillis() - epochMillis
+    return when {
+        diff < 60_000 -> "just now"
+        diff < 3_600_000 -> "${diff / 60_000}m ago"
+        diff < 86_400_000 -> "${diff / 3_600_000}h ago"
+        diff < 2_592_000_000 -> "${diff / 86_400_000}d ago"
+        else -> formatTime(epochMillis)
     }
 }
 

@@ -10,11 +10,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -75,6 +79,7 @@ fun MarkdownText(
 ) {
     val blocks = remember(markdown) { parseBlocks(markdown) }
     val codeColor = MaterialTheme.colorScheme.primary
+    val linkColor = MaterialTheme.colorScheme.primary
     Column(modifier = modifier) {
         for (block in blocks) {
             when (block) {
@@ -100,7 +105,7 @@ fun MarkdownText(
                             base
                         }
                         Text(
-                            text = renderInline(content, codeColor),
+                            text = renderInline(content, codeColor, linkColor),
                             style = style,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
                         )
@@ -114,10 +119,11 @@ fun MarkdownText(
 private val inlineRegex = Regex(
     "\\*\\*(.+?)\\*\\*" +            // bold
         "|(?<!\\*)\\*([^*\\s][^*]*?)\\*(?!\\*)" + // italic
-        "|`([^`]+)`",                // inline code
+        "|`([^`]+)`" +               // inline code
+        "|(https?://[^\\s<>()\\[\\]\"']+)", // link
 )
 
-private fun renderInline(line: String, codeColor: Color): AnnotatedString = buildAnnotatedString {
+private fun renderInline(line: String, codeColor: Color, linkColor: Color): AnnotatedString = buildAnnotatedString {
     var cursor = 0
     for (match in inlineRegex.findAll(line)) {
         if (match.range.first > cursor) {
@@ -126,6 +132,7 @@ private fun renderInline(line: String, codeColor: Color): AnnotatedString = buil
         val bold = match.groupValues[1]
         val italic = match.groupValues[2]
         val code = match.groupValues[3]
+        val url = match.groupValues[4]
         when {
             code.isNotEmpty() -> {
                 pushStyle(SpanStyle(fontFamily = FontFamily.Monospace, color = codeColor))
@@ -141,6 +148,17 @@ private fun renderInline(line: String, codeColor: Color): AnnotatedString = buil
                 pushStyle(SpanStyle(fontStyle = FontStyle.Italic))
                 append(italic)
                 pop()
+            }
+            url.isNotEmpty() -> {
+                val clean = url.trimEnd('.', ',', ';', ':', '!', '?')
+                val trailing = url.removePrefix(clean)
+                withLink(
+                    LinkAnnotation.Url(
+                        clean,
+                        TextLinkStyles(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)),
+                    ),
+                ) { append(clean) }
+                if (trailing.isNotEmpty()) append(trailing)
             }
         }
         cursor = match.range.last + 1

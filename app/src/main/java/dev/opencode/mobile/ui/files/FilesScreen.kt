@@ -137,7 +137,7 @@ fun FilesScreen(
     serverId: String,
     dir: String,
     onOpenDir: (String) -> Unit,
-    onOpenFile: (String) -> Unit,
+    onOpenFile: (String, Int?) -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -201,7 +201,7 @@ fun FilesScreen(
                     if (ui.mode == SearchMode.FILES) {
                         items(ui.fileResults, key = { it }) { path ->
                             Row(
-                                Modifier.fillMaxWidth().clickable { onOpenFile(path) }.padding(horizontal = 16.dp, vertical = 12.dp),
+                                Modifier.fillMaxWidth().clickable { onOpenFile(path, null) }.padding(horizontal = 16.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Icon(Icons.Filled.Description, contentDescription = null, tint = TextSecondary)
@@ -212,7 +212,7 @@ fun FilesScreen(
                     } else {
                         items(ui.contentResults, key = { "${it.path.text}:${it.lineNumber}" }) { match ->
                             Row(
-                                Modifier.fillMaxWidth().clickable { onOpenFile(match.path.text) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                                Modifier.fillMaxWidth().clickable { onOpenFile(match.path.text, match.lineNumber) }.padding(horizontal = 16.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.Top,
                             ) {
                                 Icon(Icons.Filled.Description, contentDescription = null, tint = TextSecondary)
@@ -244,7 +244,7 @@ fun FilesScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { if (isDir) onOpenDir(node.path) else onOpenFile(node.path) }
+                                .clickable { if (isDir) onOpenDir(node.path) else onOpenFile(node.path, null) }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {

@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -26,6 +28,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import dev.opencode.mobile.ui.chat.ChatScreen
+import dev.opencode.mobile.ui.common.PermissionSheet
+import dev.opencode.mobile.ui.common.QuestionSheet
 import dev.opencode.mobile.ui.diff.DiffScreen
 import dev.opencode.mobile.ui.file.FileViewerScreen
 import dev.opencode.mobile.ui.files.FilesScreen
@@ -39,13 +43,13 @@ object Routes {
     const val SESSIONS = "sessions/{serverId}"
     const val CHAT = "chat/{serverId}/{sessionId}"
     const val FILES = "files/{serverId}?dir={dir}"
-    const val FILE = "file/{serverId}?path={path}"
+    const val FILE = "file/{serverId}?path={path}&line={line}"
     const val DIFF = "diff/{serverId}/{sessionId}?messageID={messageID}"
 
     fun sessions(serverId: String) = "sessions/$serverId"
     fun chat(serverId: String, sessionId: String) = "chat/$serverId/$sessionId"
     fun files(serverId: String, dir: String) = "files/$serverId?dir=${java.net.URLEncoder.encode(dir, "UTF-8")}"
-    fun file(serverId: String, path: String) = "file/$serverId?path=${java.net.URLEncoder.encode(path, "UTF-8")}"
+    fun file(serverId: String, path: String, line: Int? = null) = "file/$serverId?path=${java.net.URLEncoder.encode(path, "UTF-8")}&line=${line ?: -1}"
     fun diff(serverId: String, sessionId: String, messageId: String? = null) =
         "diff/$serverId/$sessionId?messageID=${messageId ?: ""}"
 }
@@ -74,6 +78,26 @@ class MainActivity : ComponentActivity() {
                             updateDismissed = true
                             appVm.dismissUpdate((update as? UpdateState.Available)?.version)
                         },
+                    )
+                }
+
+                // App-wide blocking prompts (permission + question sheets) so they are never missed.
+                val prompts by appVm.prompts.collectAsState()
+                LaunchedEffect(active?.id, appVm) { appVm.refreshPrompts() }
+                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { appVm.refreshPrompts() }
+                prompts.permissions.firstOrNull()?.let { permission ->
+                    PermissionSheet(
+                        request = permission,
+                        pending = prompts.permissions.size,
+                        onRespond = { response -> appVm.respondPermission(permission, response) },
+                    )
+                }
+                prompts.questions.firstOrNull()?.let { question ->
+                    QuestionSheet(
+                        request = question,
+                        pending = prompts.questions.size,
+                        onSubmit = { answers -> appVm.answerQuestion(question, answers) },
+                        onDismiss = { appVm.rejectQuestion(question) },
                     )
                 }
 
@@ -122,6 +146,12 @@ class MainActivity : ComponentActivity() {
                             onOpenFile = { path ->
                                 navController.navigate(Routes.file(serverId, path))
                             },
+                            onOpenSession = { newSessionId ->
+                                navController.navigate(Routes.chat(serverId, newSessionId)) {
+                                    popUpTo(Routes.chat(serverId, sessionId)) { inclusive = true }
+                                    launchSingleTop = true
+                                }
+                            },
                         )
                     }
                     composable(
@@ -141,7 +171,7 @@ class MainActivity : ComponentActivity() {
                             serverId = serverId,
                             dir = dir,
                             onOpenDir = { d -> navController.navigate(Routes.files(serverId, d)) },
-                            onOpenFile = { path -> navController.navigate(Routes.file(serverId, path)) },
+                            onOpenFile = { path, line -> navController.navigate(Routes.file(serverId, path, line)) },
                             onBack = { navController.popBackStack() },
                         )
                     }
@@ -153,14 +183,20 @@ class MainActivity : ComponentActivity() {
                                 type = androidx.navigation.NavType.StringType
                                 defaultValue = ""
                             },
+                            androidx.navigation.navArgument("line") {
+                                type = androidx.navigation.NavType.IntType
+                                defaultValue = -1
+                            },
                         ),
                     ) { entry ->
                         val serverId = entry.arguments?.getString("serverId") ?: return@composable
                         val path = entry.arguments?.getString("path") ?: ""
+                        val line = entry.arguments?.getInt("line")?.takeIf { it > 0 }
                         FileViewerScreen(
                             appVm = appVm,
                             serverId = serverId,
                             path = path,
+                            line = line,
                             onBack = { navController.popBackStack() },
                         )
                     }

@@ -10,6 +10,7 @@ import dev.opencode.mobile.data.model.FileDiff
 import dev.opencode.mobile.data.model.FileNode
 import dev.opencode.mobile.data.model.FileStatus
 import dev.opencode.mobile.data.model.FindMatch
+import dev.opencode.mobile.data.model.ForkBody
 import dev.opencode.mobile.data.model.Health
 import dev.opencode.mobile.data.model.MessageData
 import dev.opencode.mobile.data.model.PermissionReplyBody
@@ -18,6 +19,7 @@ import dev.opencode.mobile.data.model.PermissionRequest
 import dev.opencode.mobile.data.model.ProviderList
 import dev.opencode.mobile.data.model.QuestionReplyBody
 import dev.opencode.mobile.data.model.QuestionRequest
+import dev.opencode.mobile.data.model.RevertBody
 import dev.opencode.mobile.data.model.SendMessageBody
 import dev.opencode.mobile.data.model.Session
 import dev.opencode.mobile.data.model.SessionStatus
@@ -77,6 +79,45 @@ interface OpenCodeApi {
 
     @GET("session/status")
     suspend fun sessionStatus(@Query("directory") directory: String? = null): Map<String, SessionStatus>
+
+    @POST("session/{id}/fork")
+    suspend fun forkSession(
+        @Path("id") id: String,
+        @Body body: ForkBody = ForkBody(),
+        @Query("directory") directory: String? = null,
+    ): Session
+
+    @POST("session/{id}/revert")
+    suspend fun revertSession(
+        @Path("id") id: String,
+        @Body body: RevertBody,
+        @Query("directory") directory: String? = null,
+    ): Session
+
+    @POST("session/{id}/unrevert")
+    suspend fun unrevertSession(
+        @Path("id") id: String,
+        @Query("directory") directory: String? = null,
+    ): Session
+
+    @POST("session/{id}/share")
+    suspend fun shareSession(
+        @Path("id") id: String,
+        @Query("directory") directory: String? = null,
+    ): Session
+
+    @DELETE("session/{id}/share")
+    suspend fun unshareSession(
+        @Path("id") id: String,
+        @Query("directory") directory: String? = null,
+    ): Session
+
+    @DELETE("session/{id}/message/{messageID}")
+    suspend fun deleteMessage(
+        @Path("id") id: String,
+        @Path("messageID") messageID: String,
+        @Query("directory") directory: String? = null,
+    ): Boolean
 
     @GET("session/{id}/message")
     suspend fun messages(

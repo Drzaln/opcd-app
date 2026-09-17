@@ -2,6 +2,11 @@ package dev.opencode.mobile
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.opencode.mobile.data.model.PermissionReplyBody
+import dev.opencode.mobile.data.model.PermissionReplyV2Body
+import dev.opencode.mobile.data.model.PermissionRequest
+import dev.opencode.mobile.data.model.QuestionReplyBody
+import dev.opencode.mobile.data.model.QuestionRequest
 import dev.opencode.mobile.data.net.NsdDiscovery
 import dev.opencode.mobile.data.net.OpenCodeRepository
 import dev.opencode.mobile.data.net.ServerConfig
@@ -11,10 +16,16 @@ import dev.opencode.mobile.update.Updater
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 
 class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
@@ -34,6 +45,16 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
     private val _currentDirectory = MutableStateFlow<String?>(null)
     val currentDirectory: StateFlow<String?> = _currentDirectory
 
+    data class Prompts(
+        val permissions: List<PermissionRequest> = emptyList(),
+        val questions: List<QuestionRequest> = emptyList(),
+    )
+
+    private val _prompts = MutableStateFlow(Prompts())
+    val prompts: StateFlow<Prompts> = _prompts
+
+    private val promptJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+
     init {
         viewModelScope.launch {
             store.currentDirectory.collect { dir ->
@@ -45,6 +66,7 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
                 dev.opencode.mobile.notify.SessionWatchService.start(app)
             }
         }
+        watchPrompts()
     }
 
     val notificationsEnabled: StateFlow<Boolean> =
@@ -94,6 +116,117 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
         _update.value = UpdateState.Idle
         if (version != null) {
             viewModelScope.launch { store.setSkippedUpdateVersion(version) }
+        }
+    }
+
+    // ---- Blocking prompts (permissions + questions) are app-wide so they are never missed,
+    //      including when the server is the TUI on another port or the app is not in the chat.
+
+    private fun watchPrompts() {
+        viewModelScope.launch {
+            combine(store.activeId, store.servers, store.currentDirectory) { id, list, dir ->
+                Triple(list.firstOrNull { it.id == id }, id, dir)
+            }
+                .distinctUntilChanged()
+                .collectLatest { (server, _, dir) ->
+                    if (server == null) {
+                        _prompts.value = Prompts()
+                        return@collectLatest
+                    }
+                    // Re-fetch on every (re)subscribe so prompts raised while disconnected show up.
+                    refreshPrompts(server, dir)
+                    app.repository.events(server, dir).collect { event -> applyPromptEvent(event) }
+        }
+        watchPrompts()
+    }
+    }
+
+    fun refreshPrompts() {
+        viewModelScope.launch {
+            val server = activeServer.value ?: return@launch
+            refreshPrompts(server, currentDirectory.value)
+        }
+    }
+
+    private suspend fun refreshPrompts(server: ServerConfig, dir: String?) {
+        val api = repository.apiFor(server)
+        val permissions = runCatching { api.pendingPermissions(dir) }.getOrNull()
+        val questions = runCatching { api.pendingQuestions(dir) }.getOrNull()
+        _prompts.update {
+            it.copy(
+                permissions = permissions ?: it.permissions,
+                questions = questions ?: it.questions,
+            )
+        }
+    }
+
+    private fun applyPromptEvent(event: dev.opencode.mobile.data.net.OcEvent) {
+        val properties = event.data as? kotlinx.serialization.json.JsonObject
+        when (event.type) {
+            "permission.updated", "permission.asked" -> {
+                val request = properties?.let {
+                    runCatching { promptJson.decodeFromJsonElement<PermissionRequest>(it) }.getOrNull()
+                } ?: return
+                if (request.id.isEmpty()) return
+                _prompts.update { if (it.permissions.any { p -> p.id == request.id }) it else it.copy(permissions = it.permissions + request) }
+            }
+            "permission.replied" -> {
+                val id = properties?.get("requestID")?.jsonPrimitive?.contentOrNull
+                    ?: properties?.get("permissionID")?.jsonPrimitive?.contentOrNull
+                _prompts.update { p ->
+                    if (id == null) p.copy(permissions = emptyList()) else p.copy(permissions = p.permissions.filterNot { it.id == id })
+                }
+            }
+            "question.asked", "question.v2.asked" -> {
+                val request = properties?.let {
+                    runCatching { promptJson.decodeFromJsonElement<QuestionRequest>(it) }.getOrNull()
+                } ?: return
+                if (request.id.isEmpty()) return
+                _prompts.update { if (it.questions.any { q -> q.id == request.id }) it else it.copy(questions = it.questions + request) }
+            }
+            "question.replied", "question.v2.replied", "question.rejected", "question.v2.rejected" -> {
+                val id = properties?.get("requestID")?.jsonPrimitive?.contentOrNull ?: return
+                _prompts.update { p -> p.copy(questions = p.questions.filterNot { it.id == id }) }
+            }
+        }
+    }
+
+    fun respondPermission(request: PermissionRequest, response: String) {
+        viewModelScope.launch {
+            _prompts.update { p -> p.copy(permissions = p.permissions.filterNot { it.id == request.id }) }
+            val server = activeServer.value ?: return@launch
+            val dir = currentDirectory.value
+            val api = repository.apiFor(server)
+            val legacy = runCatching {
+                api.replyPermission(request.sessionID, request.id, PermissionReplyBody(response), dir)
+            }.getOrNull()
+            val ok = legacy?.isSuccessful == true || runCatching {
+                api.replyPermissionV2(request.id, PermissionReplyV2Body(response), dir).isSuccessful
+            }.getOrDefault(false)
+            if (!ok) _prompts.update { p -> p.copy(permissions = p.permissions + request) }
+        }
+    }
+
+    fun answerQuestion(request: QuestionRequest, answers: List<List<String>>) {
+        viewModelScope.launch {
+            _prompts.update { p -> p.copy(questions = p.questions.filterNot { it.id == request.id }) }
+            val server = activeServer.value ?: return@launch
+            val ok = runCatching {
+                repository.apiFor(server)
+                    .replyQuestion(request.id, QuestionReplyBody(answers), currentDirectory.value)
+                    .isSuccessful
+            }.getOrDefault(false)
+            if (!ok) _prompts.update { p -> p.copy(questions = p.questions + request) }
+        }
+    }
+
+    fun rejectQuestion(request: QuestionRequest) {
+        viewModelScope.launch {
+            _prompts.update { p -> p.copy(questions = p.questions.filterNot { it.id == request.id }) }
+            val server = activeServer.value ?: return@launch
+            runCatching {
+                repository.apiFor(server).rejectQuestion(request.id, currentDirectory.value)
+            }
         }
     }
 
