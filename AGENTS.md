@@ -118,7 +118,8 @@ Single `:app` module. No DI framework.
 
 ## CI
 
-`.github/workflows/build.yml`: `assembleRelease` on push to `main`; tag `v*` → GitHub Release with APK.
+`.github/workflows/build.yml`: runs **only on tag `v*`** (or manual dispatch) — `assembleRelease` +
+GitHub Release with the APK. Plain pushes to `main` do NOT trigger CI.
 Optional real signing via secrets: `ANDROID_SIGNING_KEY_BASE64`, `ANDROID_SIGNING_STORE_PASSWORD`,
 `ANDROID_SIGNING_KEY_ALIAS`, `ANDROID_SIGNING_KEY_PASSWORD`.
 
