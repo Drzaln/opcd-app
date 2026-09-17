@@ -76,6 +76,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.opencode.mobile.AppViewModel
+import dev.opencode.mobile.R
 import dev.opencode.mobile.OpenCodeApp
 import dev.opencode.mobile.data.model.PtyInfo
 import dev.opencode.mobile.terminal.Attr
@@ -243,7 +244,13 @@ private fun TerminalView(vm: TerminalViewModel) {
     val context = LocalContext.current
     val defaultFg = MaterialTheme.colorScheme.onSurface
     val defaultBg = MaterialTheme.colorScheme.surface
-    val mono = remember { TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 16.sp) }
+    val terminalFont = remember {
+        FontFamily(
+            androidx.compose.ui.text.font.Font(R.font.jetbrains_mono_nerd_regular, androidx.compose.ui.text.font.FontWeight.Normal),
+            androidx.compose.ui.text.font.Font(R.font.jetbrains_mono_nerd_bold, androidx.compose.ui.text.font.FontWeight.Bold),
+        )
+    }
+    val mono = remember(terminalFont) { TextStyle(fontFamily = terminalFont, fontSize = 12.sp, lineHeight = 16.sp) }
     val measurer = rememberTextMeasurer()
     val cellWidth = remember(measurer) {
         measurer.measure(AnnotatedString("M"), mono, softWrap = false).size.width

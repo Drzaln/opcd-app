@@ -68,9 +68,16 @@ class TerminalViewModel(
     fun create(command: String? = null) {
         viewModelScope.launch {
             _ui.value = _ui.value.copy(status = "creating…")
+            // Login + interactive shell so the user's dotfiles (prompt, aliases, PATH) load.
+            // No command → the server picks the default ($SHELL) itself.
             val created = runCatching {
                 api.ptyCreate(
-                    PtyCreateBody(command = command, cwd = projectDir(), title = command?.substringAfterLast('/')),
+                    PtyCreateBody(
+                        command = command,
+                        args = if (command == null) null else listOf("-l"),
+                        cwd = projectDir(),
+                        title = command?.substringAfterLast('/')?.ifBlank { null },
+                    ),
                     projectDir(),
                 )
             }.getOrNull()

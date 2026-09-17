@@ -1,4 +1,4 @@
-<!-- ship: v0.1.23 (versionCode 24) -->
+<!-- ship: v0.1.24 (versionCode 25) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -86,6 +86,10 @@ after updating this file.
     Server→client frames are raw UTF-8; one control frame is `0x00` + JSON `{"cursor":N}` (end of
     replay). Client→server frames are UTF-8 input. The emulator lives in `terminal/`
     (`TerminalEmulator` + `OkHttpPtyTransport`); resize goes over REST, not the socket.
+    The grid renders with a bundled **JetBrainsMono Nerd Font Mono**
+    (`res/font/jetbrains_mono_nerd_{regular,bold}.ttf`, OFL-1.1) so zsh/powerline prompt glyphs
+    render instead of tofu; PTYs are created as **login** interactive shells (`-l`, or no command
+    → server default `$SHELL`) so dotfiles/aliases/PATH match the local terminal.
 
 ## Features done
 
