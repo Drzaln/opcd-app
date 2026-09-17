@@ -32,6 +32,7 @@ class ServerStore(private val context: Context) {
     private val selectedAgentKey = stringPreferencesKey("selected_agent")
     private val notifyKey = androidx.datastore.preferences.core.booleanPreferencesKey("notifications_enabled")
     private val directoryKey = stringPreferencesKey("current_directory")
+    private val skippedUpdateKey = stringPreferencesKey("skipped_update_version")
 
     val servers: Flow<List<ServerConfig>> = context.dataStore.data.map { prefs ->
         val raw = prefs[serversKey] ?: "[]"
@@ -51,6 +52,14 @@ class ServerStore(private val context: Context) {
     val notificationsEnabled: Flow<Boolean> = context.dataStore.data.map { it[notifyKey] ?: false }
 
     val currentDirectory: Flow<String?> = context.dataStore.data.map { it[directoryKey] }
+
+    val skippedUpdateVersion: Flow<String?> = context.dataStore.data.map { it[skippedUpdateKey] }
+
+    suspend fun setSkippedUpdateVersion(version: String?) {
+        context.dataStore.edit { prefs ->
+            if (version == null) prefs.remove(skippedUpdateKey) else prefs[skippedUpdateKey] = version
+        }
+    }
 
     suspend fun setCurrentDirectory(directory: String?) {
         context.dataStore.edit { prefs ->

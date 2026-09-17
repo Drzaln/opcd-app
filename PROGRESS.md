@@ -1,4 +1,4 @@
-<!-- ship: v0.1.16 (versionCode 17) -->
+<!-- ship: v0.1.17 (versionCode 18) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -82,7 +82,8 @@ indicator · per-message diff · project search (`/find`, `/find/file`) · offli
 notifications (foreground service toggle) · mDNS scan + Tailscale remote field · directory/folder picker ·
 message pagination (load-older on scroll + pull-to-refresh) · in-app permission prompts
 (Allow once / Always / Deny) · image + file attachments from the phone (rendered inline) ·
-agent questions in-app (single/multi-select + custom text, answer or dismiss).
+agent questions in-app (single/multi-select + custom text, answer or dismiss) ·
+in-app update check (launch-time prompt → download → install APK).
 
 ## Gotchas
 
@@ -97,13 +98,22 @@ agent questions in-app (single/multi-select + custom text, answer or dismiss).
   hides the input.
 - mDNS resolves the **LAN IP**, not Tailscale; use the "Tailscale (remote)" field (`100.x.y.z` or
   `<mac>.ts.net`, https if `.ts.net`).
+- **Update check avoids the GitHub REST API** (rate limit): `GET /releases/latest` 302-redirects to
+  `/releases/tag/v<ver>` (parse the final URL), and the fixed
+  `/releases/latest/download/app-release.apk` always serves the newest asset. Install needs
+  `REQUEST_INSTALL_PACKAGES` + a `FileProvider` over `cacheDir/update/` (`res/xml/file_paths.xml`);
+  on Android 8+ if `canRequestPackageInstalls()` is false, send the user to
+  `ACTION_MANAGE_UNKNOWN_APP_SOURCES`. **Caveat:** the release APK must be signed with the same key as
+  the installed app (CI falls back to the debug key) or the install fails. "Later" persists a skipped
+  version until a newer one appears.
 
 ## Open / next ideas
 
 - Share-session links, LazyColumn line virtualization for very large files, WorkManager
   notification fallback (FGS has a 6h/day limit on Android 15+), incremental refresh for
   `session.something` events (currently full refetch), image thumbnails/compression before
-  upload, decode remote `http(s)` image parts (currently only `data:` URLs render inline).
+  upload, decode remote `http(s)` image parts (currently only `data:` URLs render inline),
+  update check only over Wi-Fi + a manual "Check for updates" button.
 
 ## Verification
 

@@ -4,9 +4,21 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -20,6 +32,7 @@ import dev.opencode.mobile.ui.files.FilesScreen
 import dev.opencode.mobile.ui.servers.ServersScreen
 import dev.opencode.mobile.ui.sessions.SessionsScreen
 import dev.opencode.mobile.ui.theme.OpenCodeTheme
+import dev.opencode.mobile.update.UpdateState
 
 object Routes {
     const val SERVERS = "servers"
@@ -48,6 +61,21 @@ class MainActivity : ComponentActivity() {
                 )
                 val active by appVm.activeServer.collectAsState()
                 val navController = rememberNavController()
+
+                val update by appVm.update.collectAsState()
+                var updateDismissed by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) { appVm.checkForUpdate() }
+                if (!updateDismissed) {
+                    UpdateDialog(
+                        state = update,
+                        onDownload = { version -> appVm.downloadUpdate(version) },
+                        onInstall = { file -> appVm.installUpdate(file) },
+                        onDismiss = {
+                            updateDismissed = true
+                            appVm.dismissUpdate((update as? UpdateState.Available)?.version)
+                        },
+                    )
+                }
 
                 LaunchedEffect(active?.id) {
                     val destination = if (active == null) Routes.SERVERS else Routes.sessions(active!!.id)
@@ -161,5 +189,56 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@androidx.compose.runtime.Composable
+private fun UpdateDialog(
+    state: UpdateState,
+    onDownload: (String) -> Unit,
+    onInstall: (java.io.File) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    when (state) {
+        is UpdateState.Available -> AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Update available") },
+            text = { Text("opencode mobile v${state.version} is available. Download and install it now?") },
+            confirmButton = { TextButton(onClick = { onDownload(state.version) }) { Text("Download & install") } },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Later") } },
+        )
+
+        is UpdateState.Downloading -> AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Downloading update") },
+            text = {
+                Column {
+                    Text("v${state.version} — ${state.progress}%")
+                    LinearProgressIndicator(
+                        progress = { state.progress / 100f },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
+                }
+            },
+            confirmButton = {},
+        )
+
+        is UpdateState.Ready -> AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Ready to install") },
+            text = { Text("Android will ask you to confirm installing v${state.version}. If installs are blocked, allow them for this app and tap Install again.") },
+            confirmButton = { TextButton(onClick = { onInstall(state.file) }) { Text("Install") } },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Later") } },
+        )
+
+        is UpdateState.Failed -> AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Update failed") },
+            text = { Text(state.message) },
+            confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
+        )
+
+        UpdateState.Idle -> Unit
     }
 }
