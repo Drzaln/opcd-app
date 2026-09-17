@@ -64,6 +64,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.widget.Toast
+import kotlin.math.roundToInt
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -133,15 +134,17 @@ fun ChatScreen(
     val ui by vm.ui.collectAsState()
     val input by vm.input.collectAsState()
 
-    val contextPct = remember(ui.messages, ui.models) {
-        val last = ui.messages.lastOrNull { it.info.role == "assistant" && it.info.tokens != null }?.info
-        val tokens = last?.tokens
-        if (last != null && tokens != null) {
-            val limit = ui.models.firstOrNull {
-                it.providerId == last.providerID && it.modelId == last.modelID
-            }?.contextLimit ?: 0L
-            if (limit > 0) (tokens.input + tokens.output) * 100.0 / limit else null
-        } else null
+    val contextStatus = remember(ui.messages, ui.models, ui.session) {
+        val last = ui.messages.lastOrNull {
+            it.info.role == "assistant" && (it.info.tokens?.output ?: 0) > 0
+        }?.info
+        val t = last?.tokens
+        val tokens = if (t != null) t.input + t.output + t.reasoning + t.cache.read + t.cache.write else 0L
+        val limit = ui.models.firstOrNull {
+            it.providerId == last?.providerID && it.modelId == last?.modelID
+        }?.contextLimit ?: 0L
+        val percent = if (limit > 0) ((tokens.toDouble() / limit) * 100).roundToInt() else null
+        Triple(tokens, percent, ui.session?.cost)
     }
 
     Scaffold(
@@ -160,14 +163,20 @@ fun ChatScreen(
                         if (!dir.isNullOrEmpty()) {
                             Text(dir, style = MaterialTheme.typography.labelSmall, color = TextSecondary, maxLines = 1)
                         }
-                        if (contextPct != null) {
-                            val pct = contextPct
+                        val (ctxTokens, ctxPercent, sessionCost) = contextStatus
+                        val bits = mutableListOf<String>()
+                        if (ctxTokens > 0) bits.add("${"%,d".format(ctxTokens)} tokens")
+                        if (ctxPercent != null) bits.add("$ctxPercent% used")
+                        if (sessionCost != null && sessionCost > 0) {
+                            bits.add("$" + if (sessionCost >= 0.01) "%.2f".format(sessionCost) else "%.4f".format(sessionCost) + " spent")
+                        }
+                        if (bits.isNotEmpty()) {
                             val color = when {
-                                pct >= 90 -> Red
-                                pct >= 70 -> Orange
+                                (ctxPercent ?: 0) >= 90 -> Red
+                                (ctxPercent ?: 0) >= 70 -> Orange
                                 else -> TextSecondary
                             }
-                            Text("ctx ${"%.0f".format(pct)}%", style = MaterialTheme.typography.labelSmall, color = color, maxLines = 1)
+                            Text(bits.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = color, maxLines = 1)
                         }
                     }
                 },
@@ -550,7 +559,7 @@ private fun MessageRow(
                         it.providerId == message.info.providerID && it.modelId == message.info.modelID
                     }?.contextLimit ?: 0L
                     if (limit > 0) {
-                        val used = tokens.input + tokens.output
+                        val used = tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write
                         val pct = used * 100.0 / limit
                         bits.add("ctx ${"%.0f".format(pct)}%")
                     }
