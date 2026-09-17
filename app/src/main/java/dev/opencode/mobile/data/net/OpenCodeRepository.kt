@@ -1,8 +1,16 @@
 package dev.opencode.mobile.data.net
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -32,6 +40,8 @@ class OpenCodeRepository {
     private val lock = Any()
     private val apiCache = mutableMapOf<String, OpenCodeApi>()
     private val clientCache = mutableMapOf<String, OkHttpClient>()
+    private val streams = mutableMapOf<String, SseStream>()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun apiFor(server: ServerConfig, cache: Boolean = true): OpenCodeApi = synchronized(lock) {
         if (cache) {
@@ -48,7 +58,52 @@ class OpenCodeRepository {
         .build()
         .create(OpenCodeApi::class.java)
 
-    fun events(server: ServerConfig, projectDir: String? = null): Flow<OcEvent> = callbackFlow {
+    fun events(server: ServerConfig, projectDir: String? = null): Flow<OcEvent> = flow {
+        val key = "${server.id}|${projectDir ?: ""}"
+        val stream = synchronized(lock) {
+            val existing = streams.getOrPut(key) {
+                SseStream(MutableSharedFlow(extraBufferCapacity = 128, onBufferOverflow = BufferOverflow.DROP_OLDEST))
+            }
+            existing.refs++
+            if (existing.job == null) {
+                val job = scope.launch {
+                    runCatching {
+                        rawEvents(server, projectDir).collect { existing.shared.emit(it) }
+                    }
+                }
+                job.invokeOnCompletion {
+                    synchronized(lock) {
+                        val current = streams[key]
+                        if (current != null && current.job === job) current.job = null
+                    }
+                }
+                existing.job = job
+            }
+            existing
+        }
+        try {
+            stream.shared.collect { emit(it) }
+        } finally {
+            synchronized(lock) {
+                val current = streams[key]
+                if (current != null) {
+                    current.refs--
+                    if (current.refs <= 0) {
+                        current.job?.cancel()
+                        streams.remove(key)
+                    }
+                }
+            }
+        }
+    }
+
+    private class SseStream(
+        val shared: MutableSharedFlow<OcEvent>,
+        var refs: Int = 0,
+        var job: Job? = null,
+    )
+
+    private fun rawEvents(server: ServerConfig, projectDir: String?): Flow<OcEvent> = callbackFlow {
         // Dedicated client so cancelling the stream cannot break the shared API client.
         val client = newHttpClient(server)
         val url = buildString {
