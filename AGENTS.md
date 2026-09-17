@@ -7,6 +7,8 @@ syntax highlighting, and review session diffs.
 
 ## Quick start
 
+See **`PROGRESS.md`** for the compact project handoff (architecture, integration gotchas, status).
+
 ```bash
 make build        # assembleDebug → app/build/outputs/apk/debug/app-debug.apk
 make release      # assembleRelease (signed w/ debug key unless keystore.properties exists)
@@ -22,10 +24,12 @@ No local.properties needed — `ANDROID_HOME`/SDK on PATH is enough.
 
 Always do ALL of these, in order:
 
+0. **Update `PROGRESS.md`** — the compact handoff doc for the next agent (features done, gotchas,
+   open items). `ship.sh` auto-stamps the version, but keep the *content* current before shipping.
 1. **Bump the version**: run `./scripts/ship.sh [patch|minor|major|<x.y.z>]` (default `patch`).
-   It bumps `versionCode` (+1) and `versionName` in `app/build.gradle.kts`, builds `assembleRelease`,
-   commits, pushes `main`, tags `v<versionName>`, and pushes the tag. The tag triggers CI
-   (`.github/workflows/build.yml`) which builds the APK and creates a GitHub Release.
+   It bumps `versionCode` (+1) and `versionName` in `app/build.gradle.kts`, stamps `PROGRESS.md`,
+   builds `assembleRelease`, commits, pushes `main`, tags `v<versionName>`, and pushes the tag.
+   The tag triggers CI (`.github/workflows/build.yml`) which builds the APK and creates a GitHub Release.
 2. If the user asked for a specific bump type, pass it (e.g. `make ship minor`); otherwise default to `patch`.
 3. **Verify**: confirm the CI run on the tag completes and a GitHub Release with `app-release.apk` exists
    (check via `curl https://api.github.com/repos/Drzaln/opcd-app/releases` or the Actions tab).

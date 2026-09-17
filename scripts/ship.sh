@@ -44,6 +44,15 @@ sed -i '' "s/versionName = \"$current_name\"/versionName = \"$new_name\"/" "$GRA
 
 echo "Bumping v$current_name (code $current_code) -> v$new_name (code $new_code)"
 
+PROGRESS_FILE="PROGRESS.md"
+if [ -f "$PROGRESS_FILE" ]; then
+  if grep -q '^<!-- ship:' "$PROGRESS_FILE"; then
+    sed -i '' "1s|.*|<!-- ship: v$new_name (versionCode $new_code) -->|" "$PROGRESS_FILE"
+  else
+    printf '<!-- ship: v%s (versionCode %s) -->\n\n' "$new_name" "$new_code" | cat - "$PROGRESS_FILE" > "$PROGRESS_FILE.tmp" && mv "$PROGRESS_FILE.tmp" "$PROGRESS_FILE"
+  fi
+fi
+
 ./gradlew assembleRelease --no-daemon
 
 git add -A
