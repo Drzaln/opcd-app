@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Radar
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -35,6 +36,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -55,10 +58,12 @@ import dev.opencode.mobile.data.net.DiscoveredServer
 import dev.opencode.mobile.data.net.ServerConfig
 import kotlinx.coroutines.launch
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun ServersScreen(
     appVm: AppViewModel,
     onOpen: (String) -> Unit,
+    onSettings: () -> Unit,
 ) {
     val servers by appVm.servers.collectAsState()
     var showForm by remember { mutableStateOf(false) }
@@ -67,6 +72,17 @@ fun ServersScreen(
     val scope = rememberCoroutineScope()
 
     Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("opencode") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ),
+                actions = {
+                    IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
+                },
+            )
+        },
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = { editing = null; showForm = true },
@@ -81,23 +97,11 @@ fun ServersScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item {
-                Column {
-                    Text("OpenCode", style = MaterialTheme.typography.headlineMedium)
-                    Text(
-                        "Connect to opencode running on your Mac over Tailscale",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = OcTheme.colors.textSecondary,
-                    )
-                }
-            }
-            item {
-                SecurityHint()
-            }
-            item {
-                NotificationToggle(appVm)
-            }
-            item {
-                ThemeToggle(appVm)
+                Text(
+                    "Connect to opencode running on your Mac over Tailscale",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             item {
                 OutlinedButton(
@@ -150,104 +154,6 @@ fun ServersScreen(
             },
             appVm = appVm,
         )
-    }
-}
-
-@Composable
-private fun NotificationToggle(appVm: AppViewModel) {
-    val context = LocalContext.current
-    val enabled by appVm.notificationsEnabled.collectAsState()
-    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (granted) {
-            appVm.setNotificationsEnabled(true)
-            dev.opencode.mobile.notify.SessionWatchService.start(context)
-        }
-    }
-
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Row(
-            Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Notify when a turn finishes", style = MaterialTheme.typography.titleSmall)
-                Text(
-                    "Keeps a light background connection to the server so you get notified when opencode is done or needs input.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OcTheme.colors.textSecondary,
-                )
-            }
-            androidx.compose.material3.Switch(
-                checked = enabled,
-                onCheckedChange = { want ->
-                    if (want) {
-                        val granted = android.os.Build.VERSION.SDK_INT < 33 ||
-                            androidx.core.content.ContextCompat.checkSelfPermission(
-                                context,
-                                android.Manifest.permission.POST_NOTIFICATIONS,
-                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                        if (granted) {
-                            appVm.setNotificationsEnabled(true)
-                            dev.opencode.mobile.notify.SessionWatchService.start(context)
-                        } else {
-                            launcher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                        }
-                    } else {
-                        appVm.setNotificationsEnabled(false)
-                        dev.opencode.mobile.notify.SessionWatchService.stop(context)
-                    }
-                },
-            )
-        }
-    }
-}
-
-@Composable
-private fun ThemeToggle(appVm: AppViewModel) {
-    val mode by appVm.themeMode.collectAsState()
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(Modifier.fillMaxWidth().padding(12.dp)) {
-            Text("Appearance", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "Follow the system, or force dark/light.",
-                style = MaterialTheme.typography.bodySmall,
-                color = OcTheme.colors.textSecondary,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for ((label, value) in listOf(
-                    "System" to dev.opencode.mobile.ui.theme.ThemeMode.SYSTEM,
-                    "Dark" to dev.opencode.mobile.ui.theme.ThemeMode.DARK,
-                    "Light" to dev.opencode.mobile.ui.theme.ThemeMode.LIGHT,
-                )) {
-                    androidx.compose.material3.FilterChip(
-                        selected = mode == value,
-                        onClick = { appVm.setThemeMode(value) },
-                        label = { Text(label) },
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SecurityHint() {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(Modifier.padding(12.dp)) {
-            Text("Secure setup", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "• Mac: OPENCODE_SERVER_PASSWORD=secret opencode serve --hostname 0.0.0.0 --port 4096 --mdns\n" +
-                    "  (use serve, not web — web opens a browser)\n" +
-                    "• mDNS finds the Mac on your LAN. Away from home, use the Tailscale tab below\n" +
-                    "  or tailscale serve --bg 4096 for https://<mac>.ts.net\n" +
-                    "• Tailscale encrypts all traffic between your devices; nothing is exposed to the internet.",
-                style = MaterialTheme.typography.bodySmall,
-                color = OcTheme.colors.textSecondary,
-            )
-        }
     }
 }
 

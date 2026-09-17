@@ -87,13 +87,24 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
 
     private var updateChecked = false
 
-    fun checkForUpdate() {
-        if (updateChecked) return
+    private val _updateMessage = MutableStateFlow<String?>(null)
+    val updateMessage: StateFlow<String?> = _updateMessage
+
+    fun checkForUpdate(force: Boolean = false) {
+        if (updateChecked && !force) return
         updateChecked = true
+        if (force) _update.value = UpdateState.Idle
         viewModelScope.launch {
-            val latest = runCatching { updater.latestVersion() }.getOrNull() ?: return@launch
-            if (!updater.isNewer(latest, updater.currentVersion)) return@launch
-            if (store.skippedUpdateVersion.first() == latest) return@launch
+            val latest = runCatching { updater.latestVersion() }.getOrNull()
+            if (latest == null) {
+                if (force) _updateMessage.value = "Could not reach GitHub"
+                return@launch
+            }
+            if (!updater.isNewer(latest, updater.currentVersion)) {
+                if (force) _updateMessage.value = "You're on the latest version (v${updater.currentVersion})"
+                return@launch
+            }
+            if (!force && store.skippedUpdateVersion.first() == latest) return@launch
             _update.value = UpdateState.Available(latest)
         }
     }

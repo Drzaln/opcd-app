@@ -118,6 +118,9 @@ fun DiffScreen(
         topBar = {
             TopAppBar(
                 title = { Text(if (messageId != null) "Changes · this message" else "Changes") },
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ),
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },

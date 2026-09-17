@@ -48,6 +48,7 @@ import dev.opencode.mobile.update.UpdateState
 
 object Routes {
     const val SERVERS = "servers"
+    const val SETTINGS = "settings"
     const val SESSIONS = "sessions/{serverId}"
     const val CHAT = "chat/{serverId}/{sessionId}"
     const val FILES = "files/{serverId}?dir={dir}"
@@ -129,7 +130,17 @@ class MainActivity : ComponentActivity() {
 
                 NavHost(navController = navController, startDestination = Routes.SERVERS) {
                     composable(Routes.SERVERS) {
-                        ServersScreen(appVm = appVm, onOpen = { id -> navController.navigate(Routes.sessions(id)) })
+                        ServersScreen(
+                            appVm = appVm,
+                            onOpen = { id -> navController.navigate(Routes.sessions(id)) },
+                            onSettings = { navController.navigate(Routes.SETTINGS) },
+                        )
+                    }
+                    composable(Routes.SETTINGS) {
+                        dev.opencode.mobile.ui.settings.SettingsScreen(
+                            appVm = appVm,
+                            onBack = { navController.popBackStack() },
+                        )
                     }
                     composable(
                         route = Routes.SESSIONS,
@@ -145,6 +156,7 @@ class MainActivity : ComponentActivity() {
                                     else navController.navigate(Routes.chat(serverId, sessionId))
                                 },
                                 onFiles = { navController.navigate(Routes.files(serverId, "")) },
+                                onSettings = { navController.navigate(Routes.SETTINGS) },
                                 onDiff = { sessionId -> navController.navigate(Routes.diff(serverId, sessionId)) },
                                 onBack = { appVm.clearActive(); navController.navigate(Routes.SERVERS) { popUpTo(0) { inclusive = true } } },
                             )

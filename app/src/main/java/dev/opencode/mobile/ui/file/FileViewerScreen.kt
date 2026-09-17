@@ -4,9 +4,11 @@ import dev.opencode.mobile.ui.theme.OcTheme
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -122,6 +124,9 @@ fun FileViewerScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ),
             )
         },
     ) { padding ->
@@ -139,7 +144,7 @@ fun FileViewerScreen(
                     )
                 } else {
                     val code = content.content
-                    val lines = remember(code) { code.split('\n') }
+                    val lines = remember(code) { code.split('\n').map { it.replace("\t", "    ") } }
                     val lineCount = lines.size
                     val language = languageForPath(path)
                     Row(
@@ -154,52 +159,73 @@ fun FileViewerScreen(
                         Text("$lineCount lines", color = OcTheme.colors.textSecondary, style = MaterialTheme.typography.labelSmall)
                     }
                     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-                    val codeScroll = rememberScrollState()
                     LaunchedEffect(code, line, lineCount) {
                         val target = (line ?: return@LaunchedEffect) - 1
                         if (target in 0 until lineCount) listState.scrollToItem(target)
                     }
-                    androidx.compose.foundation.lazy.LazyColumn(
-                        state = listState,
-                        modifier = Modifier
+                    // One horizontal scroll for the whole code area: share a single ScrollState via a
+                    // fixed content width (per-line scroll states would fight each other).
+                    val gutter = 52.dp
+                    val density = androidx.compose.ui.platform.LocalDensity.current
+                    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+                    val monoStyle = androidx.compose.ui.text.TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp,
+                        lineHeight = 19.sp,
+                    )
+                    val charWidthPx = remember(measurer) {
+                        measurer.measure(androidx.compose.ui.text.AnnotatedString("M"), monoStyle, softWrap = false)
+                            .size.width.toFloat()
+                    }
+                    val maxChars = remember(lines) { lines.maxOfOrNull { it.length } ?: 1 }
+                    val contentWidth = with(density) { (charWidthPx * maxChars).toDp() } + gutter + 24.dp
+                    val hScroll = rememberScrollState()
+                    Box(
+                        Modifier
                             .fillMaxSize()
-                            .background(OcTheme.colors.surfaceVariant),
+                            .background(OcTheme.colors.surfaceVariant)
+                            .horizontalScroll(hScroll),
                     ) {
-                        items(
-                            count = lineCount,
-                            key = { it },
-                        ) { index ->
-                            val isTarget = line != null && index == line - 1
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .background(
-                                        if (isTarget) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                                        else androidx.compose.ui.graphics.Color.Transparent,
+                        androidx.compose.foundation.lazy.LazyColumn(
+                            state = listState,
+                            modifier = Modifier.width(contentWidth).fillMaxHeight(),
+                        ) {
+                            items(
+                                count = lineCount,
+                                key = { it },
+                            ) { index ->
+                                val isTarget = line != null && index == line - 1
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            if (isTarget) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                            else androidx.compose.ui.graphics.Color.Transparent,
+                                        )
+                                        .padding(vertical = 1.dp),
+                                ) {
+                                    Text(
+                                        "${index + 1}",
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 12.sp,
+                                        lineHeight = 19.sp,
+                                        color = OcTheme.colors.textSecondary,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                                        modifier = Modifier.width(gutter).padding(end = 10.dp),
                                     )
-                                    .padding(vertical = 1.dp),
-                            ) {
-                                Text(
-                                    "${index + 1}",
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 12.sp,
-                                    lineHeight = 19.sp,
-                                    color = OcTheme.colors.textSecondary,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
-                                    modifier = Modifier.width(52.dp).padding(end = 10.dp),
-                                )
-                                val highlighted = remember(language, lines[index]) {
-                                    CodeHighlighter.highlight(lines[index], language)
+                                    val highlighted = remember(language, lines[index]) {
+                                        CodeHighlighter.highlight(lines[index], language)
+                                    }
+                                    Text(
+                                        text = highlighted,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 13.sp,
+                                        lineHeight = 19.sp,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        softWrap = false,
+                                        modifier = Modifier.padding(end = 16.dp),
+                                    )
                                 }
-                                Text(
-                                    text = highlighted,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 13.sp,
-                                    lineHeight = 19.sp,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    softWrap = false,
-                                    modifier = Modifier.horizontalScroll(codeScroll, enabled = true).padding(end = 16.dp),
-                                )
                             }
                         }
                     }

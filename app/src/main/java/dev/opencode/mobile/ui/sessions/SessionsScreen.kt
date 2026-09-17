@@ -20,12 +20,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -36,6 +38,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -227,6 +231,7 @@ fun SessionsScreen(
     serverId: String,
     onChat: (String) -> Unit,
     onFiles: () -> Unit,
+    onSettings: () -> Unit,
     onDiff: (String) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -302,11 +307,43 @@ fun SessionsScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
                 actions = {
-                    IconButton(onClick = onFiles) { Icon(Icons.Filled.Folder, contentDescription = "Browse files") }
                     IconButton(onClick = { vm.refresh() }) { Icon(Icons.Filled.Refresh, contentDescription = "Refresh") }
-                    IconButton(onClick = { vm.createSession() }) { Icon(Icons.Filled.Add, contentDescription = "New session") }
                 },
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ),
             )
+        },
+        floatingActionButton = {
+            androidx.compose.material3.ExtendedFloatingActionButton(
+                onClick = { vm.createSession() },
+                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                text = { Text("New session") },
+            )
+        },
+        bottomBar = {
+            NavigationBar(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            ) {
+                NavigationBarItem(
+                    selected = true,
+                    onClick = {},
+                    icon = { Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null) },
+                    label = { Text("Sessions") },
+                )
+                NavigationBarItem(
+                    selected = false,
+                    onClick = onFiles,
+                    icon = { Icon(Icons.Filled.Folder, contentDescription = null) },
+                    label = { Text("Files") },
+                )
+                NavigationBarItem(
+                    selected = false,
+                    onClick = onSettings,
+                    icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                    label = { Text("Settings") },
+                )
+            }
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {

@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -135,6 +136,7 @@ fun ChatScreen(
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { foreground = true }
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { foreground = false }
     var showSummarize by remember { mutableStateOf(false) }
+    var chatMenu by remember { mutableStateOf(false) }
 
     val vm: ChatViewModel = viewModel(
         key = "chat_${serverId}_$sessionId",
@@ -211,19 +213,36 @@ fun ChatScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
                 actions = {
-                    if (ui.session?.revert != null) {
-                        TextButton(onClick = { vm.unrevert() }) { Text("Undo revert") }
-                    }
                     if (ui.busy) {
                         IconButton(onClick = { vm.abort() }) {
-                            Icon(Icons.Filled.Block, contentDescription = "Abort", tint = OcTheme.colors.red)
+                            Icon(Icons.Filled.Block, contentDescription = "Abort", tint = MaterialTheme.colorScheme.error)
                         }
                     }
-                    IconButton(onClick = { showSummarize = true }) {
-                        Icon(Icons.Filled.Compress, contentDescription = "Summarize")
+                    Box {
+                        IconButton(onClick = { chatMenu = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                        }
+                        DropdownMenu(expanded = chatMenu, onDismissRequest = { chatMenu = false }) {
+                            if (ui.session?.revert != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Undo revert") },
+                                    onClick = { chatMenu = false; vm.unrevert() },
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text("Summarize session") },
+                                onClick = { chatMenu = false; showSummarize = true },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("View diff") },
+                                onClick = { chatMenu = false; onDiff() },
+                            )
+                        }
                     }
-                    TextButton(onClick = onDiff) { Text("Diff") }
                 },
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ),
             )
         },
         bottomBar = {

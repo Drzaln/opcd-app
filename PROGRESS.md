@@ -1,4 +1,4 @@
-<!-- ship: v0.1.19 (versionCode 20) -->
+<!-- ship: v0.1.20 (versionCode 21) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -97,7 +97,11 @@ LazyColumn virtualization · code blocks with copy button · sticky diff headers
 relative timestamps · empty states · SSE-liveness battery saving · system/dark/light theme toggle
 (`OcTheme.colors`) · markdown tables + ordered/nested lists · summarize session ·
 retry failed send + cancel queued · WorkManager notification fallback (FGS 6h cap) ·
-home-screen status widget · two-pane layout on wide screens (≥720dp) · shared motion tokens.
+home-screen status widget · two-pane layout on wide screens (≥720dp) · shared motion tokens ·
+Material 3 pass: full color-role set (surfaceContainer*, inverse, outlineVariant) so M3 components
+match the custom palette, Settings screen (Appearance / Notifications / About / Security),
+bottom `NavigationBar` on Sessions, `ListItem` rows, Extended FABs, chat overflow menu,
+consistent `TopAppBar` colors. Markdown / code blocks / diffs stay custom-rendered.
 
 ## Gotchas
 

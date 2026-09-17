@@ -169,7 +169,10 @@ fun FilesScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("/${dir.ifEmpty { "project root" }}", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = { Text("/${dir.ifEmpty { "project root" }}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ),
                 navigationIcon = {
                     IconButton(onClick = { if (dir.isNotEmpty()) onOpenDir(parent) else onBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -242,29 +245,29 @@ fun FilesScreen(
                 ) {
                     items(ui.files, key = { it.path }) { node ->
                         val isDir = node.type == "directory"
-                        Row(
+                        androidx.compose.material3.ListItem(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .animateItem()
-                                .clickable { if (isDir) onOpenDir(node.path) else onOpenFile(node.path, null) }
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                if (isDir) Icons.Filled.Folder else Icons.Filled.Description,
-                                contentDescription = null,
-                                tint = if (isDir) MaterialTheme.colorScheme.primary else OcTheme.colors.textSecondary,
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Text(
-                                node.name,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                color = if (node.ignored) OcTheme.colors.textSecondary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
+                                .clickable { if (isDir) onOpenDir(node.path) else onOpenFile(node.path, null) },
+                            leadingContent = {
+                                Icon(
+                                    if (isDir) Icons.Filled.Folder else Icons.Filled.Description,
+                                    contentDescription = null,
+                                    tint = if (isDir) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            },
+                            headlineContent = {
+                                Text(
+                                    node.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = if (node.ignored) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                    else MaterialTheme.colorScheme.onSurface,
+                                )
+                            },
+                        )
                     }
                 }
             }
