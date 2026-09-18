@@ -51,12 +51,12 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.size
@@ -90,6 +90,7 @@ import dev.opencode.mobile.terminal.Attr
 import dev.opencode.mobile.terminal.COLOR_DEFAULT
 import dev.opencode.mobile.terminal.Cell
 import dev.opencode.mobile.terminal.TRUE_RGB_BASE
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 private val Ansi16 = arrayOf(
@@ -269,11 +270,12 @@ private fun TerminalView(vm: TerminalViewModel) {
     val scope = rememberCoroutineScope()
     val focusRequester = remember { FocusRequester() }
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    val atBottom by remember {
-        derivedStateOf {
-            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last >= listState.layoutInfo.totalItemsCount - 1
-        }
+    // Follow new output unless the user has scrolled up (auto-re-enables near the bottom).
+    var autoScroll by remember { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex to listState.layoutInfo.totalItemsCount }
+            .distinctUntilChanged()
+            .collect { (first, total) -> autoScroll = total == 0 || first >= total - 2 }
     }
     var input by remember { mutableStateOf("") }
     var ctrl by remember { mutableStateOf(false) }
@@ -343,11 +345,10 @@ private fun TerminalView(vm: TerminalViewModel) {
                     )
                 }
             }
-            LaunchedEffect(frame) {
-                if (atBottom) {
-                    val total = emulator.totalLines()
-                    if (total > 0) listState.scrollToItem((total - 1).coerceAtLeast(0))
-                }
+            LaunchedEffect(frame, autoScroll, listState.layoutInfo.totalItemsCount) {
+                if (!autoScroll) return@LaunchedEffect
+                val total = emulator.totalLines()
+                if (total > 0) listState.scrollToItem((total - 1).coerceAtLeast(0))
             }
 
             KeyRow(
