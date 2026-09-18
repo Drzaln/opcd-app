@@ -2,6 +2,9 @@ package dev.opencode.mobile.ui.terminal
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -56,6 +59,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -69,6 +74,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -261,6 +268,7 @@ private fun TerminalView(vm: TerminalViewModel) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val focusRequester = remember { FocusRequester() }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val atBottom by remember {
         derivedStateOf {
             val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
@@ -269,6 +277,34 @@ private fun TerminalView(vm: TerminalViewModel) {
     }
     var input by remember { mutableStateOf("") }
     var ctrl by remember { mutableStateOf(false) }
+
+    // Invisible capture field: keys go straight to the terminal (the shell echoes them).
+    BasicTextField(
+        value = input,
+        onValueChange = { new ->
+            when {
+                new.length > input.length -> {
+                    val added = new.substring(input.length)
+                    vm.send(if (ctrl) toCtrl(added) else added)
+                    ctrl = false
+                }
+                new.length < input.length -> vm.send("\u007f".repeat(input.length - new.length))
+            }
+            input = new
+        },
+        keyboardOptions = KeyboardOptions(
+            imeAction = ImeAction.Send,
+            keyboardType = KeyboardType.Ascii,
+            autoCorrectEnabled = false,
+        ),
+        keyboardActions = KeyboardActions(onSend = { vm.send("\r"); input = "" }),
+        singleLine = true,
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.Transparent),
+        modifier = Modifier
+            .size(1.dp)
+            .alpha(0f)
+            .focusRequester(focusRequester),
+    )
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val widthPx = with(androidx.compose.ui.platform.LocalDensity.current) { maxWidth.toPx() }
@@ -284,7 +320,10 @@ private fun TerminalView(vm: TerminalViewModel) {
         Column(Modifier.fillMaxSize().background(defaultBg)) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f).fillMaxWidth().clickable { focusRequester.requestFocus() },
+                modifier = Modifier.weight(1f).fillMaxWidth().clickable {
+                    focusRequester.requestFocus()
+                    keyboard?.show()
+                },
                 contentPadding = PaddingValues(horizontal = 4.dp),
             ) {
                 val total = emulator.totalLines()
@@ -311,7 +350,11 @@ private fun TerminalView(vm: TerminalViewModel) {
                 }
             }
 
-            KeyRow(ctrl = ctrl, onCtrlToggle = { ctrl = !ctrl }, onKey = { vm.send(it) })
+            KeyRow(
+                ctrl = ctrl,
+                onCtrlToggle = { ctrl = !ctrl },
+                onKey = { key -> vm.send(key); if (key.contains('\r')) input = "" },
+            )
 
             if (!ui.connected) {
                 Row(
@@ -329,40 +372,25 @@ private fun TerminalView(vm: TerminalViewModel) {
             }
 
             Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
-                Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp)) {
-                    OutlinedTextField(
-                        value = input,
-                        onValueChange = { new ->
-                            when {
-                                new.length > input.length -> {
-                                    val added = new.substring(input.length)
-                                    vm.send(if (ctrl) toCtrl(added) else added)
-                                    ctrl = false
-                                }
-                                // Keep the field's text so the IME's own backspace works; mirror
-                                // each removed char as DEL to the shell.
-                                new.length < input.length -> vm.send("\u007f".repeat(input.length - new.length))
-                            }
-                            input = new
-                        },
-                        placeholder = { Text(if (ui.connected) "type…" else ui.status) },
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                            imeAction = androidx.compose.ui.text.input.ImeAction.Send,
-                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Ascii,
-                        ),
-                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-                            onSend = { vm.send("\r"); input = "" },
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .focusRequester(focusRequester),
-                        maxLines = 1,
+                Row(
+                    Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (ui.connected) "tap terminal to type" else ui.status,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
                     )
-                    Spacer(Modifier.width(6.dp))
-                    TextButton(onClick = { vm.detach() }) { Text("Detach") }
-                    TextButton(onClick = { focusRequester.requestFocus() }) {
+                    TextButton(onClick = {
+                        focusRequester.requestFocus()
+                        keyboard?.show()
+                    }) {
                         Icon(Icons.Filled.Keyboard, contentDescription = "Show keyboard")
+                        Spacer(Modifier.width(4.dp))
+                        Text("Keyboard")
                     }
+                    TextButton(onClick = { vm.detach() }) { Text("Detach") }
                 }
             }
         }
