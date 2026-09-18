@@ -1,4 +1,4 @@
-<!-- ship: v0.1.26 (versionCode 27) -->
+<!-- ship: v0.1.27 (versionCode 28) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
