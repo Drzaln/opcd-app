@@ -115,6 +115,13 @@ fun CodeBlock(
     }
 }
 
+fun shortenPath(path: String?, keep: Int = 2): String {
+    if (path.isNullOrBlank()) return ""
+    val segments = path.trimEnd('/').split('/').filter { it.isNotEmpty() }
+    if (segments.size <= keep) return path.trimEnd('/').ifEmpty { "/" }
+    return "…/" + segments.takeLast(keep).joinToString("/")
+}
+
 @Composable
 fun MutedLabel(text: String, modifier: Modifier = Modifier) {
     Text(

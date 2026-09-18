@@ -69,6 +69,7 @@ import dev.opencode.mobile.data.model.SessionStatus
 import dev.opencode.mobile.data.model.SessionUpdateBody
 import dev.opencode.mobile.data.net.ServerConfig
 import dev.opencode.mobile.ui.common.MutedLabel
+import dev.opencode.mobile.ui.common.shortenPath
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json as KxJson
@@ -487,7 +488,7 @@ private fun DirectoryBar(directory: String?, onChange: () -> Unit) {
         Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(8.dp))
         Text(
-            directory ?: "Mac default project",
+            directory?.let { shortenPath(it) } ?: "Mac default project",
             style = MaterialTheme.typography.bodySmall,
             fontFamily = FontFamily.Monospace,
             maxLines = 1,
@@ -605,7 +606,7 @@ private fun SessionCard(
                     )
                 }
             }
-            MutedLabel(session.directory)
+            MutedLabel(shortenPath(session.directory))
             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 MutedLabel(relativeTime(session.time?.updated ?: session.time?.created))
                 Spacer(Modifier.width(12.dp))

@@ -479,3 +479,22 @@ data class ProviderList(
     val default: Map<String, String> = emptyMap(),
     val connected: List<String> = emptyList(),
 )
+
+@Serializable
+data class GoUsageEnvelope(
+    val usage: GoUsage = GoUsage(),
+)
+
+@Serializable
+data class GoUsage(
+    val rolling: UsageWindow? = null,
+    val weekly: UsageWindow? = null,
+    val monthly: UsageWindow? = null,
+)
+
+@Serializable
+data class UsageWindow(
+    val status: String = "",
+    val percent: Int = 0,
+    val resetsAt: String? = null,
+)

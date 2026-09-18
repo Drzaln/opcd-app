@@ -102,8 +102,10 @@ import dev.opencode.mobile.ui.common.JsonUtil
 import dev.opencode.mobile.ui.common.shareText
 import dev.opencode.mobile.ui.common.MarkdownText
 import dev.opencode.mobile.ui.common.MutedLabel
+import dev.opencode.mobile.ui.common.shortenPath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -138,6 +140,7 @@ fun ChatScreen(
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { foreground = false }
     var showSummarize by remember { mutableStateOf(false) }
     var chatMenu by remember { mutableStateOf(false) }
+    var scrollToBottomSignal by remember { mutableStateOf(0) }
 
     val vm: ChatViewModel = viewModel(
         key = "chat_${serverId}_$sessionId",
@@ -191,7 +194,7 @@ fun ChatScreen(
                         )
                         val dir = ui.session?.directory
                         if (!dir.isNullOrEmpty()) {
-                            Text(dir, style = MaterialTheme.typography.labelSmall, color = OcTheme.colors.textSecondary, maxLines = 1)
+                            Text(shortenPath(dir), style = MaterialTheme.typography.labelSmall, color = OcTheme.colors.textSecondary, maxLines = 1)
                         }
                         val (ctxTokens, ctxPercent, sessionCost) = contextStatus
                         val bits = mutableListOf<String>()
@@ -250,7 +253,7 @@ fun ChatScreen(
             InputBar(
                 value = input,
                 onValueChange = { vm.onInputChange(it) },
-                onSend = { vm.send() },
+                onSend = { vm.send(); scrollToBottomSignal++ },
                 busy = ui.busy,
                 enabled = true,
                 queued = ui.queued,
@@ -277,7 +280,7 @@ fun ChatScreen(
                             Text(ui.error!!, color = OcTheme.colors.red, style = MaterialTheme.typography.bodySmall)
                         }
                         if (input.isNotBlank()) {
-                            TextButton(onClick = { vm.dismissError(); vm.send() }) { Text("Retry") }
+                            TextButton(onClick = { vm.dismissError(); vm.send(); scrollToBottomSignal++ }) { Text("Retry") }
                         }
                         TextButton(onClick = { vm.dismissError() }) { Text("Dismiss") }
                     }
@@ -295,6 +298,7 @@ fun ChatScreen(
                 busy = ui.busy,
                 loadingOlder = ui.loadingOlder,
                 hasMore = ui.hasMore,
+                scrollToBottomSignal = scrollToBottomSignal,
                 onLoadOlder = { vm.loadOlder() },
                 onRefresh = { vm.refresh() },
                 onOpenFile = onOpenFile,
@@ -605,6 +609,7 @@ private fun MessageList(
     busy: Boolean,
     loadingOlder: Boolean,
     hasMore: Boolean,
+    scrollToBottomSignal: Int = 0,
     onLoadOlder: () -> Unit,
     onRefresh: () -> Unit,
     onOpenFile: (String) -> Unit,
@@ -622,9 +627,28 @@ private fun MessageList(
             last >= listState.layoutInfo.totalItemsCount - 1
         }
     }
+    // Follow the tail only while the user is parked at the bottom. Scrolling up must not be
+    // yanked back down by incoming/streaming messages.
+    var autoFollow by remember { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }
+            .filter { !it }
+            .collect {
+                val info = listState.layoutInfo
+                val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+                autoFollow = last >= info.totalItemsCount - 1
+            }
+    }
     // Only follow new messages appended at the end; loading older ones must not yank the viewport.
     LaunchedEffect(messages.lastOrNull()?.info?.id, messages.lastOrNull()?.parts?.size) {
-        if (messages.isNotEmpty()) {
+        if (autoFollow && messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+    // Sending a message always snaps back to the latest turn.
+    LaunchedEffect(scrollToBottomSignal) {
+        if (scrollToBottomSignal > 0 && messages.isNotEmpty()) {
+            autoFollow = true
             listState.animateScrollToItem(messages.lastIndex)
         }
     }
@@ -691,7 +715,10 @@ private fun MessageList(
         }
         if (!atBottom && messages.isNotEmpty()) {
             FloatingActionButton(
-                onClick = { scope.launch { listState.animateScrollToItem(messages.lastIndex) } },
+                onClick = {
+                    autoFollow = true
+                    scope.launch { listState.animateScrollToItem(messages.lastIndex) }
+                },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
             ) {

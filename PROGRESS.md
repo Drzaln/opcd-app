@@ -1,4 +1,4 @@
-<!-- ship: v0.1.30 (versionCode 31) -->
+<!-- ship: v0.1.31 (versionCode 32) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -25,8 +25,8 @@ after updating this file.
   `ServerStore` (DataStore), `NsdDiscovery` (mDNS).
 - `data/cache/CacheStore.kt` — Room key/json cache (sessions, messages).
 - `notify/` — notification channels + `SessionWatchService` (foreground SSE watcher).
-- `ui/common/` — `CodeHighlighter` (Prism4j), `Markdown`, `DiffLines`, `CodeBlock`.
-- `ui/{servers,sessions,chat,files,file,diff}/` — screens + their ViewModels.
+- `ui/common/` — `CodeHighlighter` (Prism4j), `Markdown`, `DiffLines`, `CodeBlock`, `shortenPath`.
+- `ui/{servers,sessions,chat,files,file,diff,settings}/` — screens + their ViewModels.
 
 ## Server integration (hard-won facts)
 
@@ -91,8 +91,16 @@ after updating this file.
     render instead of tofu; PTYs are created as **login** interactive shells (`-l`, or no command
     → server default `$SHELL`) so dotfiles/aliases/PATH match the local terminal.
     **Gotcha:** the grid lives in a plain (non-`State`) emulator object, so a `LazyColumn` item
-    that only reads it will be *skipped* by Compose and never redraw — read the `frame` State inside
-    the item scope (or the list stays blank while data is actually arriving).
+     that only reads it will be *skipped* by Compose and never redraw — read the `frame` State inside
+     the item scope (or the list stays blank while data is actually arriving).
+16. **OpenCode Go plan usage (Settings → OpenCode Go):** `GET https://opencode.ai/zen/go/v1/usage`
+    with `Authorization: Bearer <go-api-key>` returns
+    `{"usage":{"rolling":{status,percent,resetsAt},"weekly":{…},"monthly":{…}}}` — 5h/weekly/monthly
+    percentages. This is the **provider endpoint on opencode.ai**, NOT the local server (which has
+    no usage route and never exposes credentials), so the app stores the Go key itself
+    (`ServerStore` `opencode_go_api_key`, from the user's Zen console) and calls it directly via
+    `data/net/GoUsageClient.kt`. Poll-based (no SSE): refresh on open/save/resume + every 60 s while
+    the Settings screen is visible. Aggregate only — no per-model breakdown / balance.
 
 ## Features done
 
@@ -113,10 +121,14 @@ relative timestamps · empty states · SSE-liveness battery saving · system/dar
 retry failed send + cancel queued · WorkManager notification fallback (FGS 6h cap) ·
 home-screen status widget · two-pane layout on wide screens (≥720dp) · shared motion tokens ·
 Material 3 pass: full color-role set (surfaceContainer*, inverse, outlineVariant) so M3 components
-match the custom palette, Settings screen (Appearance / Notifications / About / Security),
+match the custom palette, Settings screen (Appearance / Notifications / OpenCode Go / About / Security),
 bottom `NavigationBar` on Sessions, `ListItem` rows, Extended FABs, chat overflow menu,
 consistent `TopAppBar` colors. Markdown / code blocks / diffs stay custom-rendered ·
-**in-app terminal** (full PTY + ANSI/xterm emulator, bottom-nav item).
+**in-app terminal** (full PTY + ANSI/xterm emulator, bottom-nav item) ·
+**OpenCode Go plan usage** in Settings (5h/weekly/monthly bars, refresh + auto-refresh, masked key
+with show/hide) · shortened project paths (`…/parent/folder` in rows, header, folder bar) ·
+chat viewport is no longer yanked while reading old messages (follow-tail only when parked at the
+bottom; sending always snaps to the latest turn).
 
 ## Gotchas
 
@@ -165,7 +177,8 @@ consistent `TopAppBar` colors. Markdown / code blocks / diffs stay custom-render
 - Remote `http(s)` image parts (currently only `data:` URLs render inline), image
   thumbnails/compression before upload, incremental refresh for `session.something` events
   (currently full refetch), update check only over Wi-Fi + manual "check now" button, widget for
-  multiple sessions, richer wide-screen layout (three panes / list-detail for servers).
+  multiple sessions, richer wide-screen layout (three panes / list-detail for servers),
+  per-model Go usage / Zen balance (not exposed by the public usage endpoint).
 
 ## Verification
 

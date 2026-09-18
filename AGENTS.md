@@ -24,8 +24,15 @@ No local.properties needed — `ANDROID_HOME`/SDK on PATH is enough.
 
 Always do ALL of these, in order:
 
-0. **Update `PROGRESS.md`** — the compact handoff doc for the next agent (features done, gotchas,
-   open items). `ship.sh` auto-stamps the version, but keep the *content* current before shipping.
+0. **Update ALL docs before shipping** (ship.sh auto-stamps the version, but the *content* must be
+   current first):
+   - `PROGRESS.md` — compact handoff (features done, gotchas, open items).
+   - `README.md` — user-facing feature/screen list, setup, usage.
+   - `AGENTS.md` — architecture, conventions, endpoints, status/next ideas.
+   - `README.linux.md` — if the Linux/server notes changed.
+   - `CLAUDE.md` — if it mirrors anything you touched.
+   If a change adds a screen/feature or alters behavior, it must be reflected in the relevant docs
+   (at minimum `PROGRESS.md` + `README.md`).
 1. **Bump the version**: run `./scripts/ship.sh [patch|minor|major|<x.y.z>]` (default `patch`).
    It bumps `versionCode` (+1) and `versionName` in `app/build.gradle.kts`, stamps `PROGRESS.md`,
    builds `assembleRelease`, commits, pushes `main`, tags `v<versionName>`, and pushes the tag.
@@ -40,6 +47,9 @@ Always do ALL of these, in order:
    permissions → "Read and write permissions", then re-run.
 5. Never create a version bump commit or tag without the user asking to ship (or saying ship/push/release).
 6. `ship.sh` does `git add -A`; keep build artifacts (`.kotlin/`, logs) out of the tree first.
+7. **Reindex this project** into the codebase-memory-mcp knowledge graph after shipping, so the graph
+   reflects the released code. Call `index_repository(repo_path="/Users/rizal/perkodingan/opencode-android-app")`
+   (it is not indexed by default; index even if it reports "project not found").
 
 Note: release APK is signed with the debug key unless `keystore.properties` + CI signing secrets exist.
 
@@ -77,9 +87,11 @@ Single `:app` module. No DI framework.
 - `OpenCodeApp` (Application) owns `ServerStore` (DataStore prefs) + `OpenCodeRepository` (Retrofit/OkHttp/SSE factory).
 - `data/net`: `ServerStore` (server list + active id), `OpenCodeRepository`, `OpenCodeApi` (Retrofit iface),
   `NsdDiscovery` (mDNS auto-detect of `opencode-<port>` on `_http._tcp` — resolves the LAN IP, NOT the
-  Tailscale IP; the servers screen has a separate "Tailscale (remote)" field for that), `ServerConfig`.
+  Tailscale IP; the servers screen has a separate "Tailscale (remote)" field for that), `ServerConfig`,
+  `GoUsageClient` (OpenCode Go plan usage — external Bearer call, see below).
 - `AppViewModel` (MainActivity): global state — servers list, active server, `probe()` health check.
-- Screens (nav routes in `MainActivity.Routes`): servers → sessions → chat / files / file viewer / diff.
+- Screens (nav routes in `MainActivity.Routes`): servers → sessions → chat / files / file viewer / diff,
+  plus `Settings` (Appearance / Notifications / OpenCode Go / About / Security).
 - Screens fetch their `ServerConfig` from `appVm.servers`; ViewModels are built inline:
   ```kotlin
   val vm: ChatViewModel = viewModel(
@@ -88,6 +100,10 @@ Single `:app` module. No DI framework.
   )
   ```
 - `ui/common`: `CodeHighlighter` (Prism4j), `Markdown` (lightweight block/inline renderer), `DiffLines`, `CodeBlock`.
+- OpenCode Go usage: `GET https://opencode.ai/zen/go/v1/usage` with `Authorization: Bearer <go key>`
+  → `usage.{rolling,weekly,monthly}.{status,percent,resetsAt}`. **Not** on the local server — the app
+  stores the user's Go API key (`ServerStore` `opencode_go_api_key`) and calls opencode.ai directly
+  (`GoUsageClient`, `ui/settings/UsageViewModel.kt`). Poll-based; aggregate only.
 
 ## Conventions
 
@@ -138,7 +154,9 @@ curl -u opencode:secret http://127.0.0.1:4199/file/content?path=settings.gradle.
   switcher (persisted per server), copy message, session status dots, rename, per-message
   model/tokens/context/cost meta, session totals, queued indicator, slash commands, per-message diff,
   project search (`/find` + `/find/file`), offline cache (Room), local notifications (foreground
-  watch service, toggle in Servers screen).
+  watch service, toggle in Servers screen), **OpenCode Go plan usage in Settings**, shortened project
+  paths (`ui/common.shortenPath`), chat follow-tail that never yanks you away while reading old
+  messages (send always snaps to bottom via `scrollToBottomSignal`).
 - Chat header shows session totals using the TUI's exact formula (`packages/tui/src/feature-plugins/sidebar/context.tsx`):
   tokens = last assistant message `input + output + reasoning + cache.read + cache.write`;
   % = tokens / model context limit; $ = `session.cost`.

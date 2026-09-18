@@ -35,6 +35,7 @@ class ServerStore(private val context: Context) {
     private val skippedUpdateKey = stringPreferencesKey("skipped_update_version")
     private val themeKey = stringPreferencesKey("theme_mode")
     private val busySessionsKey = androidx.datastore.preferences.core.stringSetPreferencesKey("busy_sessions")
+    private val goApiKey = stringPreferencesKey("opencode_go_api_key")
 
     val servers: Flow<List<ServerConfig>> = context.dataStore.data.map { prefs ->
         val raw = prefs[serversKey] ?: "[]"
@@ -60,6 +61,14 @@ class ServerStore(private val context: Context) {
     val theme: Flow<String?> = context.dataStore.data.map { it[themeKey] }
 
     val busySessions: Flow<Set<String>> = context.dataStore.data.map { it[busySessionsKey] ?: emptySet() }
+
+    val openCodeGoApiKey: Flow<String> = context.dataStore.data.map { it[goApiKey] ?: "" }
+
+    suspend fun setOpenCodeGoApiKey(value: String?) {
+        context.dataStore.edit { prefs ->
+            if (value.isNullOrBlank()) prefs.remove(goApiKey) else prefs[goApiKey] = value.trim()
+        }
+    }
 
     suspend fun setBusySessions(ids: Set<String>) {
         context.dataStore.edit { it[busySessionsKey] = ids }

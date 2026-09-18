@@ -9,9 +9,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -20,33 +25,56 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.opencode.mobile.AppViewModel
+import dev.opencode.mobile.OpenCodeApp
+import dev.opencode.mobile.data.model.UsageWindow
+import dev.opencode.mobile.ui.theme.OcTheme
 import dev.opencode.mobile.ui.theme.ThemeMode
+import kotlinx.coroutines.delay
+import java.time.Duration
+import java.time.Instant
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -157,6 +185,67 @@ fun SettingsScreen(
                 }
             }
 
+            item { SectionLabel("OpenCode Go") }
+            item {
+                val usageVm: UsageViewModel = viewModel(
+                    key = "opencode_go_usage",
+                    factory = viewModelFactory { initializer { UsageViewModel(app = context.applicationContext as OpenCodeApp) } },
+                )
+                val apiKey by usageVm.apiKey.collectAsState()
+                val usageState by usageVm.state.collectAsState()
+                var keyDraft by remember(apiKey) { mutableStateOf(apiKey) }
+                var revealKey by remember { mutableStateOf(false) }
+
+                LaunchedEffect(apiKey) {
+                    if (apiKey.isNotBlank()) usageVm.refresh()
+                }
+                LaunchedEffect(apiKey) {
+                    while (true) {
+                        delay(60_000)
+                        usageVm.refresh()
+                    }
+                }
+                LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { usageVm.refresh() }
+
+                SettingsCard {
+                    ListItem(
+                        headlineContent = { Text("API key") },
+                        supportingContent = { Text("Paste your OpenCode Go key to show plan usage.") },
+                        leadingContent = { Icon(Icons.Filled.VpnKey, contentDescription = null) },
+                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                    )
+                    OutlinedTextField(
+                        value = keyDraft,
+                        onValueChange = { keyDraft = it },
+                        label = { Text("sk-...") },
+                        singleLine = true,
+                        visualTransformation = if (revealKey) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { revealKey = !revealKey }) {
+                                Icon(
+                                    if (revealKey) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                    contentDescription = if (revealKey) "Hide API key" else "Show API key",
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            onClick = { usageVm.saveKey(keyDraft) },
+                            enabled = keyDraft != apiKey,
+                        ) { Text("Save") }
+                    }
+                    if (apiKey.isNotBlank()) {
+                        HorizontalDivider()
+                        UsageBars(state = usageState, onRefresh = { usageVm.refresh() })
+                    }
+                }
+            }
+
             item { SectionLabel("About") }
             item {
                 SettingsCard {
@@ -195,6 +284,77 @@ fun SettingsScreen(
         }
     }
 }
+
+@Composable
+private fun UsageBars(state: UsageUiState, onRefresh: () -> Unit) {
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Plan usage", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            if (state.loading) {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+            }
+            IconButton(onClick = onRefresh) {
+                Icon(Icons.Filled.Refresh, contentDescription = "Refresh usage")
+            }
+        }
+        val usage = state.usage
+        if (usage == null) {
+            Text(
+                state.error ?: "No usage data",
+                style = MaterialTheme.typography.bodySmall,
+                color = OcTheme.colors.textSecondary,
+            )
+        } else {
+            UsageRow("5 hours", usage.rolling)
+            UsageRow("Weekly", usage.weekly)
+            UsageRow("Monthly", usage.monthly)
+        }
+        state.error?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = OcTheme.colors.red)
+        }
+    }
+}
+
+@Composable
+private fun UsageRow(label: String, window: UsageWindow?) {
+    if (window == null) return
+    val percent = window.percent.coerceIn(0, 100)
+    val color = when {
+        percent >= 90 -> OcTheme.colors.red
+        percent >= 70 -> OcTheme.colors.orange
+        else -> MaterialTheme.colorScheme.primary
+    }
+    Column(Modifier.padding(vertical = 6.dp)) {
+        Row {
+            Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            Text("$percent%", style = MaterialTheme.typography.labelMedium, color = color)
+        }
+        LinearProgressIndicator(
+            progress = { percent / 100f },
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            color = color,
+            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+        )
+        window.resetsAt?.let {
+            Text(
+                "resets in ${formatReset(it)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = OcTheme.colors.textSecondary,
+            )
+        }
+    }
+}
+
+private fun formatReset(iso: String): String = runCatching {
+    val minutes = Duration.between(Instant.now(), Instant.parse(iso)).toMinutes()
+    when {
+        minutes <= 0 -> "now"
+        minutes < 60 -> "${minutes}m"
+        minutes < 1440 -> "${minutes / 60}h ${minutes % 60}m"
+        else -> "${minutes / 1440}d ${(minutes % 1440) / 60}h"
+    }
+}.getOrDefault("")
 
 @Composable
 private fun SectionLabel(text: String) {

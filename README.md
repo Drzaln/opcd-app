@@ -22,6 +22,7 @@ Kotlin · Jetpack Compose · Material 3 · dark theme · minSdk 26.
 | Diffs | Session diff, per-message diff (tap `± diff` under a user message) |
 | Offline | Room cache — sessions/messages show instantly, then refresh |
 | Notifications | Background watch: notifies when a turn finishes or opencode needs input |
+| OpenCode Go | Plan usage in Settings: paste your Go API key → 5-hour / weekly / monthly bars |
 | Discovery | mDNS auto-detect on LAN + a Tailscale (remote) field |
 
 ---
@@ -118,6 +119,9 @@ Reopen the app later and it reconnects to the saved server automatically.
   (grep). Tap a result to open it with syntax highlighting.
 - **Notifications** — Servers screen → toggle **Notify when a turn finishes**, grant the permission.
   You'll get a notification when opencode finishes or needs input, even with the app backgrounded.
+- **OpenCode Go usage** (optional) — Settings → **OpenCode Go** → paste your Go API key (copy it from
+  the [Zen console](https://opencode.ai/auth)). The app then shows your 5-hour / weekly / monthly
+  plan usage with reset times. The key is stored on-device and only sent to `opencode.ai`.
 
 ---
 
@@ -130,6 +134,8 @@ Reopen the app later and it reconnects to the saved server automatically.
   access to your Mac.
 - For TLS, use `tailscale serve` and connect via `https://<mac>.ts.net`.
 - Optionally restrict port `4096` to your own devices with Tailscale **ACLs**.
+- The optional **OpenCode Go API key** is stored in the app's private DataStore and sent only to
+  `opencode.ai` (never through the local server).
 
 ---
 
