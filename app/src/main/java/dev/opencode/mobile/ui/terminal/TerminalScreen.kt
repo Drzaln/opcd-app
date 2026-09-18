@@ -82,6 +82,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -256,7 +257,6 @@ private fun TerminalView(vm: TerminalViewModel) {
     val emulator = vm.emulator
     val defaultFg = MaterialTheme.colorScheme.onSurface
     val defaultBg = MaterialTheme.colorScheme.surface
-    val gutterFg = MaterialTheme.colorScheme.onSurfaceVariant
     val terminalFont = remember {
         FontFamily(
             androidx.compose.ui.text.font.Font(R.font.jetbrains_mono_nerd_regular, androidx.compose.ui.text.font.FontWeight.Normal),
@@ -264,13 +264,9 @@ private fun TerminalView(vm: TerminalViewModel) {
         )
     }
     val mono = remember(terminalFont) { TextStyle(fontFamily = terminalFont, fontSize = 12.sp, lineHeight = 16.sp) }
-    val numberStyle = remember(terminalFont) { TextStyle(fontFamily = terminalFont, fontSize = 10.sp, color = gutterFg) }
     val measurer = rememberTextMeasurer()
     val cellWidth = remember(measurer) { measurer.measure(AnnotatedString("M"), mono, softWrap = false).size.width }
     val rowHeight = remember(measurer) { measurer.measure(AnnotatedString("M"), mono, softWrap = false).size.height }
-    val gutterWidth = remember(measurer) {
-        measurer.measure(AnnotatedString("00000"), numberStyle, softWrap = false).size.width + 8
-    }
 
     val focusRequester = remember { FocusRequester() }
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
@@ -285,7 +281,7 @@ private fun TerminalView(vm: TerminalViewModel) {
         val heightPx = with(androidx.compose.ui.platform.LocalDensity.current) { maxHeight.toPx() }
         val cell = cellWidth.coerceAtLeast(1)
         val lineH = rowHeight.coerceAtLeast(1)
-        val cols = ((widthPx - gutterWidth) / cell).toInt().coerceIn(10, 500)
+        val cols = (widthPx / cell).toInt().coerceIn(10, 500)
         val rows = (heightPx / lineH).toInt().coerceIn(4, 300)
         LaunchedEffect(cols, rows, ui.active?.id) {
             if (ui.active != null) vm.resize(cols, rows)
@@ -325,14 +321,13 @@ private fun TerminalView(vm: TerminalViewModel) {
                     val last = (first + rows + 1).coerceAtMost(totalRows)
                     // Read the frame state so the canvas redraws on new output.
                     @Suppress("UNUSED_EXPRESSION") frameState.value
+                    // Measure with an explicit, positive Constraints — passing Size.Unspecified to
+                    // drawText produced NaN constraints and crashed the draw phase.
+                    val maxWidth = widthPx.toInt().coerceAtLeast(1)
+                    val maxHeight = lineH.coerceAtLeast(1)
                     for (index in first until last) {
                         val cells = emulator.screenLine(index) ?: continue
                         val y = index * lineH - scrollPx
-                        val number = measurer.measure(AnnotatedString("${index + 1}"), numberStyle, softWrap = false)
-                        drawText(
-                            textLayoutResult = number,
-                            topLeft = androidx.compose.ui.geometry.Offset((gutterWidth - number.size.width - 6).toFloat(), y),
-                        )
                         val isCursorRow = index == emulator.cursorRow
                         val annotated = rowAnnotated(
                             cells = cells,
@@ -341,13 +336,17 @@ private fun TerminalView(vm: TerminalViewModel) {
                             defaultFg = defaultFg,
                             defaultBg = defaultBg,
                         )
-                        drawText(
-                            textMeasurer = measurer,
+                        val layout = measurer.measure(
                             text = annotated,
-                            topLeft = androidx.compose.ui.geometry.Offset(gutterWidth.toFloat(), y),
                             style = mono,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Clip,
                             softWrap = false,
                             maxLines = 1,
+                            constraints = Constraints(maxWidth = maxWidth, maxHeight = maxHeight),
+                        )
+                        drawText(
+                            textLayoutResult = layout,
+                            topLeft = androidx.compose.ui.geometry.Offset(0f, y),
                         )
                     }
                 }
