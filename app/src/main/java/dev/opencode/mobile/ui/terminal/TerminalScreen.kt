@@ -1,10 +1,12 @@
 package dev.opencode.mobile.ui.terminal
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -61,7 +63,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -73,6 +77,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -247,12 +252,11 @@ private fun SessionList(
 @Composable
 private fun TerminalView(vm: TerminalViewModel) {
     val frameState = vm.frame.collectAsState()
-    val frame = frameState.value
     val ui by vm.ui.collectAsState()
     val emulator = vm.emulator
-    val context = LocalContext.current
     val defaultFg = MaterialTheme.colorScheme.onSurface
     val defaultBg = MaterialTheme.colorScheme.surface
+    val gutterFg = MaterialTheme.colorScheme.onSurfaceVariant
     val terminalFont = remember {
         FontFamily(
             androidx.compose.ui.text.font.Font(R.font.jetbrains_mono_nerd_regular, androidx.compose.ui.text.font.FontWeight.Normal),
@@ -260,95 +264,93 @@ private fun TerminalView(vm: TerminalViewModel) {
         )
     }
     val mono = remember(terminalFont) { TextStyle(fontFamily = terminalFont, fontSize = 12.sp, lineHeight = 16.sp) }
+    val numberStyle = remember(terminalFont) { TextStyle(fontFamily = terminalFont, fontSize = 10.sp, color = gutterFg) }
     val measurer = rememberTextMeasurer()
-    val cellWidth = remember(measurer) {
-        measurer.measure(AnnotatedString("M"), mono, softWrap = false).size.width
+    val cellWidth = remember(measurer) { measurer.measure(AnnotatedString("M"), mono, softWrap = false).size.width }
+    val rowHeight = remember(measurer) { measurer.measure(AnnotatedString("M"), mono, softWrap = false).size.height }
+    val gutterWidth = remember(measurer) {
+        measurer.measure(AnnotatedString("00000"), numberStyle, softWrap = false).size.width + 8
     }
-    val rowHeightPx = remember(measurer) { measurer.measure(AnnotatedString("M"), mono, softWrap = false).size.height }
 
-    val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
     val focusRequester = remember { FocusRequester() }
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    // Follow new output unless the user has scrolled up (auto-re-enables near the bottom).
-    var autoScroll by remember { mutableStateOf(true) }
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.firstVisibleItemIndex to listState.layoutInfo.totalItemsCount }
-            .distinctUntilChanged()
-            .collect { (first, total) -> autoScroll = total == 0 || first >= total - 2 }
-    }
     var input by remember { mutableStateOf("") }
     var ctrl by remember { mutableStateOf(false) }
-
-    // Invisible capture field: keys go straight to the terminal (the shell echoes them).
-    BasicTextField(
-        value = input,
-        onValueChange = { new ->
-            when {
-                new.length > input.length -> {
-                    val added = new.substring(input.length)
-                    vm.send(if (ctrl) toCtrl(added) else added)
-                    ctrl = false
-                }
-                new.length < input.length -> vm.send("\u007f".repeat(input.length - new.length))
-            }
-            input = new
-        },
-        keyboardOptions = KeyboardOptions(
-            imeAction = ImeAction.Send,
-            keyboardType = KeyboardType.Ascii,
-            autoCorrectEnabled = false,
-        ),
-        keyboardActions = KeyboardActions(onSend = { vm.send("\r"); input = "" }),
-        singleLine = true,
-        cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.Transparent),
-        modifier = Modifier
-            .size(1.dp)
-            .alpha(0f)
-            .focusRequester(focusRequester),
-    )
+    // Scroll offset in px from the top of (scrollback + screen); follow output unless the user drags up.
+    var scrollPx by remember { mutableStateOf(0f) }
+    var following by remember { mutableStateOf(true) }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val widthPx = with(androidx.compose.ui.platform.LocalDensity.current) { maxWidth.toPx() }
         val heightPx = with(androidx.compose.ui.platform.LocalDensity.current) { maxHeight.toPx() }
-        val cell = cellWidth.coerceAtLeast(1).toFloat()
-        val lineH = rowHeightPx.coerceAtLeast(1).toFloat()
-        val cols = (widthPx / cell).toInt().coerceIn(10, 500)
+        val cell = cellWidth.coerceAtLeast(1)
+        val lineH = rowHeight.coerceAtLeast(1)
+        val cols = ((widthPx - gutterWidth) / cell).toInt().coerceIn(10, 500)
         val rows = (heightPx / lineH).toInt().coerceIn(4, 300)
         LaunchedEffect(cols, rows, ui.active?.id) {
             if (ui.active != null) vm.resize(cols, rows)
         }
 
+        val totalRows = emulator.totalLines()
+        val contentHeight = totalRows * lineH
+        val maxScroll = (contentHeight - heightPx).coerceAtLeast(0f)
+        LaunchedEffect(frameState.value, following, totalRows) {
+            if (following) scrollPx = maxScroll
+        }
+        LaunchedEffect(ui.active?.id) {
+            following = true
+            scrollPx = maxScroll
+        }
+
         Column(Modifier.fillMaxSize().background(defaultBg)) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.weight(1f).fillMaxWidth().clickable {
-                    focusRequester.requestFocus()
-                    keyboard?.show()
-                },
-                contentPadding = PaddingValues(horizontal = 4.dp),
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .pointerInput(Unit) {
+                        detectVerticalDragGestures { change, dragAmount ->
+                            change.consume()
+                            following = false
+                            scrollPx = (scrollPx - dragAmount).coerceIn(0f, maxScroll)
+                            if (scrollPx >= maxScroll - 1f) following = true
+                        }
+                    }
+                    .clickable {
+                        focusRequester.requestFocus()
+                        keyboard?.show()
+                    },
             ) {
-                val total = emulator.totalLines()
-                items(total, key = { "line_$it" }) { index ->
-                    // Read the frame State inside the item scope so rows recompose on new output;
-                    // the emulator is a plain object and would otherwise be skipped.
+                Canvas(Modifier.fillMaxSize().clipToBounds()) {
+                    val first = (scrollPx / lineH).toInt().coerceIn(0, maxOf(0, totalRows - 1))
+                    val last = (first + rows + 1).coerceAtMost(totalRows)
+                    // Read the frame state so the canvas redraws on new output.
                     @Suppress("UNUSED_EXPRESSION") frameState.value
-                    val cells = emulator.screenLine(index) ?: emptyList()
-                    val isCursorRow = index == emulator.cursorRow
-                    TerminalRow(
-                        cells = cells,
-                        cursorCol = if (isCursorRow) emulator.cursorCol else -1,
-                        showCursor = isCursorRow && emulator.isCursorVisible,
-                        defaultFg = defaultFg,
-                        defaultBg = defaultBg,
-                        style = mono,
-                    )
+                    for (index in first until last) {
+                        val cells = emulator.screenLine(index) ?: continue
+                        val y = index * lineH - scrollPx
+                        val number = measurer.measure(AnnotatedString("${index + 1}"), numberStyle, softWrap = false)
+                        drawText(
+                            textLayoutResult = number,
+                            topLeft = androidx.compose.ui.geometry.Offset((gutterWidth - number.size.width - 6).toFloat(), y),
+                        )
+                        val isCursorRow = index == emulator.cursorRow
+                        val annotated = rowAnnotated(
+                            cells = cells,
+                            cursorCol = if (isCursorRow) emulator.cursorCol else -1,
+                            showCursor = isCursorRow && emulator.isCursorVisible,
+                            defaultFg = defaultFg,
+                            defaultBg = defaultBg,
+                        )
+                        drawText(
+                            textMeasurer = measurer,
+                            text = annotated,
+                            topLeft = androidx.compose.ui.geometry.Offset(gutterWidth.toFloat(), y),
+                            style = mono,
+                            softWrap = false,
+                            maxLines = 1,
+                        )
+                    }
                 }
-            }
-            LaunchedEffect(frame, autoScroll, listState.layoutInfo.totalItemsCount) {
-                if (!autoScroll) return@LaunchedEffect
-                val total = emulator.totalLines()
-                if (total > 0) listState.scrollToItem((total - 1).coerceAtLeast(0))
             }
 
             KeyRow(
@@ -383,6 +385,12 @@ private fun TerminalView(vm: TerminalViewModel) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )
+                    if (!following) {
+                        TextButton(onClick = {
+                            following = true
+                            scrollPx = maxScroll
+                        }) { Text("Bottom") }
+                    }
                     TextButton(onClick = {
                         focusRequester.requestFocus()
                         keyboard?.show()
@@ -395,7 +403,34 @@ private fun TerminalView(vm: TerminalViewModel) {
                 }
             }
         }
-        LaunchedEffect(ui.active?.id) { focusRequester.requestFocus() }
+
+        // Invisible capture field: keys go straight to the terminal (the shell echoes them).
+        BasicTextField(
+            value = input,
+            onValueChange = { new ->
+                when {
+                    new.length > input.length -> {
+                        val added = new.substring(input.length)
+                        vm.send(if (ctrl) toCtrl(added) else added)
+                        ctrl = false
+                    }
+                    new.length < input.length -> vm.send("\u007f".repeat(input.length - new.length))
+                }
+                input = new
+            },
+            keyboardOptions = KeyboardOptions(
+                imeAction = ImeAction.Send,
+                keyboardType = KeyboardType.Ascii,
+                autoCorrectEnabled = false,
+            ),
+            keyboardActions = KeyboardActions(onSend = { vm.send("\r"); input = "" }),
+            singleLine = true,
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.Transparent),
+            modifier = Modifier
+                .size(1.dp)
+                .alpha(0f)
+                .focusRequester(focusRequester),
+        )
     }
 }
 
@@ -454,42 +489,32 @@ private fun toCtrl(text: String): String = buildString {
     }
 }
 
-@Composable
-private fun TerminalRow(
+private fun rowAnnotated(
     cells: List<Cell>,
     cursorCol: Int,
     showCursor: Boolean,
     defaultFg: Color,
     defaultBg: Color,
-    style: TextStyle,
-) {
-    val text = buildAnnotatedString {
-        for ((index, cell) in cells.withIndex()) {
-            val inverse = cell.attr and Attr.INVERSE != 0
-            var fg = ansiColor(cell.fg, defaultFg)
-            var bg = ansiColor(cell.bg, defaultBg)
-            if (inverse) {
-                val t = fg; fg = bg; bg = t
-            }
-            val isCursor = showCursor && index == cursorCol
-            if (isCursor) {
-                val t = fg; fg = bg; bg = t
-            }
-            val span = SpanStyle(
-                color = fg,
-                background = if (bg == defaultBg) Color.Unspecified else bg,
-                fontWeight = if (cell.attr and Attr.BOLD != 0) FontWeight.Bold else null,
-                fontStyle = if (cell.attr and Attr.ITALIC != 0) FontStyle.Italic else null,
-                textDecoration = if (cell.attr and Attr.UNDERLINE != 0) TextDecoration.Underline else null,
-            )
-            withStyle(span) { append(if (cell.ch == '\u0000') ' ' else cell.ch) }
+): AnnotatedString = buildAnnotatedString {
+    for ((index, cell) in cells.withIndex()) {
+        val inverse = cell.attr and Attr.INVERSE != 0
+        var fg = ansiColor(cell.fg, defaultFg)
+        var bg = ansiColor(cell.bg, defaultBg)
+        if (inverse) {
+            val t = fg; fg = bg; bg = t
         }
+        val isCursor = showCursor && index == cursorCol
+        if (isCursor) {
+            val t = fg; fg = bg; bg = t
+        }
+        val span = SpanStyle(
+            color = fg,
+            background = if (bg == defaultBg) Color.Unspecified else bg,
+            fontWeight = if (cell.attr and Attr.BOLD != 0) FontWeight.Bold else null,
+            fontStyle = if (cell.attr and Attr.ITALIC != 0) FontStyle.Italic else null,
+            textDecoration = if (cell.attr and Attr.UNDERLINE != 0) TextDecoration.Underline else null,
+        )
+        withStyle(span) { append(if (cell.ch == '\u0000') ' ' else cell.ch) }
     }
-    Text(
-        text = text,
-        style = style,
-        softWrap = false,
-        maxLines = 1,
-        modifier = Modifier.fillMaxWidth(),
-    )
 }
+
