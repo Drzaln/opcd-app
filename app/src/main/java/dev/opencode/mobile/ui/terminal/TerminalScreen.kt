@@ -339,12 +339,23 @@ private fun TerminalView(vm: TerminalViewModel) {
                                     vm.send(if (ctrl) toCtrl(added) else added)
                                     ctrl = false
                                 }
-                                new.length < input.length -> vm.send("\u007f")
+                                // Keep the field's text so the IME's own backspace works; mirror
+                                // each removed char as DEL to the shell.
+                                new.length < input.length -> vm.send("\u007f".repeat(input.length - new.length))
                             }
-                            input = ""
+                            input = new
                         },
                         placeholder = { Text(if (ui.connected) "type…" else ui.status) },
-                        modifier = Modifier.weight(1f).focusRequester(focusRequester),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            imeAction = androidx.compose.ui.text.input.ImeAction.Send,
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Ascii,
+                        ),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                            onSend = { vm.send("\r"); input = "" },
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(focusRequester),
                         maxLines = 1,
                     )
                     Spacer(Modifier.width(6.dp))
@@ -376,6 +387,8 @@ private fun KeyRow(ctrl: Boolean, onCtrlToggle: () -> Unit, onKey: (String) -> U
         }
         TerminalKey("esc") { onKey("\u001b") }
         TerminalKey("tab") { onKey("\t") }
+        TerminalKey("⌫") { onKey("\u007f") }
+        TerminalKey("␣") { onKey(" ") }
         TerminalKey("↑") { onKey("\u001b[A") }
         TerminalKey("↓") { onKey("\u001b[B") }
         TerminalKey("←") { onKey("\u001b[D") }
