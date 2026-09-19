@@ -282,9 +282,12 @@ private fun TerminalView(vm: TerminalViewModel) {
     var scrollPx by remember { mutableStateOf(0f) }
     var following by remember { mutableStateOf(true) }
 
+    val terminalPad = 16.dp
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val widthPx = with(androidx.compose.ui.platform.LocalDensity.current) { maxWidth.toPx() }
-        val heightPx = with(androidx.compose.ui.platform.LocalDensity.current) { maxHeight.toPx() }
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val padPx = with(density) { terminalPad.toPx() }
+        val widthPx = with(density) { maxWidth.toPx() } - padPx * 2
+        val heightPx = with(density) { maxHeight.toPx() } - padPx
         val cell = cellWidth.coerceAtLeast(1)
         val lineH = rowHeight.coerceAtLeast(1)
         val cols = (widthPx / cell).toInt().coerceIn(10, 500)
@@ -309,6 +312,7 @@ private fun TerminalView(vm: TerminalViewModel) {
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    .padding(start = terminalPad, end = terminalPad, bottom = terminalPad)
                     .pointerInput(Unit) {
                         detectVerticalDragGestures { change, dragAmount ->
                             change.consume()
