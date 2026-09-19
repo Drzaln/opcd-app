@@ -24,6 +24,7 @@ Kotlin · Jetpack Compose · Material 3 · dark theme · minSdk 26.
 | Offline | Room cache — sessions/messages show instantly, then refresh |
 | Notifications | Background watch: notifies when a turn finishes or opencode needs input |
 | OpenCode Go | Plan usage in Settings: paste your Go API key → 5-hour / weekly / monthly bars |
+| Connection | Live/Checking/Offline chip in the app bar (tap for version + latency + recheck) |
 | Discovery | mDNS auto-detect on LAN + a Tailscale (remote) field |
 
 ---

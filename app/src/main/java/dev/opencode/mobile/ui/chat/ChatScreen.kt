@@ -102,6 +102,7 @@ import dev.opencode.mobile.ui.common.JsonUtil
 import dev.opencode.mobile.ui.common.shareText
 import dev.opencode.mobile.ui.common.MarkdownText
 import dev.opencode.mobile.ui.common.MutedLabel
+import dev.opencode.mobile.ui.common.ConnectionIndicator
 import dev.opencode.mobile.ui.common.shortenPath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -159,6 +160,7 @@ fun ChatScreen(
     val ui by vm.ui.collectAsState()
     val input by vm.input.collectAsState()
     val attachments by vm.attachments.collectAsState()
+    val connection by appVm.connection.collectAsState()
 
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         uri?.let { vm.addAttachment(it.toString()) }
@@ -217,6 +219,7 @@ fun ChatScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
                 actions = {
+                    ConnectionIndicator(state = connection, onRecheck = { appVm.refreshConnection() })
                     if (ui.busy) {
                         IconButton(onClick = { vm.abort() }) {
                             Icon(Icons.Filled.Block, contentDescription = "Abort", tint = MaterialTheme.colorScheme.error)

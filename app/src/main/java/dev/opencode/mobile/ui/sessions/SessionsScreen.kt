@@ -69,6 +69,7 @@ import dev.opencode.mobile.data.model.SessionStatus
 import dev.opencode.mobile.data.model.SessionUpdateBody
 import dev.opencode.mobile.data.net.ServerConfig
 import dev.opencode.mobile.ui.common.MutedLabel
+import dev.opencode.mobile.ui.common.ConnectionIndicator
 import dev.opencode.mobile.ui.common.shortenPath
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.encodeToString
@@ -259,6 +260,7 @@ fun SessionsScreen(
     )
     val ui by vm.ui.collectAsState()
     val projectDir by appVm.currentDirectory.collectAsState()
+    val connection by appVm.connection.collectAsState()
 
     var showDirPicker by remember { mutableStateOf(false) }
     var editTarget by remember { mutableStateOf<Session?>(null) }
@@ -310,6 +312,7 @@ fun SessionsScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
                 actions = {
+                    ConnectionIndicator(state = connection, onRecheck = { appVm.refreshConnection() })
                     IconButton(onClick = { vm.refresh() }) { Icon(Icons.Filled.Refresh, contentDescription = "Refresh") }
                 },
                 colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(

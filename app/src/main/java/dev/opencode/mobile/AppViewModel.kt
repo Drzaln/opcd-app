@@ -77,6 +77,7 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
             }
         }
         watchPrompts()
+        startConnectionWatch()
     }
 
     val notificationsEnabled: StateFlow<Boolean> =
@@ -271,8 +272,52 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
 
     fun events(server: ServerConfig) = repository.events(server)
 
+    private val _connection = MutableStateFlow(ConnectionState())
+    val connection: StateFlow<ConnectionState> = _connection
+
+    private fun startConnectionWatch() {
+        viewModelScope.launch {
+            activeServer.collectLatest { server ->
+                if (server == null) {
+                    _connection.value = ConnectionState(status = ConnectionStatus.OFFLINE, error = "No server selected")
+                    return@collectLatest
+                }
+                _connection.value = ConnectionState(status = ConnectionStatus.CHECKING)
+                while (true) {
+                    refreshConnection(server)
+                    kotlinx.coroutines.delay(30_000)
+                }
+            }
+        }
+    }
+
+    fun refreshConnection(server: ServerConfig? = activeServer.value) {
+        val target = server ?: return
+        viewModelScope.launch {
+            val start = System.currentTimeMillis()
+            val result = probe(target)
+            val latency = System.currentTimeMillis() - start
+            if (activeServer.value?.id != target.id) return@launch
+            _connection.value = if (result.ok) {
+                ConnectionState(
+                    status = ConnectionStatus.CONNECTED,
+                    version = result.version,
+                    latencyMs = latency,
+                    checkedAt = System.currentTimeMillis(),
+                )
+            } else {
+                ConnectionState(
+                    status = ConnectionStatus.OFFLINE,
+                    error = result.error,
+                    latencyMs = latency,
+                    checkedAt = System.currentTimeMillis(),
+                )
+            }
+        }
+    }
+
     suspend fun probe(server: ServerConfig): ServerProbeResult = try {
-        val api = repository.apiFor(server.copy(id = "probe-${System.currentTimeMillis()}"), cache = false)
+        val api = repository.apiFor(server.copy(id = "probe-${server.id}"), cache = true)
         val health = api.health()
         ServerProbeResult(ok = health.healthy, version = health.version)
     } catch (e: Exception) {
@@ -308,4 +353,14 @@ data class ServerProbeResult(
     val ok: Boolean,
     val version: String = "",
     val error: String = "",
+)
+
+enum class ConnectionStatus { CHECKING, CONNECTED, OFFLINE }
+
+data class ConnectionState(
+    val status: ConnectionStatus = ConnectionStatus.CHECKING,
+    val version: String? = null,
+    val error: String? = null,
+    val latencyMs: Long? = null,
+    val checkedAt: Long = 0L,
 )

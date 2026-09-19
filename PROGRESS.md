@@ -1,4 +1,4 @@
-<!-- ship: v0.1.33 (versionCode 34) -->
+<!-- ship: v0.1.34 (versionCode 35) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -25,7 +25,8 @@ after updating this file.
   `ServerStore` (DataStore), `NsdDiscovery` (mDNS).
 - `data/cache/CacheStore.kt` — Room key/json cache (sessions, messages).
 - `notify/` — notification channels + `SessionWatchService` (foreground SSE watcher).
-- `ui/common/` — `CodeHighlighter` (Prism4j), `Markdown`, `DiffLines`, `CodeBlock`, `shortenPath`.
+- `ui/common/` — `CodeHighlighter` (Prism4j), `Markdown`, `DiffLines`, `CodeBlock`, `shortenPath`,
+  `ConnectionIndicator`.
 - `ui/{servers,sessions,chat,files,file,diff,settings}/` — screens + their ViewModels.
 
 ## Server integration (hard-won facts)
@@ -128,6 +129,10 @@ consistent `TopAppBar` colors. Markdown / code blocks / diffs stay custom-render
 long-press to copy visible screen / whole scrollback) ·
 **OpenCode Go plan usage** in Settings (5h/weekly/monthly bars, refresh + auto-refresh, masked key
 with show/hide) · shortened project paths (`…/parent/folder` in rows, header, folder bar) ·
+**connection status chip** in the Sessions + Chat app bars (green Live / amber Checking… / red
+Offline; tap for version + latency + recheck). `AppViewModel.connection` polls `/global/health`
+every 30 s and on server switch (probe client is cached per server as `probe-<id>`) — health-based,
+not SSE-liveness. ·
 chat viewport is no longer yanked while reading old messages (follow-tail only when parked at the
 bottom; sending always snaps to the latest turn).
 

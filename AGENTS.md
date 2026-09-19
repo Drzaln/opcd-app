@@ -157,7 +157,9 @@ curl -u opencode:secret http://127.0.0.1:4199/file/content?path=settings.gradle.
   watch service, toggle in Servers screen), **OpenCode Go plan usage in Settings**, shortened project
   paths (`ui/common.shortenPath`), chat follow-tail that never yanks you away while reading old
   messages (send always snaps to bottom via `scrollToBottomSignal`), terminal clipboard (paste button
-  + long-press copy of visible/whole scrollback, `TerminalEmulator.linesText`).
+  + long-press copy of visible/whole scrollback, `TerminalEmulator.linesText`), connection status chip
+  in the Sessions/Chat app bars (`ConnectionIndicator` + `AppViewModel.connection`, `/global/health`
+  every 30 s).
 - Chat header shows session totals using the TUI's exact formula (`packages/tui/src/feature-plugins/sidebar/context.tsx`):
   tokens = last assistant message `input + output + reasoning + cache.read + cache.write`;
   % = tokens / model context limit; $ = `session.cost`.
