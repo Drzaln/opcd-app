@@ -1,4 +1,4 @@
-<!-- ship: v0.1.31 (versionCode 32) -->
+<!-- ship: v0.1.32 (versionCode 33) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -124,7 +124,8 @@ Material 3 pass: full color-role set (surfaceContainer*, inverse, outlineVariant
 match the custom palette, Settings screen (Appearance / Notifications / OpenCode Go / About / Security),
 bottom `NavigationBar` on Sessions, `ListItem` rows, Extended FABs, chat overflow menu,
 consistent `TopAppBar` colors. Markdown / code blocks / diffs stay custom-rendered ·
-**in-app terminal** (full PTY + ANSI/xterm emulator, bottom-nav item) ·
+**in-app terminal** (full PTY + ANSI/xterm emulator, bottom-nav item; paste from clipboard +
+long-press to copy visible screen / whole scrollback) ·
 **OpenCode Go plan usage** in Settings (5h/weekly/monthly bars, refresh + auto-refresh, masked key
 with show/hide) · shortened project paths (`…/parent/folder` in rows, header, folder bar) ·
 chat viewport is no longer yanked while reading old messages (follow-tail only when parked at the

@@ -93,8 +93,11 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24, private val scrollbackLim
 
     fun totalLines(): Int = scrollback.size + rows
 
-    fun snapshotText(): String = buildString {
-        for (i in 0 until totalLines()) {
+    fun snapshotText(): String = linesText(0, totalLines())
+
+    fun linesText(from: Int, count: Int): String = buildString {
+        val end = (from + count).coerceAtMost(totalLines())
+        for (i in from.coerceAtLeast(0) until end) {
             val line = screenLine(i) ?: continue
             append(line.joinToString("") { it.ch.toString() }.trimEnd())
             append('\n')

@@ -1,8 +1,10 @@
 package dev.opencode.mobile.ui.terminal
 
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -69,6 +71,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -270,8 +273,11 @@ private fun TerminalView(vm: TerminalViewModel) {
 
     val focusRequester = remember { FocusRequester() }
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     var input by remember { mutableStateOf("") }
     var ctrl by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
     // Scroll offset in px from the top of (scrollback + screen); follow output unless the user drags up.
     var scrollPx by remember { mutableStateOf(0f) }
     var following by remember { mutableStateOf(true) }
@@ -311,10 +317,13 @@ private fun TerminalView(vm: TerminalViewModel) {
                             if (scrollPx >= maxScroll - 1f) following = true
                         }
                     }
-                    .clickable {
-                        focusRequester.requestFocus()
-                        keyboard?.show()
-                    },
+                    .combinedClickable(
+                        onClick = {
+                            focusRequester.requestFocus()
+                            keyboard?.show()
+                        },
+                        onLongClick = { showMenu = true },
+                    ),
             ) {
                 Canvas(Modifier.fillMaxSize().clipToBounds()) {
                     val first = (scrollPx / lineH).toInt().coerceIn(0, maxOf(0, totalRows - 1))
@@ -349,6 +358,23 @@ private fun TerminalView(vm: TerminalViewModel) {
                             topLeft = androidx.compose.ui.geometry.Offset(0f, y),
                         )
                     }
+                }
+                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Copy visible screen") },
+                        onClick = {
+                            showMenu = false
+                            val first = (scrollPx / lineH).toInt().coerceIn(0, maxOf(0, totalRows - 1))
+                            copyToClipboard(context, clipboard, emulator.linesText(first, rows))
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Copy all") },
+                        onClick = {
+                            showMenu = false
+                            copyToClipboard(context, clipboard, emulator.snapshotText())
+                        },
+                    )
                 }
             }
 
@@ -391,6 +417,10 @@ private fun TerminalView(vm: TerminalViewModel) {
                         }) { Text("Bottom") }
                     }
                     TextButton(onClick = {
+                        val text = clipboard.getText()?.text
+                        if (!text.isNullOrEmpty()) vm.send(text)
+                    }) { Text("Paste") }
+                    TextButton(onClick = {
                         focusRequester.requestFocus()
                         keyboard?.show()
                     }) {
@@ -431,6 +461,16 @@ private fun TerminalView(vm: TerminalViewModel) {
                 .focusRequester(focusRequester),
         )
     }
+}
+
+private fun copyToClipboard(
+    context: android.content.Context,
+    clipboard: androidx.compose.ui.platform.ClipboardManager,
+    text: String,
+) {
+    if (text.isBlank()) return
+    clipboard.setText(AnnotatedString(text))
+    Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
 }
 
 @Composable

@@ -19,6 +19,7 @@ Kotlin · Jetpack Compose · Material 3 · dark theme · minSdk 26.
 | Commands | `/` picker for opencode slash commands |
 | Context | Header shows `N tokens · N% used · $N spent` (same formula as the TUI) |
 | Files | Folder browser, code viewer with syntax highlighting, fuzzy file search + content grep |
+| Terminal | Full PTY + ANSI/xterm emulator; paste from clipboard, long-press to copy output |
 | Diffs | Session diff, per-message diff (tap `± diff` under a user message) |
 | Offline | Room cache — sessions/messages show instantly, then refresh |
 | Notifications | Background watch: notifies when a turn finishes or opencode needs input |
@@ -117,6 +118,9 @@ Reopen the app later and it reconnects to the saved server automatically.
 - **Header** — `N tokens · N% used · $N spent` for the current session (matches the TUI).
 - **Files** — browse the project; search box switches between **Files** (fuzzy names) and **Content**
   (grep). Tap a result to open it with syntax highlighting.
+- **Terminal** — open from the Sessions screen. Tap it to type; the key row gives esc/tab/arrows/^C etc.
+  **Paste** sends your clipboard to the shell; **long-press** the terminal to copy the visible screen
+  or the whole scrollback.
 - **Notifications** — Servers screen → toggle **Notify when a turn finishes**, grant the permission.
   You'll get a notification when opencode finishes or needs input, even with the app backgrounded.
 - **OpenCode Go usage** (optional) — Settings → **OpenCode Go** → paste your Go API key (copy it from
