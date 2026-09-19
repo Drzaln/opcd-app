@@ -46,6 +46,9 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
     private val _currentDirectory = MutableStateFlow<String?>(null)
     val currentDirectory: StateFlow<String?> = _currentDirectory
 
+    private val _connection = MutableStateFlow(ConnectionState())
+    val connection: StateFlow<ConnectionState> = _connection
+
     data class Prompts(
         val permissions: List<PermissionRequest> = emptyList(),
         val questions: List<QuestionRequest> = emptyList(),
@@ -271,9 +274,6 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
     fun apiFor(server: ServerConfig) = repository.apiFor(server)
 
     fun events(server: ServerConfig) = repository.events(server)
-
-    private val _connection = MutableStateFlow(ConnectionState())
-    val connection: StateFlow<ConnectionState> = _connection
 
     private fun startConnectionWatch() {
         viewModelScope.launch {
