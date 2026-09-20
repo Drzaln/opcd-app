@@ -112,6 +112,8 @@ Reopen the app later and it reconnects to the saved server automatically.
 
 ## 4. Using the app
 
+Screens use standard Android navigation animations (slide in/out on push, reverse on back).
+
 - **Sessions** — tap to open, `+` for a new one, long-press for Rename/Delete, **Diff** for changes,
   folder bar to switch project (tappable card showing the folder name + shortened path; the picker
   sheet lists detected projects with the active one check-marked and filters as the list grows),

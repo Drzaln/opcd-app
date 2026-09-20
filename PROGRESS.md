@@ -1,4 +1,4 @@
-<!-- ship: v0.1.36 (versionCode 37) -->
+<!-- ship: v0.1.37 (versionCode 38) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -125,6 +125,8 @@ relative timestamps · empty states · SSE-liveness battery saving · system/dar
 (`OcTheme.colors`) · markdown tables + ordered/nested lists · summarize session ·
 retry failed send + cancel queued · WorkManager notification fallback (FGS 6h cap) ·
 home-screen status widget · two-pane layout on wide screens (≥720dp) · shared motion tokens ·
+standard Android push/pop navigation transitions (`NavHost` slide-in-from-right / slide-out on pop,
+240ms `Motion.MEDIUM`; replaces navigation-compose's default cross-fade) ·
 Material 3 pass: full color-role set (surfaceContainer*, inverse, outlineVariant) so M3 components
 match the custom palette, Settings screen (Appearance / Notifications / OpenCode Go / About / Security),
 bottom `NavigationBar` on Sessions, `ListItem` rows, Extended FABs, chat overflow menu,

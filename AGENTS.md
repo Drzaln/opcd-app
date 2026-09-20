@@ -108,6 +108,9 @@ Single `:app` module. No DI framework.
 ## Conventions
 
 - Kotlin, Jetpack Compose (Material3), dark theme only. Colors in `ui/theme/Color.kt`.
+- Navigation uses standard Android push/pop transitions (`NavHost` slide-in-from-right + slide-out on
+  pop, `Motion.MEDIUM` + `FastOutSlowInEasing` in `MainActivity`). Don't set per-screen transitions
+  unless a screen needs something different.
 - No comments unless they explain a non-obvious decision.
 - Chat renders messages by `part.type` in `PartView` (ChatScreen.kt). Add new part types there.
 - Chat has slash-command support: input matching `/<name> args` where `<name>` is a known `/command`

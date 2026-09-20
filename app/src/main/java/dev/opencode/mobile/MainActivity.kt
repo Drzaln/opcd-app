@@ -4,6 +4,9 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +47,7 @@ import dev.opencode.mobile.ui.files.FilesScreen
 import dev.opencode.mobile.ui.servers.ServersScreen
 import dev.opencode.mobile.ui.sessions.SessionsScreen
 import dev.opencode.mobile.ui.theme.OpenCodeTheme
+import dev.opencode.mobile.ui.theme.Motion
 import dev.opencode.mobile.update.UpdateState
 
 object Routes {
@@ -130,7 +134,34 @@ class MainActivity : ComponentActivity() {
                     selectedFile = null
                 }
 
-                NavHost(navController = navController, startDestination = Routes.SERVERS) {
+                NavHost(
+                    navController = navController,
+                    startDestination = Routes.SERVERS,
+                    enterTransition = {
+                        slideIntoContainer(
+                            AnimatedContentTransitionScope.SlideDirection.Left,
+                            animationSpec = tween(Motion.MEDIUM, easing = FastOutSlowInEasing),
+                        )
+                    },
+                    exitTransition = {
+                        slideOutOfContainer(
+                            AnimatedContentTransitionScope.SlideDirection.Left,
+                            animationSpec = tween(Motion.MEDIUM, easing = FastOutSlowInEasing),
+                        )
+                    },
+                    popEnterTransition = {
+                        slideIntoContainer(
+                            AnimatedContentTransitionScope.SlideDirection.Right,
+                            animationSpec = tween(Motion.MEDIUM, easing = FastOutSlowInEasing),
+                        )
+                    },
+                    popExitTransition = {
+                        slideOutOfContainer(
+                            AnimatedContentTransitionScope.SlideDirection.Right,
+                            animationSpec = tween(Motion.MEDIUM, easing = FastOutSlowInEasing),
+                        )
+                    },
+                ) {
                     composable(Routes.SERVERS) {
                         ServersScreen(
                             appVm = appVm,
