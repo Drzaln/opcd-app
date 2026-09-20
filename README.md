@@ -102,8 +102,9 @@ Requirements: JDK 17, Android SDK 36, Gradle 8.13 (wrapper included).
    - Otherwise use the **Tailscale (remote)** field: enter `100.111.24.2` (or `my-mac.ts.net` for
      `tailscale serve`), port `4096`, and the password.
 3. Tap **Connect**. The server is saved; it becomes your active server.
-4. On the **Sessions** screen use the folder bar's **Change** to pick which project folder to view —
-   sessions are scoped per folder.
+4. On the **Sessions** screen tap the folder bar to pick which project folder to view — sessions are
+   scoped per folder. The picker is a scrollable sheet with a filter box (appears when you have many
+   projects), a checkmark on the active folder, "Server default", and "Use a custom path".
 
 Reopen the app later and it reconnects to the saved server automatically.
 
@@ -112,7 +113,9 @@ Reopen the app later and it reconnects to the saved server automatically.
 ## 4. Using the app
 
 - **Sessions** — tap to open, `+` for a new one, long-press for Rename/Delete, **Diff** for changes,
-  folder bar to switch project, green/orange dot = idle/busy.
+  folder bar to switch project (tappable card showing the folder name + shortened path; the picker
+  sheet lists detected projects with the active one check-marked and filters as the list grows),
+  green/orange dot = idle/busy.
 - **Chat** — type and send. `/` opens the slash-command picker. The agent/model chips above the input
   choose who answers (remembered per server). Long-press a message to copy. `± diff` under your
   message shows that turn's changes. `Abort` stops a running turn. Todos appear in a collapsible panel.
@@ -152,7 +155,7 @@ Reopen the app later and it reconnects to the saved server automatically.
 | `Send failed: HTTP 400 …` | Update the app — an old build omitted the part `type` field. |
 | Terminal doesn't update live | You must run the **TUI** with `--port` (not a separate `opencode serve`). |
 | Input hidden behind keyboard | Fixed in current builds; update the app. |
-| Can't see sessions from another folder | Use the folder bar (**Change**) on the Sessions screen. |
+| Can't see sessions from another folder | Tap the folder bar on the Sessions screen and pick the project folder. |
 | Auto-detect only finds the LAN IP | mDNS advertises the LAN address; use the **Tailscale (remote)** field instead. |
 | Notifications silent | Grant notification permission; re-toggle the switch; check Android battery settings. |
 | "App not installed" on update | Signing-key mismatch (debug vs release). `adb uninstall dev.opencode.mobile`, then install. |

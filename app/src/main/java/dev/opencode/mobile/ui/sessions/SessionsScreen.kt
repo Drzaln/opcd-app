@@ -13,16 +13,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
@@ -35,9 +38,11 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -54,6 +59,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -143,6 +149,12 @@ class SessionsViewModel(
                 _ui.value = _ui.value.copy(loading = false, error = e.message ?: "Failed to load sessions")
             }
         }
+    }
+
+    fun switchDirectory() {
+        _ui.value = _ui.value.copy(sessions = emptyList(), statuses = emptyMap(), loading = true, error = null, query = "")
+        loadCached()
+        refresh()
     }
 
     fun updateTitle(id: String, title: String) {
@@ -270,7 +282,7 @@ fun SessionsScreen(
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
 
     LaunchedEffect(projectDir) {
-        vm.refresh()
+        vm.switchDirectory()
         vm.refreshProjects()
     }
 
@@ -424,13 +436,13 @@ fun SessionsScreen(
     }
 
     if (showDirPicker) {
-        DirectoryPickerDialog(
-            projects = ui.projects.map { it.worktree }.filter { it.isNotBlank() }.distinct(),
+        DirectoryPickerSheet(
+            projects = ui.projects.map { it.worktree }.filter { it.isNotBlank() }.distinct().sorted(),
             current = projectDir,
             onDismiss = { showDirPicker = false },
             onSelect = { dir ->
                 showDirPicker = false
-                appVm.setDirectory(dir)
+                if (dir != projectDir) appVm.setDirectory(dir)
             },
         )
     }
@@ -484,83 +496,201 @@ private fun DirectoryBar(directory: String?, onChange: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .clickable(onClick = onChange)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                folderName(directory),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                directory?.let { shortenPath(it, keep = 3) } ?: "Server default folder",
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = OcTheme.colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Spacer(Modifier.width(8.dp))
-        Text(
-            directory?.let { shortenPath(it) } ?: "Mac default project",
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        TextButton(onClick = onChange) { Text("Change") }
+        Icon(Icons.Filled.ArrowDropDown, contentDescription = "Change folder", tint = OcTheme.colors.textSecondary)
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DirectoryPickerDialog(
+private fun DirectoryPickerSheet(
     projects: List<String>,
     current: String?,
     onDismiss: () -> Unit,
     onSelect: (String?) -> Unit,
 ) {
+    var query by remember { mutableStateOf("") }
+    var showCustom by remember { mutableStateOf(false) }
     var custom by remember { mutableStateOf(current ?: "") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Project folder") },
-        text = {
-            Column {
+
+    val filtered = remember(projects, query) {
+        if (query.isBlank()) projects
+        else projects.filter { it.contains(query, ignoreCase = true) }
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+            Column(Modifier.padding(horizontal = 20.dp)) {
+                Text("Project folder", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(2.dp))
                 Text(
-                    "Sessions are stored per folder. Pick which project folder to show.",
+                    current?.let { shortenPath(it, keep = 3) } ?: "Server default",
                     style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
                     color = OcTheme.colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(12.dp))
-                Text("Detected projects", style = MaterialTheme.typography.labelMedium)
-                Spacer(Modifier.height(4.dp))
-                if (projects.isEmpty()) {
-                    MutedLabel("None detected yet")
+                if (projects.size > 6) {
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        placeholder = { Text("Filter folders") },
+                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                        trailingIcon = {
+                            if (query.isNotEmpty()) {
+                                IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Close, contentDescription = "Clear") }
+                            }
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
-                for (path in projects) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(path) }
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(8.dp))
-                        Text(path, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(4.dp))
+            }
+            LazyColumn(
+                Modifier.fillMaxWidth().heightIn(max = 420.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp),
+            ) {
+                if (query.isBlank()) {
+                    item {
+                        DirectoryRow(
+                            name = "Server default",
+                            subtitle = "Use the server's default folder",
+                            selected = current.isNullOrBlank(),
+                            onClick = { onSelect(null) },
+                        )
                     }
                 }
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = custom,
-                    onValueChange = { custom = it },
-                    label = { Text("Or type an absolute path") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                if (filtered.isEmpty()) {
+                    item {
+                        Text(
+                            if (query.isBlank()) "No folders detected yet" else "No folders match \"$query\"",
+                            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
+                            color = OcTheme.colors.textSecondary,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                items(filtered, key = { it }) { path ->
+                    DirectoryRow(
+                        name = folderName(path),
+                        subtitle = shortenPath(path, keep = 3),
+                        selected = path == current,
+                        onClick = { onSelect(path) },
+                    )
+                }
             }
-        },
-        confirmButton = {
-            Row {
-                TextButton(onClick = { onSelect(null) }) { Text("Default") }
-                Spacer(Modifier.width(8.dp))
-                Button(
-                    enabled = custom.isNotBlank(),
-                    onClick = { onSelect(custom.trim()) },
-                ) { Text("Use path") }
+            HorizontalDivider()
+            if (showCustom) {
+                Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                    OutlinedTextField(
+                        value = custom,
+                        onValueChange = { custom = it },
+                        label = { Text("Absolute path") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            enabled = custom.isNotBlank(),
+                            onClick = { onSelect(custom.trim()) },
+                        ) { Text("Use this path") }
+                        TextButton(onClick = { showCustom = false }) { Text("Cancel") }
+                    }
+                }
+            } else {
+                TextButton(
+                    onClick = {
+                        custom = current ?: ""
+                        showCustom = true
+                    },
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Use a custom path")
+                }
             }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+        }
+    }
+}
+
+@Composable
+private fun DirectoryRow(
+    name: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.Folder,
+            contentDescription = null,
+            tint = if (selected) MaterialTheme.colorScheme.primary else OcTheme.colors.textSecondary,
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                name,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = OcTheme.colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (selected) {
+            Spacer(Modifier.width(12.dp))
+            Icon(Icons.Filled.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+private fun folderName(path: String?): String {
+    if (path.isNullOrBlank()) return "Server default"
+    val trimmed = path.trimEnd('/')
+    return trimmed.substringAfterLast('/').ifEmpty { trimmed }
 }
 
 @Composable

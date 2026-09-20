@@ -1,4 +1,4 @@
-<!-- ship: v0.1.35 (versionCode 36) -->
+<!-- ship: v0.1.36 (versionCode 37) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -33,7 +33,9 @@ after updating this file.
 
 1. **Instance routing:** pass `?directory=<abs path>` on nearly every call (sessions, messages,
    prompt_async, command, diff, abort, todos, file list/content, status, SSE). Global: `/global/health`,
-   `/project`. The app keeps `AppViewModel.currentDirectory` (folder picker on Sessions screen).
+   `/project`. The app keeps `AppViewModel.currentDirectory` (folder picker on Sessions screen — a
+   tappable card that opens a scrollable bottom sheet; filter box when >6 projects, active folder
+   check-marked, "Server default" + custom path; `switchDirectory()` clears stale sessions on change).
 2. **SSE:** event type is inside the JSON body — `data: {"type":"...","properties":{...}}` — NOT the SSE
    `event:` field. `/event` also takes `?directory=`.
 3. **Prompt body:** must include the part discriminator. Json config is
@@ -109,7 +111,9 @@ Incremental SSE part patching · adaptive power-aware polling (3s busy / 15s fg 
 panel · agent+model switcher (persisted per server) · slash commands (`/command`) · copy message ·
 session status dots · rename session · per-message model/tokens/ctx/$ · session totals · queued
 indicator · per-message diff · project search (`/find`, `/find/file`) · offline cache (Room) ·
-notifications (foreground service toggle) · mDNS scan + Tailscale remote field · directory/folder picker ·
+notifications (foreground service toggle) · mDNS scan + Tailscale remote field · **redesigned folder
+picker** (tappable folder card + scrollable sheet, filter when the project list grows, active-folder
+checkmark, server-default + custom-path entries, no stale-session flash on switch) ·
 message pagination (load-older on scroll + pull-to-refresh) · in-app permission prompts
 (Allow once / Always / Deny) · image + file attachments from the phone (rendered inline) ·
 agent questions in-app (single/multi-select + custom text, answer or dismiss) ·
