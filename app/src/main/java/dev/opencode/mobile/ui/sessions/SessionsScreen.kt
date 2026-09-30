@@ -172,12 +172,13 @@ class SessionsViewModel(
         }
     }
 
-    fun createSession() {
+    fun createSession(onCreated: (String) -> Unit) {
         viewModelScope.launch {
             _ui.value = _ui.value.copy(creating = true)
             try {
-                api.createSession(dev.opencode.mobile.data.model.CreateSessionBody(), projectDir())
+                val session = api.createSession(dev.opencode.mobile.data.model.CreateSessionBody(), projectDir())
                 refresh()
+                onCreated(session.id)
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(creating = false, error = e.message ?: "Failed to create session")
             }
@@ -334,7 +335,7 @@ fun SessionsScreen(
         },
         floatingActionButton = {
             androidx.compose.material3.ExtendedFloatingActionButton(
-                onClick = { vm.createSession() },
+                onClick = { vm.createSession { onChat(it) } },
                 icon = { Icon(Icons.Filled.Add, contentDescription = null) },
                 text = { Text("New session") },
             )
@@ -407,7 +408,7 @@ fun SessionsScreen(
                     )
                     if (ui.query.isBlank()) {
                         Spacer(Modifier.height(8.dp))
-                        Button(onClick = { vm.createSession() }) { Text("New session") }
+                        Button(onClick = { vm.createSession { onChat(it) } }) { Text("New session") }
                     }
                 }
             }

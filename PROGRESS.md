@@ -1,4 +1,4 @@
-<!-- ship: v0.1.37 (versionCode 38) -->
+<!-- ship: v0.1.38 (versionCode 39) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -140,7 +140,9 @@ Offline; tap for version + latency + recheck). `AppViewModel.connection` polls `
 every 30 s and on server switch (probe client is cached per server as `probe-<id>`) — health-based,
 not SSE-liveness. ·
 chat viewport is no longer yanked while reading old messages (follow-tail only when parked at the
-bottom; sending always snaps to the latest turn).
+bottom; sending always snaps to the latest turn) ·
+**New session opens it immediately** (`createSession()` returns the created id → `onChat`, so the
+FAB / empty-state button navigates straight into the chat; two-pane selects it in place).
 
 ## Gotchas
 

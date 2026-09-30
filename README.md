@@ -13,7 +13,7 @@ Kotlin · Jetpack Compose · Material 3 · dark theme · minSdk 26.
 
 | Area | What you get |
 |---|---|
-| Sessions | List/resume, new, rename (long-press), delete, per-session folder picker, status dots, tokens + cost |
+| Sessions | List/resume, new (opens it immediately), rename (long-press), delete, per-session folder picker, status dots, tokens + cost |
 | Chat | Live streaming (SSE, incremental), markdown + code highlighting, reasoning + tool cards, todos panel, copy message (long-press), queued indicator |
 | Agents/models | Pick agent + model per message; selection persisted per server; per-message model name |
 | Commands | `/` picker for opencode slash commands |
@@ -114,7 +114,8 @@ Reopen the app later and it reconnects to the saved server automatically.
 
 Screens use standard Android navigation animations (slide in/out on push, reverse on back).
 
-- **Sessions** — tap to open, `+` for a new one, long-press for Rename/Delete, **Diff** for changes,
+- **Sessions** — tap to open, `+` for a new one (it opens straight away), long-press for
+  Rename/Delete, **Diff** for changes,
   folder bar to switch project (tappable card showing the folder name + shortened path; the picker
   sheet lists detected projects with the active one check-marked and filters as the list grows),
   green/orange dot = idle/busy.
