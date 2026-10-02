@@ -1,4 +1,4 @@
-<!-- ship: v0.1.38 (versionCode 39) -->
+<!-- ship: v0.1.39 (versionCode 40) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -142,7 +142,11 @@ not SSE-liveness. ·
 chat viewport is no longer yanked while reading old messages (follow-tail only when parked at the
 bottom; sending always snaps to the latest turn) ·
 **New session opens it immediately** (`createSession()` returns the created id → `onChat`, so the
-FAB / empty-state button navigates straight into the chat; two-pane selects it in place).
+FAB / empty-state button navigates straight into the chat; two-pane selects it in place) ·
+**SSE events are session-filtered** (`ChatViewModel.isOwnSession` checks `sessionID` on
+`message.updated`/`message.part.updated`/`message.removed`/`message.part.removed`/`session.status`/
+`session.idle`/`todo.updated` before patching). Fixes chat glitching when a folder holds several
+sessions — foreign-session events used to bleed into the open chat.
 
 ## Gotchas
 
@@ -175,6 +179,8 @@ FAB / empty-state button navigates straight into the chat; two-pane selects it i
   (often still `null`) silently misses every event — always resubscribe on `currentDirectory` change
   (`collectLatest`); (2) `server.heartbeat` arrives even when the stream is NOT delivering for the
   selected instance, so heartbeats must not count as liveness or the poll fallback is suppressed.
+  (3) the stream carries events for EVERY session in the folder, so consumers must filter by
+  `sessionID` (see `ChatViewModel.isOwnSession`) or a busy/idle session elsewhere glitches this one.
 - mDNS resolves the **LAN IP**, not Tailscale; use the "Tailscale (remote)" field (`100.x.y.z` or
   `<mac>.ts.net`, https if `.ts.net`).
 - **Update check avoids the GitHub REST API** (rate limit): `GET /releases/latest` 302-redirects to

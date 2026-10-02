@@ -396,10 +396,13 @@ class ChatViewModel(
                             "message.part.removed" -> applyPartRemoved(event)
                             "message.removed" -> applyMessageRemoved(event)
                             "session.status" -> applyStatus(event)
-                            "session.idle" -> _ui.update { it.copy(status = SessionStatus(type = "idle"), queued = 0) }
+                            "session.idle" -> if (isOwnSession(event)) {
+                                _ui.update { it.copy(status = SessionStatus(type = "idle"), queued = 0) }
+                            }
                             "todo.updated" -> applyTodos(event)
                             "server.connected" -> scheduleFullRefresh()
-                            "session.updated", "session.diff", "session.compacted" -> scheduleFullRefresh()
+                            "session.updated", "session.diff", "session.compacted" ->
+                                if (isOwnSession(event)) scheduleFullRefresh()
                         }
                     }
                 }
@@ -408,10 +411,18 @@ class ChatViewModel(
 
     // ---- Incremental patching (no network) ----
 
+    private fun isOwnSession(event: OcEvent): Boolean {
+        val id = (event.data as? JsonObject)?.get("sessionID")?.jsonPrimitive?.contentOrNull
+        return isOwnSession(id)
+    }
+
+    private fun isOwnSession(id: String?): Boolean = id.isNullOrEmpty() || id == sessionId
+
     private fun applyPartUpdated(event: OcEvent) {
         val properties = event.data as? JsonObject ?: return
         val partJson = properties["part"] ?: return
         val part = runCatching { json.decodeFromJsonElement<Part>(partJson) }.getOrNull() ?: return
+        if (!isOwnSession(part.sessionID)) return
         val delta = properties["delta"]?.jsonPrimitive?.contentOrNull
         val messageId = part.messageID
         _ui.update { state ->
@@ -436,6 +447,7 @@ class ChatViewModel(
         val properties = event.data as? JsonObject ?: return
         val info = properties["info"] ?: return
         val message = runCatching { json.decodeFromJsonElement<Message>(info) }.getOrNull() ?: return
+        if (!isOwnSession(message.sessionID)) return
         _ui.update { state ->
             val idx = state.messages.indexOfFirst { it.info.id == message.id }
             val list = state.messages.toMutableList()
@@ -449,6 +461,7 @@ class ChatViewModel(
     }
 
     private fun applyPartRemoved(event: OcEvent) {
+        if (!isOwnSession(event)) return
         val properties = event.data as? JsonObject ?: return
         val messageId = properties["messageID"]?.jsonPrimitive?.contentOrNull ?: return
         val partId = properties["partID"]?.jsonPrimitive?.contentOrNull ?: return
@@ -463,12 +476,14 @@ class ChatViewModel(
     }
 
     private fun applyMessageRemoved(event: OcEvent) {
+        if (!isOwnSession(event)) return
         val properties = event.data as? JsonObject ?: return
         val messageId = properties["messageID"]?.jsonPrimitive?.contentOrNull ?: return
         _ui.update { state -> state.copy(messages = state.messages.filterNot { it.info.id == messageId }) }
     }
 
     private fun applyStatus(event: OcEvent) {
+        if (!isOwnSession(event)) return
         val properties = event.data as? JsonObject ?: return
         val statusJson = properties["status"] ?: return
         val status = runCatching { json.decodeFromJsonElement<SessionStatus>(statusJson) }.getOrNull() ?: return
@@ -476,6 +491,7 @@ class ChatViewModel(
     }
 
     private fun applyTodos(event: OcEvent) {
+        if (!isOwnSession(event)) return
         val properties = event.data as? JsonObject ?: return
         val todosJson = properties["todos"] as? JsonArray ?: return
         val todos = runCatching { json.decodeFromJsonElement<List<Todo>>(todosJson) }.getOrNull() ?: return

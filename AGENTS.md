@@ -163,6 +163,8 @@ curl -u opencode:secret http://127.0.0.1:4199/file/content?path=settings.gradle.
   + long-press copy of visible/whole scrollback, `TerminalEmulator.linesText`), connection status chip
   in the Sessions/Chat app bars (`ConnectionIndicator` + `AppViewModel.connection`, `/global/health`
   every 30 s), new-session auto-navigate (`createSession` → `onChat` opens the created session).
+  SSE events are filtered by `sessionID` (`ChatViewModel.isOwnSession`) — the directory-scoped stream
+  carries every session in the folder, so unfiltered patching glitched the open chat.
 - Chat header shows session totals using the TUI's exact formula (`packages/tui/src/feature-plugins/sidebar/context.tsx`):
   tokens = last assistant message `input + output + reasoning + cache.read + cache.write`;
   % = tokens / model context limit; $ = `session.cost`.
