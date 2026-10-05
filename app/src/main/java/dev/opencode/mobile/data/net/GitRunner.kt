@@ -3,7 +3,9 @@ package dev.opencode.mobile.data.net
 import dev.opencode.mobile.data.model.PtyCreateBody
 import dev.opencode.mobile.terminal.OkHttpPtyTransport
 import dev.opencode.mobile.terminal.PtyEvent
-import kotlinx.coroutines.flow.takeWhile
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 data class GitResult(val output: String, val exitCode: Int) {
@@ -16,15 +18,20 @@ data class GitResult(val output: String, val exitCode: Int) {
  * The server exposes no endpoint to mutate VCS state (`/vcs` is read-only), so branch
  * switching/creation runs git itself. The PTY is the only primitive that streams the
  * command's stdout/stderr; we append an exit-code marker and read the socket to completion.
+ *
+ * The PTY is removed the moment the command exits, so a fast git command would be reaped
+ * before the WebSocket handshake finishes (404, "Expected HTTP 101"). A trailing `sleep`
+ * keeps it alive; we stop reading as soon as the exit marker shows up.
  */
 class GitRunner(
     private val server: ServerConfig,
     private val api: OpenCodeApi,
 ) {
     private val exitMarker = "__OC_EXIT__"
+    private val exitPattern = Regex(exitMarker + "[0-9]+")
 
     suspend fun run(command: String, dir: String?, timeoutMs: Long = 15_000): GitResult {
-        val script = "$command\nprintf '$exitMarker%s\\n' \$?"
+        val script = "$command\nprintf '$exitMarker%s\\n' \$?\nsleep 60"
         val pty = runCatching {
             api.ptyCreate(
                 PtyCreateBody(command = "sh", args = listOf("-c", script), cwd = dir, title = "git"),
@@ -35,18 +42,27 @@ class GitRunner(
         val transport = OkHttpPtyTransport(server, pty.id, dir)
         val buffer = StringBuilder()
         var failure: String? = null
+        val done = CompletableDeferred<Unit>()
 
         try {
             withTimeoutOrNull(timeoutMs) {
-                transport.events
-                    .takeWhile { event ->
-                        when (event) {
-                            is PtyEvent.Closed -> false
-                            is PtyEvent.Failed -> { failure = event.message; false }
-                            else -> true
+                coroutineScope {
+                    val job = launch {
+                        transport.events.collect { event ->
+                            when (event) {
+                                is PtyEvent.Data -> {
+                                    buffer.append(event.text)
+                                    if (exitPattern.containsMatchIn(buffer)) done.complete(Unit)
+                                }
+                                is PtyEvent.Failed -> { failure = event.message; done.complete(Unit) }
+                                is PtyEvent.Closed -> done.complete(Unit)
+                                is PtyEvent.Meta -> {}
+                            }
                         }
                     }
-                    .collect { event -> if (event is PtyEvent.Data) buffer.append(event.text) }
+                    done.await()
+                    job.cancel()
+                }
             }
         } finally {
             transport.close()

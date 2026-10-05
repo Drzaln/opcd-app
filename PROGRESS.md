@@ -1,4 +1,4 @@
-<!-- ship: v0.1.40 (versionCode 41) -->
+<!-- ship: v0.1.41 (versionCode 42) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -113,6 +113,10 @@ after updating this file.
     Branch names are validated (`^[A-Za-z0-9/_.-]+$`, no leading `-`, no `..`) before interpolation.
     Use `git --no-pager -c color.ui=false` — a TTY otherwise starts a pager and emits terminal
     control sequences.
+    **Gotcha:** the server reaps a PTY the instant its command exits, so a fast git command is gone
+    before the WebSocket handshake finishes (connect 404 → OkHttp `Expected HTTP 101 response but
+    was '404 Not Found'`). Append `sleep 60` after the exit marker and stop reading as soon as the
+    marker matches (don't wait for socket close).
 
 ## Features done
 

@@ -74,6 +74,9 @@ Note: release APK is signed with the debug key unless `keystore.properties` + CI
 - **Git branch:** `/vcs` is read-only (no branch-mutating route on the server). Switching/creating
   branches runs git through a one-shot PTY (`POST /pty` + `ws /pty/{id}/connect`) — see
   `data/net/GitRunner.kt`. The Sessions screen shows the branch and opens a picker sheet.
+  The server reaps the PTY the moment the command exits, so append `sleep 60` after the exit-marker
+  `printf` and stop reading as soon as the marker appears — otherwise the WebSocket connect 404s
+  (`Expected HTTP 101 response but was '404 Not Found'`).
 - Live updates come from the `/event` SSE stream. The app passes `?directory=` to scope events to the
   selected project instance.
 - **Quirk:** SSE event type lives in the JSON body (`data: {"type":"message.updated","properties":{...}}`),
