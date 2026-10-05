@@ -55,6 +55,9 @@ interface OpenCodeApi {
     @GET("path")
     suspend fun currentPath(@Query("directory") directory: String? = null): JsonObject
 
+    @GET("vcs")
+    suspend fun vcs(@Query("directory") directory: String? = null): dev.opencode.mobile.data.model.VcsInfo
+
     @GET("session")
     suspend fun sessions(@Query("directory") directory: String? = null): List<Session>
 

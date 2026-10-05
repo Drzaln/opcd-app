@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
@@ -31,6 +33,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -73,6 +76,8 @@ import dev.opencode.mobile.OpenCodeApp
 import dev.opencode.mobile.data.model.Session
 import dev.opencode.mobile.data.model.SessionStatus
 import dev.opencode.mobile.data.model.SessionUpdateBody
+import dev.opencode.mobile.data.net.GitResult
+import dev.opencode.mobile.data.net.GitRunner
 import dev.opencode.mobile.data.net.ServerConfig
 import dev.opencode.mobile.ui.common.MutedLabel
 import dev.opencode.mobile.ui.common.ConnectionIndicator
@@ -101,6 +106,11 @@ class SessionsViewModel(
         val creating: Boolean = false,
         val query: String = "",
         val shareUrl: String? = null,
+        val branch: String? = null,
+        val branches: List<String> = emptyList(),
+        val branchLoading: Boolean = false,
+        val branchOpRunning: Boolean = false,
+        val branchError: String? = null,
     ) {
         val visibleSessions: List<Session>
             get() = if (query.isBlank()) sessions else sessions.filter { session ->
@@ -114,12 +124,14 @@ class SessionsViewModel(
     val ui: StateFlow<UiState> = _ui
 
     private val api = app.repository.apiFor(server)
+    private val git = GitRunner(server, api)
     private val unshared = mutableSetOf<String>()
 
     init {
         loadCached()
         refresh()
         refreshProjects()
+        refreshBranch()
     }
 
     private val jsonCache = KxJson { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
@@ -152,9 +164,19 @@ class SessionsViewModel(
     }
 
     fun switchDirectory() {
-        _ui.value = _ui.value.copy(sessions = emptyList(), statuses = emptyMap(), loading = true, error = null, query = "")
+        _ui.value = _ui.value.copy(
+            sessions = emptyList(),
+            statuses = emptyMap(),
+            loading = true,
+            error = null,
+            query = "",
+            branch = null,
+            branches = emptyList(),
+            branchError = null,
+        )
         loadCached()
         refresh()
+        refreshBranch()
     }
 
     fun updateTitle(id: String, title: String) {
@@ -168,6 +190,59 @@ class SessionsViewModel(
         viewModelScope.launch {
             runCatching { api.projects() }.getOrNull()?.let { projects ->
                 _ui.value = _ui.value.copy(projects = projects)
+            }
+        }
+    }
+
+    fun refreshBranch() {
+        viewModelScope.launch {
+            val info = runCatching { api.vcs(projectDir()) }.getOrNull()
+            _ui.value = _ui.value.copy(branch = info?.branch)
+        }
+    }
+
+    fun loadBranches() {
+        viewModelScope.launch {
+            _ui.value = _ui.value.copy(branchLoading = true, branchError = null)
+            val result = git.run("git --no-pager -c color.ui=false branch --format='%(refname:short)'", projectDir())
+            val branches = if (result.ok) {
+                result.output.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.distinct().sorted().toList()
+            } else {
+                emptyList()
+            }
+            _ui.value = _ui.value.copy(
+                branches = branches,
+                branchLoading = false,
+                branchError = if (result.ok) null else result.output.ifBlank { "git branch failed (exit ${result.exitCode})" },
+            )
+        }
+    }
+
+    fun checkoutBranch(name: String) = runBranchOp(name) { git.run("git --no-pager -c color.ui=false checkout $name", projectDir()) }
+
+    fun createBranch(name: String) = runBranchOp(name) { git.run("git --no-pager -c color.ui=false checkout -b $name", projectDir()) }
+
+    fun clearBranchError() {
+        _ui.value = _ui.value.copy(branchError = null)
+    }
+
+    private fun runBranchOp(name: String, op: suspend () -> GitResult) {
+        if (!GitRunner.isValidBranch(name)) {
+            _ui.value = _ui.value.copy(branchError = "Invalid branch name")
+            return
+        }
+        viewModelScope.launch {
+            _ui.value = _ui.value.copy(branchOpRunning = true, branchError = null)
+            val result = op()
+            if (result.ok) {
+                _ui.value = _ui.value.copy(branchOpRunning = false)
+                refreshBranch()
+                loadBranches()
+            } else {
+                _ui.value = _ui.value.copy(
+                    branchOpRunning = false,
+                    branchError = result.output.ifBlank { "git exited with code ${result.exitCode}" },
+                )
             }
         }
     }
@@ -276,6 +351,7 @@ fun SessionsScreen(
     val connection by appVm.connection.collectAsState()
 
     var showDirPicker by remember { mutableStateOf(false) }
+    var showBranchSheet by remember { mutableStateOf(false) }
     var editTarget by remember { mutableStateOf<Session?>(null) }
     var editTitle by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<Session?>(null) }
@@ -376,6 +452,16 @@ fun SessionsScreen(
                 directory = projectDir,
                 onChange = { showDirPicker = true },
             )
+            if (!ui.branch.isNullOrBlank()) {
+                BranchBar(
+                    branch = ui.branch!!,
+                    onChange = {
+                        vm.clearBranchError()
+                        showBranchSheet = true
+                        vm.loadBranches()
+                    },
+                )
+            }
             OutlinedTextField(
                 value = ui.query,
                 onValueChange = { vm.setQuery(it) },
@@ -445,6 +531,19 @@ fun SessionsScreen(
                 showDirPicker = false
                 if (dir != projectDir) appVm.setDirectory(dir)
             },
+        )
+    }
+
+    if (showBranchSheet) {
+        BranchSheet(
+            current = ui.branch,
+            branches = ui.branches,
+            loading = ui.branchLoading,
+            running = ui.branchOpRunning,
+            error = ui.branchError,
+            onDismiss = { showBranchSheet = false },
+            onCheckout = { vm.checkoutBranch(it) },
+            onCreate = { vm.createBranch(it) },
         )
     }
 
@@ -524,6 +623,44 @@ private fun DirectoryBar(directory: String?, onChange: () -> Unit) {
         }
         Spacer(Modifier.width(8.dp))
         Icon(Icons.Filled.ArrowDropDown, contentDescription = "Change folder", tint = OcTheme.colors.textSecondary)
+    }
+}
+
+@Composable
+private fun BranchBar(branch: String, onChange: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .clickable(onClick = onChange)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.AccountTree,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text("Branch", style = MaterialTheme.typography.labelSmall, color = OcTheme.colors.textSecondary)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            branch,
+            style = MaterialTheme.typography.bodyMedium,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            Icons.Filled.SwapHoriz,
+            contentDescription = "Switch or create branch",
+            tint = OcTheme.colors.textSecondary,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 
@@ -692,6 +829,117 @@ private fun folderName(path: String?): String {
     if (path.isNullOrBlank()) return "Server default"
     val trimmed = path.trimEnd('/')
     return trimmed.substringAfterLast('/').ifEmpty { trimmed }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BranchSheet(
+    current: String?,
+    branches: List<String>,
+    loading: Boolean,
+    running: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onCheckout: (String) -> Unit,
+    onCreate: (String) -> Unit,
+) {
+    var newName by remember { mutableStateOf("") }
+    val valid = GitRunner.isValidBranch(newName.trim())
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+            Column(Modifier.padding(horizontal = 20.dp)) {
+                Text("Branch", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Filled.AccountTree,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        current ?: "—",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = OcTheme.colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        placeholder = { Text("New branch name") },
+                        singleLine = true,
+                        enabled = !running,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        enabled = valid && !running,
+                        onClick = {
+                            val name = newName.trim()
+                            newName = ""
+                            onCreate(name)
+                        },
+                    ) { Text("Create") }
+                }
+                if (error != null && error.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(error, color = OcTheme.colors.red, style = MaterialTheme.typography.bodySmall)
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+            if (loading) {
+                androidx.compose.material3.CircularProgressIndicator(Modifier.padding(20.dp))
+            }
+            LazyColumn(
+                Modifier.fillMaxWidth().heightIn(max = 420.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp),
+            ) {
+                if (!loading && branches.isEmpty()) {
+                    item {
+                        Text(
+                            "No branches found",
+                            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
+                            color = OcTheme.colors.textSecondary,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                items(branches, key = { it }) { name ->
+                    val isCurrent = name == current
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = !running && !isCurrent) { onCheckout(name) }
+                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            if (isCurrent) Icons.Filled.Check else Icons.Filled.AccountTree,
+                            contentDescription = null,
+                            tint = if (isCurrent) MaterialTheme.colorScheme.primary else OcTheme.colors.textSecondary,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                            color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

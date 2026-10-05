@@ -1,4 +1,4 @@
-<!-- ship: v0.1.39 (versionCode 40) -->
+<!-- ship: v0.1.40 (versionCode 41) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -104,6 +104,15 @@ after updating this file.
     (`ServerStore` `opencode_go_api_key`, from the user's Zen console) and calls it directly via
     `data/net/GoUsageClient.kt`. Poll-based (no SSE): refresh on open/save/resume + every 60 s while
     the Settings screen is visible. Aggregate only — no per-model breakdown / balance.
+17. **Git branch:** current branch is `GET /vcs?directory=` → `{branch, default_branch}` (both
+    `null` outside a repo → hide the UI). The server exposes **no** branch-mutating route
+    (`/vcs` is GET-only; POST falls through to the web SPA), so switching/creating runs git through
+    a one-shot PTY: `POST /pty` `{command:"sh",args:["-c","<git cmd>; printf '__OC_EXIT__%s\n' $?"],
+    cwd,title:"git"}` → connect `ws /pty/{id}/connect` → collect stdout/stderr until close → parse
+    exit code. `data/net/GitRunner.kt` wraps this (ANSI-stripped, timeout, deletes the pty).
+    Branch names are validated (`^[A-Za-z0-9/_.-]+$`, no leading `-`, no `..`) before interpolation.
+    Use `git --no-pager -c color.ui=false` — a TTY otherwise starts a pager and emits terminal
+    control sequences.
 
 ## Features done
 
@@ -146,7 +155,9 @@ FAB / empty-state button navigates straight into the chat; two-pane selects it i
 **SSE events are session-filtered** (`ChatViewModel.isOwnSession` checks `sessionID` on
 `message.updated`/`message.part.updated`/`message.removed`/`message.part.removed`/`session.status`/
 `session.idle`/`todo.updated` before patching). Fixes chat glitching when a folder holds several
-sessions — foreign-session events used to bleed into the open chat.
+sessions — foreign-session events used to bleed into the open chat. ·
+**git branch bar** on the Sessions screen (current branch from `/vcs`; tap to list local branches,
+switch, or create one — git runs server-side through a one-shot PTY, see integration fact 17).
 
 ## Gotchas
 

@@ -247,6 +247,12 @@ data class Project(
 )
 
 @Serializable
+data class VcsInfo(
+    val branch: String? = null,
+    @SerialName("default_branch") val defaultBranch: String? = null,
+)
+
+@Serializable
 data class FileNode(
     val name: String = "",
     val path: String = "",

@@ -13,7 +13,7 @@ Kotlin · Jetpack Compose · Material 3 · dark theme · minSdk 26.
 
 | Area | What you get |
 |---|---|
-| Sessions | List/resume, new (opens it immediately), rename (long-press), delete, per-session folder picker, status dots, tokens + cost |
+| Sessions | List/resume, new (opens it immediately), rename (long-press), delete, per-session folder picker, git branch bar (switch/create), status dots, tokens + cost |
 | Chat | Live streaming (SSE, incremental), markdown + code highlighting, reasoning + tool cards, todos panel, copy message (long-press), queued indicator |
 | Agents/models | Pick agent + model per message; selection persisted per server; per-message model name |
 | Commands | `/` picker for opencode slash commands |
@@ -118,6 +118,7 @@ Screens use standard Android navigation animations (slide in/out on push, revers
   Rename/Delete, **Diff** for changes,
   folder bar to switch project (tappable card showing the folder name + shortened path; the picker
   sheet lists detected projects with the active one check-marked and filters as the list grows),
+  branch bar under the folder to see the current git branch and switch/create branches,
   green/orange dot = idle/busy.
 - **Chat** — type and send. `/` opens the slash-command picker. The agent/model chips above the input
   choose who answers (remembered per server). Long-press a message to copy. `± diff` under your

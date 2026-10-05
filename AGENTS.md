@@ -67,10 +67,13 @@ Note: release APK is signed with the debug key unless `keystore.properties` + CI
   todos, file list/content, session status). The app keeps a global `currentDirectory` in `AppViewModel`
   (`setDirectory()`); pick a folder from the Sessions screen. `/project` lists known projects.
 - Endpoints used (see `data/net/OpenCodeApi.kt`): `/global/health`, `/project`, `/project/current`, `/path`,
-  `/session` (GET list + POST create + GET/PATCH/DELETE by id), `/session/status`,
+  `/vcs` (current branch), `/session` (GET list + POST create + GET/PATCH/DELETE by id), `/session/status`,
   `/session/{id}/message` (GET + POST), `/session/{id}/prompt_async`, `/session/{id}/command`,
   `/session/{id}/diff`, `/session/{id}/abort`, `/session/{id}/todo`, `/file`, `/file/content`,
   `/file/status`, `/agent`, `/provider`, `/command`.
+- **Git branch:** `/vcs` is read-only (no branch-mutating route on the server). Switching/creating
+  branches runs git through a one-shot PTY (`POST /pty` + `ws /pty/{id}/connect`) — see
+  `data/net/GitRunner.kt`. The Sessions screen shows the branch and opens a picker sheet.
 - Live updates come from the `/event` SSE stream. The app passes `?directory=` to scope events to the
   selected project instance.
 - **Quirk:** SSE event type lives in the JSON body (`data: {"type":"message.updated","properties":{...}}`),
@@ -88,7 +91,8 @@ Single `:app` module. No DI framework.
 - `data/net`: `ServerStore` (server list + active id), `OpenCodeRepository`, `OpenCodeApi` (Retrofit iface),
   `NsdDiscovery` (mDNS auto-detect of `opencode-<port>` on `_http._tcp` — resolves the LAN IP, NOT the
   Tailscale IP; the servers screen has a separate "Tailscale (remote)" field for that), `ServerConfig`,
-  `GoUsageClient` (OpenCode Go plan usage — external Bearer call, see below).
+  `GoUsageClient` (OpenCode Go plan usage — external Bearer call, see below),
+  `GitRunner` (one-shot PTY git commands for branch switch/create).
 - `AppViewModel` (MainActivity): global state — servers list, active server, `probe()` health check.
 - Screens (nav routes in `MainActivity.Routes`): servers → sessions → chat / files / file viewer / diff,
   plus `Settings` (Appearance / Notifications / OpenCode Go / About / Security).
