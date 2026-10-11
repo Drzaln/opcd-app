@@ -116,7 +116,7 @@ class ChatViewModel(
             val cached = app.cacheStore.get(messagesKey) ?: return@launch
             val messages = runCatching { json.decodeFromString<List<MessageData>>(cached) }.getOrNull() ?: return@launch
             if (messages.isNotEmpty()) {
-                _ui.update { it.copy(messages = messages, loading = false) }
+                _ui.update { it.copy(messages = messages.sortedBy { m -> m.info.time?.created ?: 0L }, loading = false) }
             }
         }
     }
@@ -581,11 +581,13 @@ class ChatViewModel(
 
     // The latest page is fetched on every refresh; anything already loaded above it is older and kept.
     private fun mergePage(existing: List<MessageData>, page: List<MessageData>): List<MessageData> {
-        if (existing.isEmpty() || page.isEmpty()) return page.ifEmpty { existing }
+        if (existing.isEmpty() || page.isEmpty()) {
+            return (page.ifEmpty { existing }).sortedBy { it.info.time?.created ?: 0L }
+        }
         val pageIds = page.mapTo(HashSet()) { it.info.id }
         val pageFirstTime = page.first().info.time?.created ?: Long.MIN_VALUE
         val older = existing.filter { it.info.id !in pageIds && (it.info.time?.created ?: Long.MIN_VALUE) < pageFirstTime }
-        return older + page
+        return (older + page).sortedBy { it.info.time?.created ?: 0L }
     }
 
     companion object {

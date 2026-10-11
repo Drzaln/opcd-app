@@ -270,9 +270,8 @@ class OpenCodeApi(
         Protocol.V2 -> {
             val body = v2.messages(id, limit)
             buildJsonArray {
-                body.arrayData().forEach { m ->
-                    m.asObjectOrNull()?.let { add(json.encodeToJsonElement(MessageData.serializer(), mapMessage(it, id))) }
-                }
+                // V2 returns newest-first; the app expects oldest-first (ascending).
+                body.arrayData().mapNotNull { m -> m.asObjectOrNull()?.let { mapMessage(it, id) } }.asReversed().forEach { add(json.encodeToJsonElement(MessageData.serializer(), it)) }
             }
         }
     }
@@ -282,9 +281,8 @@ class OpenCodeApi(
         Protocol.V2 -> {
             val body = v2.messages(id, limit, before).asJsonObject()
             val list = body.field("data").arr() ?: JsonArray(emptyList())
-            val array = buildJsonArray {
-                list.forEach { m -> m.asObjectOrNull()?.let { add(json.encodeToJsonElement(MessageData.serializer(), mapMessage(it, id))) } }
-            }
+            val mapped = list.mapNotNull { m -> m.asObjectOrNull()?.let { mapMessage(it, id) } }.asReversed()
+            val array = buildJsonArray { mapped.forEach { add(json.encodeToJsonElement(MessageData.serializer(), it)) } }
             val cursor = body.field("cursor")?.asObjectOrNull()?.field("next").str()
             val headers = if (cursor.isNullOrBlank()) Headers.headersOf() else Headers.headersOf("X-Next-Cursor", cursor)
             Response.success(array, headers)
