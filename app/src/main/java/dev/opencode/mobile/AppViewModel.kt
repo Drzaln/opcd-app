@@ -238,7 +238,7 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
             val server = activeServer.value ?: return@launch
             val ok = runCatching {
                 repository.apiFor(server)
-                    .replyQuestion(request.id, QuestionReplyBody(answers), currentDirectory.value)
+                    .replyQuestion(request, answers, currentDirectory.value)
                     .isSuccessful
             }.getOrDefault(false)
             if (!ok) _prompts.update { p -> p.copy(questions = p.questions + request) }
@@ -250,7 +250,7 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
             _prompts.update { p -> p.copy(questions = p.questions.filterNot { it.id == request.id }) }
             val server = activeServer.value ?: return@launch
             runCatching {
-                repository.apiFor(server).rejectQuestion(request.id, currentDirectory.value)
+                repository.apiFor(server).rejectQuestion(request, currentDirectory.value)
             }
         }
     }

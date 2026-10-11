@@ -55,25 +55,42 @@ Note: release APK is signed with the debug key unless `keystore.properties` + CI
 
 ## How the app talks to opencode
 
-- Mac runs `opencode serve` (NOT `web` — web opens a browser) bound to `0.0.0.0` or the Tailscale IP,
-  with `OPENCODE_SERVER_PASSWORD` set.
-- For real-time two-way sync, run the **TUI itself** on a fixed port instead of a separate serve/web:
-  `OPENCODE_SERVER_PASSWORD=secret opencode --hostname <tailscale-ip> --port 4096`. The TUI IS the
-  server; the app connects to that same server, so app↔TUI updates flow both ways. (A separate
-  `opencode serve` is a different process → its own event bus → no live TUI updates.)
+- Mac runs an opencode server bound to `0.0.0.0` or the Tailscale IP, with a password set.
+- **opencode V2 changed this:** the TUI is now a *client*, not a server. There is no
+  `opencode --hostname/--port` on the root command anymore. The shared **background service** is the
+  server; expose it and both the TUI and the app become clients of the same process/event bus, so
+  app↔TUI updates flow both ways. Configure it once from a plain terminal (each `service set` restarts
+  the server, so don't run it inside an opencode session):
+  ```sh
+  opencode service set hostname 0.0.0.0
+  opencode service set port 4096
+  opencode service set password sebuahpassword
+  opencode service start
+  ```
+  Then run plain `opencode` (TUI) — it auto-discovers and authenticates to that same service.
+  `opencode service get` shows the config; `service unset <key>` reverts a setting.
+- Alternatively, a foreground/isolated server: `OPENCODE_SERVER_PASSWORD=secret opencode serve
+  --hostname 0.0.0.0 --port 4096` (a separate process → its own event bus → no live TUI sync unless
+  clients are pointed at it with `opencode --server http://127.0.0.1:4096`).
 - App talks plain HTTP(S). Auth = HTTP Basic (`opencode` user + password). Server returns 401 otherwise.
 - **Instance routing:** sessions/files are scoped per project folder. Almost every call passes an optional
   `?directory=<path>` query to select the project instance (sessions, messages, prompt_async, diff, abort,
   todos, file list/content, session status). The app keeps a global `currentDirectory` in `AppViewModel`
   (`setDirectory()`); pick a folder from the Sessions screen. `/project` lists known projects.
-- Endpoints used (see `data/net/OpenCodeApi.kt`): `/global/health`, `/project`, `/project/current`, `/path`,
+- **Two API generations, one client.** The app auto-detects and supports **opencode 1.x and 2.0**.
+  `data/net/OpenCodeApi.kt` is the app-facing compat class (same methods the UI already calls); it
+  probes `/api/info` (2.0 → JSON `{version}`, 1.x → 404) and delegates to either `OpenCodeV1Api`
+  (Retrofit, 1.x routes) or `OpenCodeV2Api` (Retrofit, `/api/*` 2.0 routes returning raw `JsonElement`),
+  mapping V2 payloads back to the internal DTOs. See `PROGRESS.md` → "opencode 2.0 (V2 API) support".
+- Endpoints used (1.x; see `data/net/OpenCodeV1Api.kt`): `/global/health`, `/project`, `/project/current`, `/path`,
   `/vcs` (current branch), `/session` (GET list + POST create + GET/PATCH/DELETE by id), `/session/status`,
   `/session/{id}/message` (GET + POST), `/session/{id}/prompt_async`, `/session/{id}/command`,
   `/session/{id}/diff`, `/session/{id}/abort`, `/session/{id}/todo`, `/file`, `/file/content`,
-  `/file/status`, `/agent`, `/provider`, `/command`.
+  `/file/status`, `/agent`, `/provider`, `/command`. On 2.0 these become `/api/...` with different
+  shapes/envelopes (sessions accept `?directory=`, most instance routes use `?location[directory]=`).
 - **Git branch:** `/vcs` is read-only (no branch-mutating route on the server). Switching/creating
-  branches runs git through a one-shot PTY (`POST /pty` + `ws /pty/{id}/connect`) — see
-  `data/net/GitRunner.kt`. The Sessions screen shows the branch and opens a picker sheet.
+  branches runs git through a one-shot PTY (`POST /pty` on 1.x, `/api/pty` on 2.0; connect at
+  `ws /pty/{id}/connect` or `/api/pty/{id}/connect?ticket=`) — see `data/net/GitRunner.kt`. The Sessions screen shows the branch and opens a picker sheet.
   The server reaps the PTY the moment the command exits, so append `sleep 60` after the exit-marker
   `printf` and stop reading as soon as the marker appears — otherwise the WebSocket connect 404s
   (`Expected HTTP 101 response but was '404 Not Found'`).
@@ -91,7 +108,8 @@ Note: release APK is signed with the debug key unless `keystore.properties` + CI
 Single `:app` module. No DI framework.
 
 - `OpenCodeApp` (Application) owns `ServerStore` (DataStore prefs) + `OpenCodeRepository` (Retrofit/OkHttp/SSE factory).
-- `data/net`: `ServerStore` (server list + active id), `OpenCodeRepository`, `OpenCodeApi` (Retrofit iface),
+- `data/net`: `ServerStore` (server list + active id), `OpenCodeRepository`, `OpenCodeApi` (app-facing
+  compat client, 1.x + 2.0), `OpenCodeV1Api`/`OpenCodeV2Api` (Retrofit interfaces),
   `NsdDiscovery` (mDNS auto-detect of `opencode-<port>` on `_http._tcp` — resolves the LAN IP, NOT the
   Tailscale IP; the servers screen has a separate "Tailscale (remote)" field for that), `ServerConfig`,
   `GoUsageClient` (OpenCode Go plan usage — external Bearer call, see below),
@@ -178,7 +196,10 @@ curl -u opencode:secret http://127.0.0.1:4199/file/content?path=settings.gradle.
 - Remaining ideas: image attachments (image/* file parts), share-session links, LazyColumn line
   virtualization for very large files, WorkManager/notification fallback instead of a foreground service.
 - Verified against opencode 1.18.31 live server (sessions, messages, prompt_async, command, diff,
-  SSE, file list/content, find/find-file, provider/agent lists).
+  SSE, file list/content, find/find-file, provider/agent lists) **and opencode 2.0.26** (V2 `/api/*`
+  surface: auto-detect, sessions + directory filter, projects, vcs branch, chat load/render/send +
+  SSE, agents/models/commands, fs list/read/find, pty create/shells/ticket/websocket, session diff
+  patch). V2-only gaps: todos, content grep, share links (removed server-side).
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:46cd31e7 -->
 ## Beads Issue Tracker

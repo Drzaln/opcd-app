@@ -1,4 +1,4 @@
-<!-- ship: v0.1.41 (versionCode 42) -->
+<!-- ship: v0.1.42 (versionCode 43) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -21,13 +21,56 @@ after updating this file.
 - `MainActivity` — NavHost + `Routes` (servers→sessions→chat/files/file/diff).
 - `AppViewModel` — servers list, active server, `currentDirectory`, notifications toggle, `probe()`.
 - `data/model/Dtos.kt` — all kotlinx DTOs.
-- `data/net/`: `OpenCodeApi` (Retrofit), `OpenCodeRepository` (client cache + SSE + reconnect),
-  `ServerStore` (DataStore), `NsdDiscovery` (mDNS).
+- `data/net/`: `OpenCodeApi` (app-facing compat client — auto-detects 1.x vs 2.0), `OpenCodeV1Api`
+  (Retrofit, 1.x routes), `OpenCodeV2Api` (Retrofit, `/api/*` 2.0 routes returning raw `JsonElement`),
+  `OpenCodeRepository` (client cache + SSE + reconnect + V2 event mapping), `ServerStore` (DataStore),
+  `NsdDiscovery` (mDNS).
 - `data/cache/CacheStore.kt` — Room key/json cache (sessions, messages).
 - `notify/` — notification channels + `SessionWatchService` (foreground SSE watcher).
 - `ui/common/` — `CodeHighlighter` (Prism4j), `Markdown`, `DiffLines`, `CodeBlock`, `shortenPath`,
   `ConnectionIndicator`.
 - `ui/{servers,sessions,chat,files,file,diff,settings}/` — screens + their ViewModels.
+
+## opencode 2.0 (V2 API) support
+
+The app speaks **both** API generations and picks one per server by probing `/api/info` (2.0 answers
+JSON `{version}`; 1.x 404s → fall back to 1.x). All mapping lives in `data/net/OpenCodeApi.kt`, which
+exposes the same app-facing methods and returns the existing internal DTOs, so screens/ViewModels are
+unchanged. V2 payloads are parsed as raw `JsonElement` (see `OpenCodeV2Api.kt`) and mapped to V1 shapes.
+
+V2 differences that matter (verified against 2.0.26):
+
+- **Base path:** everything moves under `/api/…`; the bare root serves the web UI (HTML), which is
+  what produced the old `Unexpected JSON token … had '<'` crash.
+- **Instance routing:** sessions/files accept `?directory=<path>`, but `vcs`/`agent`/`provider`/`model`/
+  `fs/*`/`pty`/`permission` take a nested `?location[directory]=<path>` (OkHttp leaves the brackets).
+- **Envelopes:** most routes return `{location, data}` or `{data, cursor}`; `/api/project` returns a
+  bare array.
+- **Sessions:** `location.directory`, nested `tokens`, `model{id,providerID}`, `agent` string;
+  status is `/api/session/active` (`{data:{<id>:{type:"running"}}}` → mapped to busy/idle).
+- **Messages are a different model:** `{type:"user|assistant", content:[{type:"text|reasoning|tool"}]}`
+  (no `parts`/`role`). Mapped to the app's `MessageData`/`Part` (tool `state.content[]` joined to
+  `output`); reasoning/tool/text render unchanged.
+- **Sending:** `/api/session/{id}/prompt` `{text, files:[{uri,name}]}` (no inline model/agent) — the
+  client first POSTs `/agent` and `/model`; commands go to `/api/session/{id}/command` `{name,text}`;
+  abort is `/interrupt`.
+- **Files:** `/api/fs/list` `{path,type}` (dirs have a trailing `/`), `/api/fs/read/<path>` returns
+  raw bytes (content sniffed for binary), `/api/fs/find?type=file|directory`. **No content grep** →
+  the Content search tab returns nothing.
+- **Diff:** `/api/session/{id}/diff` returns a unified-diff `patch` per file (not full before/after) →
+  `DiffLines.parsePatch` renders it.
+- **PTY:** create/list/delete under `/api/pty`; websocket `/api/pty/{id}/connect?location[directory]=&
+  cursor=&ticket=`, ticket from `POST /api/pty/{id}/connect-token`; shells from `/api/config/shell`.
+- **Prompts:** permissions are `/api/permission/request` + `/api/session/{id}/permission/{requestID}/reply`
+  `{decision}`; agent **questions are now "forms"** (`/api/form`, reply `/api/session/{id}/form/{formID}/
+  reply {answer:{<key>:value}}`) — mapped back onto the existing question UI (options carry their
+  `value`, fields their `key`).
+- **Events:** `data: {"id","type","data"}` with types like `session.text.delta`, `session.step.*`,
+  `session.tool.*`, `session.execution.*`, `session.usage.updated`, `permission.asked`, `form.created`.
+  `OpenCodeRepository` maps these onto the V1 event names the UI already understands (deltas →
+  debounced full refresh; `execution.started/succeeded` → status busy/idle; forms/permissions →
+  prompt shapes).
+- **Removed in 2.0 (degraded):** todos (panel empty), content grep, session share/unshare links.
 
 ## Server integration (hard-won facts)
 
@@ -45,9 +88,11 @@ after updating this file.
 4. **Session diff:** `/session/{id}/diff[?messageID=]` returns `FileDiff{file,before,after,additions,
    deletions}` where `before`/`after` are FULL file contents → compute line diffs client-side
    (`ui/common/DiffLines.kt`). `messageID` must be a **user** message (server requires `role==="user"`).
-5. **Realtime both ways:** the Mac must run the **TUI on a fixed port**
-   (`OPENCODE_SERVER_PASSWORD=… opencode --hostname <ip> --port 4096`). A separate `opencode serve`
-   is a different process/event-bus → no live TUI↔app sync. (Linux box: see `README.linux.md`.)
+5. **Realtime both ways:** the Mac must expose a shared server the TUI and app both attach to.
+   **1.x:** run the TUI on a fixed port (`OPENCODE_SERVER_PASSWORD=… opencode --hostname <ip> --port 4096`).
+   **2.0:** configure the background service once (`opencode service set hostname/port/password` then
+   `opencode service start`) and run plain `opencode` — it attaches to that service. A separate
+   `opencode serve` is a different process/event-bus → no live TUI↔app sync. (Linux box: see `README.linux.md`.)
 6. **Auth:** HTTP Basic (`opencode` user + password). 401 otherwise.
 7. **Totals formula** (matches TUI `sidebar/context.tsx`): tokens = last assistant message
    `input+output+reasoning+cache.read+cache.write`; % = tokens / model `limit.context`;
@@ -220,3 +265,9 @@ switch, or create one — git runs server-side through a one-shot PTY, see integ
 Validated against opencode **1.18.31** live server: sessions, messages, prompt_async, command, diff,
 SSE, file list/content, find/find-file, provider/agent, PATCH title. `make serve` starts a local test
 server on :4199 (password `secret`).
+
+Validated against opencode **2.0.26** live server (on a real device): version auto-detect, sessions
+list + `?directory=` filtering, project/folder picker, git branch bar, chat load/render
+(text/reasoning/tool), send + live SSE streaming, agent/model/command lists, files list/navigate/read
+(+ syntax highlighting), file find, terminal create + shells + ticket + websocket, session diff
+(patch rendering). V1 path is unchanged.

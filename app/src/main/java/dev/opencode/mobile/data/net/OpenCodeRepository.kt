@@ -1,5 +1,7 @@
 package dev.opencode.mobile.data.net
 
+import dev.opencode.mobile.data.model.PermissionRequest
+import dev.opencode.mobile.data.model.QuestionRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -14,8 +16,12 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import okhttp3.Credentials
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -51,12 +57,17 @@ class OpenCodeRepository {
         }
     }
 
-    private fun build(server: ServerConfig): OpenCodeApi = Retrofit.Builder()
-        .baseUrl(baseUrl(server))
-        .client(httpClient(server))
-        .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
-        .build()
-        .create(OpenCodeApi::class.java)
+    private fun build(server: ServerConfig): OpenCodeApi {
+        val client = httpClient(server)
+        val retrofit = Retrofit.Builder()
+            .baseUrl(baseUrl(server))
+            .client(client)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+        val v1 = retrofit.create(OpenCodeV1Api::class.java)
+        val v2 = retrofit.create(OpenCodeV2Api::class.java)
+        return OpenCodeApi(server, v1, v2, client)
+    }
 
     fun events(server: ServerConfig, projectDir: String? = null): Flow<OcEvent> = flow {
         val key = "${server.id}|${projectDir ?: ""}"
@@ -106,12 +117,21 @@ class OpenCodeRepository {
     private fun rawEvents(server: ServerConfig, projectDir: String?): Flow<OcEvent> = callbackFlow {
         // Dedicated client so cancelling the stream cannot break the shared API client.
         val client = newHttpClient(server)
+        val protocol = apiFor(server).protocol()
         val url = buildString {
             append(baseUrl(server))
-            append("event")
+            when (protocol) {
+                Protocol.V1 -> append("event")
+                Protocol.V2 -> append("api/event")
+            }
             if (projectDir != null) {
-                append("?directory=")
-                append(java.net.URLEncoder.encode(projectDir, "UTF-8"))
+                if (protocol == Protocol.V1) {
+                    append("?directory=")
+                    append(java.net.URLEncoder.encode(projectDir, "UTF-8"))
+                } else {
+                    append("?location[directory]=")
+                    append(java.net.URLEncoder.encode(projectDir, "UTF-8"))
+                }
             }
         }
         val request = Request.Builder()
@@ -127,6 +147,7 @@ class OpenCodeRepository {
             request = request,
             factory = factory,
             isClosed = { closed },
+            protocol = protocol,
             onEvent = { trySend(it) },
         )
         factory.newEventSource(request, listener)
@@ -143,10 +164,13 @@ class OpenCodeRepository {
         private val request: Request,
         private val factory: EventSource.Factory,
         private val isClosed: () -> Boolean,
+        private val protocol: Protocol,
         private val onEvent: (OcEvent) -> Unit,
     ) : EventSourceListener() {
 
         private var backoff = 1000L
+
+        private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
         override fun onOpen(eventSource: EventSource, response: Response) {
             backoff = 1000L
@@ -154,6 +178,14 @@ class OpenCodeRepository {
 
         override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
             val json = runCatching { Json.parseToJsonElement(data) }.getOrNull()
+            if (protocol == Protocol.V2) {
+                if (json is JsonObject) {
+                    val v2Type = json["type"]?.jsonPrimitive?.contentOrNull ?: type ?: "event"
+                    val props = json["data"] as? JsonObject
+                    mapV2Event(v2Type, props)?.let(onEvent)
+                }
+                return
+            }
             val eventType = if (json is JsonObject) {
                 json["type"]?.jsonPrimitive?.contentOrNull
             } else {
@@ -161,6 +193,26 @@ class OpenCodeRepository {
             }
             val props = if (json is JsonObject) json["properties"] else json
             onEvent(OcEvent(eventType ?: type ?: "event", props))
+        }
+
+        private fun mapV2Event(type: String, props: JsonObject?): OcEvent? = when {
+            type == "server.connected" -> OcEvent("server.connected", props)
+            type == "permission.asked" -> props?.let { OcEvent("permission.asked", json.encodeToJsonElement(PermissionRequest.serializer(), mapPermissionRequest(it))) }
+            type == "permission.replied" || type == "permission.rejected" ->
+                OcEvent("permission.replied", buildJsonObject { put("requestID", props?.get("id")?.jsonPrimitive?.contentOrNull ?: "") })
+            type == "form.created" -> props?.let { OcEvent("question.asked", json.encodeToJsonElement(QuestionRequest.serializer(), mapFormToQuestionRequest(it))) }
+            type == "form.replied" || type == "form.cancelled" ->
+                OcEvent("question.replied", buildJsonObject { put("requestID", props?.get("id")?.jsonPrimitive?.contentOrNull ?: "") })
+            type == "session.execution.started" -> OcEvent("session.status", buildJsonObject {
+                put("sessionID", props?.get("sessionID")?.jsonPrimitive?.contentOrNull ?: "")
+                put("status", buildJsonObject { put("type", "busy") })
+            })
+            type == "session.execution.succeeded" || type == "session.execution.failed" || type == "session.execution.interrupted" ->
+                OcEvent("session.idle", buildJsonObject { put("sessionID", props?.get("sessionID")?.jsonPrimitive?.contentOrNull ?: "") })
+            type.startsWith("session.") -> OcEvent("session.updated", buildJsonObject {
+                put("sessionID", props?.get("sessionID")?.jsonPrimitive?.contentOrNull ?: "")
+            })
+            else -> null
         }
 
         override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {

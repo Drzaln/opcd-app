@@ -97,10 +97,12 @@ class TerminalViewModel(
         lastCursor = null
         _frame.value = emulator.version
         _ui.value = _ui.value.copy(active = pty, status = "connecting…", connected = false)
-        val t = OkHttpPtyTransport(server, pty.id, projectDir(), cursor = null)
-        transport = t
         connectJob = viewModelScope.launch {
             try {
+                val protocol = api.protocol()
+                val ticket = api.ptyTicket(pty.id, projectDir())
+                val t = OkHttpPtyTransport(server, pty.id, projectDir(), cursor = null, protocol = protocol, ticket = ticket)
+                transport = t
                 t.events.collect { event ->
                     when (event) {
                         is PtyEvent.Data -> {

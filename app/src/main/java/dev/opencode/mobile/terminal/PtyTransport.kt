@@ -34,6 +34,8 @@ class OkHttpPtyTransport(
     private val ptyId: String,
     directory: String?,
     cursor: Long? = null,
+    protocol: dev.opencode.mobile.data.net.Protocol = dev.opencode.mobile.data.net.Protocol.V1,
+    ticket: String? = null,
 ) : PtyTransport {
 
     private val client = OkHttpClient.Builder()
@@ -53,12 +55,19 @@ class OkHttpPtyTransport(
             else -> "ws://$base"
         }
         append(ws)
-        append("/pty/")
+        if (protocol == dev.opencode.mobile.data.net.Protocol.V2) append("/api/pty/") else append("/pty/")
         append(ptyId)
         append("/connect")
         val query = mutableListOf<String>()
-        if (directory != null) query.add("directory=" + java.net.URLEncoder.encode(directory, "UTF-8"))
+        if (directory != null) {
+            if (protocol == dev.opencode.mobile.data.net.Protocol.V2) {
+                query.add("location[directory]=" + java.net.URLEncoder.encode(directory, "UTF-8"))
+            } else {
+                query.add("directory=" + java.net.URLEncoder.encode(directory, "UTF-8"))
+            }
+        }
         if (cursor != null) query.add("cursor=$cursor")
+        if (ticket != null) query.add("ticket=" + java.net.URLEncoder.encode(ticket, "UTF-8"))
         if (query.isNotEmpty()) append("?").append(query.joinToString("&"))
     }
 

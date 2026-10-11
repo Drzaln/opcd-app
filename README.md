@@ -27,14 +27,42 @@ Kotlin · Jetpack Compose · Material 3 · dark theme · minSdk 26.
 | Connection | Live/Checking/Offline chip in the app bar (tap for version + latency + recheck) |
 | Discovery | mDNS auto-detect on LAN + a Tailscale (remote) field |
 
+> **opencode 2.0 note:** the app auto-detects the server API generation (1.x or 2.0). On 2.0 a few
+> things differ because the server dropped them: **content grep** (the *Content* search tab returns
+> nothing), the **todos panel** stays empty, and **share/unshare session links** are unavailable
+> (share links were removed server-side). Everything else — sessions, chat, files, diffs, terminal,
+> permissions, agent questions — works on both.
+
 ---
 
 ## 1. Mac side — run opencode as a server
 
 > Running the server on **Linux** instead? See **[README.linux.md](README.linux.md)**.
 
-The phone talks to the same server the terminal TUI uses. The simplest way is to make the **TUI
-itself** listen on a fixed port — then terminal and phone update each other in real time.
+The app supports **both opencode 1.x and 2.0** (it auto-detects the API generation). How you expose
+the server depends on your opencode version.
+
+### opencode 2.0 (recommended)
+
+In 2.0 the TUI is a *client* of a shared background service, so expose that service and both the TUI
+and the phone become clients of the same event bus (live sync both ways). Configure it once from a
+plain terminal (each `service set` restarts the server, so don't run it inside an opencode session):
+
+```bash
+opencode service set hostname 0.0.0.0        # or your Tailscale IP 100.x.y.z
+opencode service set port 4096
+opencode service set password your-secret
+opencode service start
+```
+
+Then just run plain `opencode` (the TUI) — it discovers and authenticates to that same service.
+`opencode service get` shows the config; `service unset <key>` reverts a setting. For an isolated
+server instead: `OPENCODE_SERVER_PASSWORD=secret opencode serve --hostname 0.0.0.0 --port 4096`
+(separate process → its own event bus; point clients at it with `opencode --server http://127.0.0.1:4096`).
+
+### opencode 1.x
+
+Make the **TUI itself** listen on a fixed port — then terminal and phone update each other in real time.
 
 ```bash
 # 1. Find your Tailscale IP
@@ -155,7 +183,8 @@ Screens use standard Android navigation animations (slide in/out on push, revers
 
 | Symptom | Fix |
 |---|---|
-| `401` / can't connect | Wrong password. It's the value of `OPENCODE_SERVER_PASSWORD`. |
+| `401` / can't connect | Wrong password. It's the value of `OPENCODE_SERVER_PASSWORD` (or `opencode service get password`). |
+| `Unexpected JSON token … had '<'` after upgrading opencode | Old build hitting the 2.0 web UI on old paths. Update the app — it now auto-detects 1.x vs 2.0. |
 | `Send failed: HTTP 400 …` | Update the app — an old build omitted the part `type` field. |
 | Terminal doesn't update live | You must run the **TUI** with `--port` (not a separate `opencode serve`). |
 | Input hidden behind keyboard | Fixed in current builds; update the app. |

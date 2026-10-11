@@ -12,6 +12,8 @@ data class FileDiff(
     val after: String = "",
     val additions: Int = 0,
     val deletions: Int = 0,
+    // V2 returns a unified diff patch instead of full before/after contents.
+    val patch: String = "",
 )
 
 @Serializable
@@ -373,6 +375,7 @@ data class PermissionReplyV2Body(
 data class QuestionOption(
     val label: String = "",
     val description: String = "",
+    val value: String = "",
 )
 
 @Serializable
@@ -382,6 +385,7 @@ data class QuestionInfo(
     val options: List<QuestionOption> = emptyList(),
     val multiple: Boolean = false,
     val custom: Boolean = false,
+    val key: String = "",
 )
 
 @Serializable

@@ -142,7 +142,9 @@ fun DiffScreen(
                 )
             }
             val computed = remember(ui.diffs) {
-                ui.diffs.map { diff -> diff to DiffLines.compute(diff.before, diff.after) }
+                ui.diffs.map { diff ->
+                    diff to if (diff.patch.isNotBlank()) DiffLines.parsePatch(diff.patch) else DiffLines.compute(diff.before, diff.after)
+                }
             }
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),

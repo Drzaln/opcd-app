@@ -31,16 +31,28 @@ tailscale ip -4          # e.g. 100.111.24.2
 
 ## 3. Run the server
 
-**Desktop Linux — TUI as server (recommended if you also use the terminal):**
+The app supports **opencode 1.x and 2.0** (it auto-detects). Pick the block for your version.
+
+**opencode 2.0 — shared background service (recommended):**
 
 ```bash
-OPENCODE_SERVER_PASSWORD=your-secret \
-  opencode --hostname 100.111.24.2 --port 4096
+opencode service set hostname 100.111.24.2   # Tailscale IP (or 0.0.0.0 for LAN/mDNS)
+opencode service set port 4096
+opencode service set password your-secret
+opencode service start
 ```
 
-**Headless server — dedicated server process:**
+Then run plain `opencode` (the TUI) — it attaches to that same service (live sync both ways).
+For a headless 2.0 box: `OPENCODE_SERVER_PASSWORD=your-secret opencode serve --hostname 100.111.24.2 --port 4096`.
+
+**opencode 1.x — TUI as server (desktop) / dedicated server (headless):**
 
 ```bash
+# Desktop (also use the terminal TUI):
+OPENCODE_SERVER_PASSWORD=your-secret \
+  opencode --hostname 100.111.24.2 --port 4096
+
+# Headless:
 OPENCODE_SERVER_PASSWORD=your-secret \
   opencode serve --hostname 100.111.24.2 --port 4096
 ```
@@ -98,7 +110,8 @@ sudo firewall-cmd --reload
 # nftables/iptables: accept tcp dport 4096 on the tailscale0 interface only
 ```
 
-Verify from the Mac/phone: `curl -u opencode:your-secret http://100.111.24.2:4096/global/health`
+Verify from the Mac/phone: `curl -u opencode:your-secret http://100.111.24.2:4096/api/info` (2.0)
+or `.../global/health` (1.x).
 
 ---
 

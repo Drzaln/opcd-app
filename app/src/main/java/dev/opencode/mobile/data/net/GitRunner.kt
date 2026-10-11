@@ -39,7 +39,7 @@ class GitRunner(
             )
         }.getOrElse { return GitResult("Could not start command: ${it.message ?: "unknown error"}", -1) }
 
-        val transport = OkHttpPtyTransport(server, pty.id, dir)
+        val transport = OkHttpPtyTransport(server, pty.id, dir, protocol = api.protocol(), ticket = api.ptyTicket(pty.id, dir))
         val buffer = StringBuilder()
         var failure: String? = null
         val done = CompletableDeferred<Unit>()
