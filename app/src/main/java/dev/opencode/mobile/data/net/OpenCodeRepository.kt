@@ -27,6 +27,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
@@ -243,10 +244,48 @@ class OpenCodeRepository {
         }
         .build()
 
+    /**
+     * API client (shared, cached). Adds a one-shot retry for idempotent GETs: Tailscale/keep-alive
+     * blips surface as `unexpected end of stream`, which would otherwise bubble up as a UI error.
+     * SSE streams (`Accept: text/event-stream`) are excluded — they have their own reconnect logic.
+     */
+    private fun apiHttpClient(server: ServerConfig): OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .addInterceptor { chain ->
+            val req = chain.request().newBuilder()
+                .header("Authorization", Credentials.basic(server.username, server.password))
+                .build()
+            chain.proceed(req)
+        }
+        .addInterceptor { chain ->
+            val req = chain.request()
+            val isStream = req.header("Accept")?.contains("text/event-stream") == true
+            val isFileRead = req.url.encodedPath.contains("/fs/read/")
+            if (isStream || isFileRead || req.method != "GET") return@addInterceptor chain.proceed(req)
+            // Buffer the body so a mid-stream cut ("unexpected end of stream") is caught and retried
+            // once on a fresh connection, instead of surfacing as a UI error.
+            var attempt = 0
+            while (true) {
+                try {
+                    val resp = chain.proceed(req)
+                    val body = resp.body ?: return@addInterceptor resp
+                    val bytes = body.bytes()
+                    return@addInterceptor resp.newBuilder()
+                        .body(bytes.toResponseBody(body.contentType()))
+                        .build()
+                } catch (e: java.io.IOException) {
+                    if (attempt++ >= 1) throw e
+                }
+            }
+            throw java.io.IOException("GET retry exhausted")
+        }
+        .build()
+
     private fun httpClient(server: ServerConfig): OkHttpClient {
         val cached = synchronized(lock) { clientCache[server.id] }
         if (cached != null) return cached
-        val client = newHttpClient(server)
+        val client = apiHttpClient(server)
         synchronized(lock) { clientCache[server.id] = client }
         return client
     }

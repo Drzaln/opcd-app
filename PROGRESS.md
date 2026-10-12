@@ -1,4 +1,4 @@
-<!-- ship: v0.1.43 (versionCode 44) -->
+<!-- ship: v0.1.44 (versionCode 45) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -73,6 +73,9 @@ V2 differences that matter (verified against 2.0.26):
   debounced full refresh; `execution.started/succeeded` → status busy/idle; forms/permissions →
   prompt shapes).
 - **Removed in 2.0 (degraded):** todos (panel empty), content grep, session share/unshare links.
+- **Robustness:** the API client buffers GET bodies and retries once on `IOException` (e.g. a
+  mid-stream cut surfaced as `unexpected end of stream`) — SSE and `/fs/read/` are excluded so
+  streams stay streaming and large file reads aren't buffered.
 
 ## Server integration (hard-won facts)
 
