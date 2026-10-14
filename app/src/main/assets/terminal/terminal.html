@@ -12,7 +12,8 @@
 <style>
   @font-face { font-family: 'JBMono'; src: url('font') format('truetype'); font-display: block; }
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #11131a; }
-  #term { position: absolute; top: 0; left: 0; right: 0; bottom: 0; padding: 8px 8px 2px 8px; }
+  /* fixed → sized from the visual viewport, which stays correct even if the document box collapses */
+  #term { position: fixed; top: 0; left: 0; right: 0; bottom: 0; padding: 8px 8px 2px 8px; }
   .xterm .xterm-viewport { overflow-y: auto; scrollbar-width: none; }
   .xterm .xterm-viewport::-webkit-scrollbar { width: 0; height: 0; }
 </style>
@@ -26,6 +27,8 @@
 var bridge = window.AndroidTerminal || null;
 var host = document.getElementById('term');
 
+function log(msg) { try { console.log("OC " + msg); } catch (e) { } }
+
 window.onerror = function (message, source, line) {
   if (bridge && bridge.onError) bridge.onError(String(message) + " @" + String(line));
   return false;
@@ -37,7 +40,9 @@ window.onunhandledrejection = function (e) {
 var term = new Terminal({
   fontFamily: "'JBMono', ui-monospace, monospace",
   fontSize: 12,
-  lineHeight: 1.2,
+  // Matches the native renderer's 16sp/12sp: powerline glyphs are taller than the cell and overlap
+  // neighbouring rows at a tighter line height.
+  lineHeight: 1.34,
   scrollback: 8000,
   cursorBlink: true,
   convertEol: false,
@@ -45,26 +50,39 @@ var term = new Terminal({
 });
 var fit = new FitAddon.FitAddon();
 term.loadAddon(fit);
-term.open(host);
 
 // Input: xterm handles the IME, hardware keys, paste and mouse itself.
 term.onData(function (data) { if (bridge) bridge.onInput(data); });
 
-var started = false;
+var opened = false, started = false, wroteOnce = false;
 var lastCols = 0, lastRows = 0, resizeTimer = null;
 
 function hostReady() {
   return host && host.clientWidth >= 8 && host.clientHeight >= 8;
 }
 
+// The WebView is often laid out *after* this script runs. Opening xterm on a 0x0 element makes the
+// renderer measure a bogus cell size and paint nothing, so wait for a real size before open().
+function start() {
+  if (opened || !hostReady()) return;
+  opened = true;
+  term.open(host);
+  try { fit.fit(); } catch (e) { log("fit failed: " + e); }
+  console.log("OC start host=" + host.clientWidth + "x" + host.clientHeight +
+    " cols=" + term.cols + " rows=" + term.rows);
+  started = true;
+  if (bridge) bridge.onReady();
+}
+
 function doFit() {
-  // fit() on a 0x0 surface would resize the terminal to 0 columns and never recover.
   if (!started || !hostReady()) return;
   try { fit.fit(); } catch (e) { return; }
   if (term.cols < 2 || term.rows < 2) return;
   if (term.cols === lastCols && term.rows === lastRows) return;
   lastCols = term.cols;
   lastRows = term.rows;
+  // Force a full repaint: after a resize the renderer can leave stale cells behind.
+  try { term.refresh(0, term.rows - 1); } catch (e) { }
   // Debounce: the keyboard animation fires a ResizeObserver event per pixel.
   if (resizeTimer) clearTimeout(resizeTimer);
   resizeTimer = setTimeout(function () {
@@ -72,11 +90,11 @@ function doFit() {
   }, 80);
 }
 
-new ResizeObserver(function () { doFit(); }).observe(host);
+if (window.ResizeObserver) new ResizeObserver(function () { start(); doFit(); }).observe(host);
 window.addEventListener('resize', doFit);
 window.addEventListener('orientationchange', function () { setTimeout(doFit, 300); });
-// The WebView can be laid out after the page loads, so keep retrying until the surface has a size.
-setInterval(function () { if (started && (term.cols < 2 || term.rows < 2)) doFit(); }, 500);
+// Safety net: the host can gain a size without a ResizeObserver notification reaching us.
+setInterval(function () { start(); doFit(); }, 200);
 
 // ---- Kotlin -> JS -------------------------------------------------------------------------------
 // Output arrives base64-encoded so escape sequences/UTF-8 survive the bridge untouched.
@@ -87,12 +105,20 @@ function bytesOf(b64) {
   return bytes;
 }
 window.__ocWrite = function (b64) {
-  term.write(new TextDecoder('utf-8').decode(bytesOf(b64)));
+  var text = new TextDecoder('utf-8').decode(bytesOf(b64));
+  term.write(text);
+  if (!wroteOnce) {
+    wroteOnce = true;
+    setTimeout(function () {
+      console.log("OC first-write chars=" + text.length + " rows=" + term.rows);
+    }, 300);
+  }
 };
 window.__ocReset = function () {
   term.reset();
   lastCols = 0;
   lastRows = 0;
+  wroteOnce = false;
 };
 window.__ocPaste = function (text) { term.paste(text); };
 window.__ocPaste64 = function (b64) { term.paste(new TextDecoder('utf-8').decode(bytesOf(b64))); };
@@ -124,21 +150,13 @@ window.__ocCopy = function (visibleOnly) {
 };
 window.__ocBottom = function () { term.scrollToBottom(); };
 
-// Tell Kotlin the surface is laid out: it then replays the buffered PTY stream into the terminal.
-function announceReady() {
-  if (started) return;
-  started = true;
-  if (!bridge) term.write("\r\n[opencode JS bridge missing]\r\n");
-  doFit();
-  if (bridge) bridge.onReady();
-}
-// Fit only once the Nerd Font is loaded, otherwise the first layout uses fallback cell metrics.
-// A font failure must not block startup (the timeout covers a hung/failed font request).
+// Fit only once the Nerd Font is loaded (otherwise the first layout uses fallback cell metrics).
+// A font failure must not block startup, so race it against a timeout.
 var fontReady = (document.fonts && document.fonts.load)
   ? document.fonts.load('12px JBMono').catch(function () { })
   : Promise.resolve();
-fontReady.then(announceReady);
-setTimeout(announceReady, 2000);
+fontReady.then(start);
+setTimeout(start, 1200);
 </script>
 </body>
 </html>

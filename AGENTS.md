@@ -131,12 +131,16 @@ Single `:app` module. No DI framework.
     `terminal/TerminalEmulator.kt`.
   - `ui/terminal/XtermTerminalView.kt` = a WebView over vendored **xterm.js** in
     `app/src/main/assets/terminal/` (MIT; `NOTICE.txt` has versions + hashes). The engine is
-    **inlined** into `terminal.html` by `readSeed()` (never fetched as a subresource); only the
-    optional font is served via `shouldInterceptRequest` from `res/font`. Needs WebView Chromium
-    80+ — `MIN_WEBVIEW_CHROME` gates back to the native renderer otherwise. Kotlin keeps owning the
-    socket; `TerminalViewModel` exposes `rawOutput: ReceiveChannel<String>` when in raw mode
-    (`setRawMode`), buffers output until the page reports ready, and bumps `attachGeneration` per
-    attach so the page can `__ocReset()` before the replayed stream.
+    **inlined** into `terminal.html` by `readSeed()` (never fetched as a subresource), only the
+    optional font is served via `shouldInterceptRequest` from `res/font`, and the page is loaded
+    **only on the first non-zero layout** — loading it while the view is 0×0 gives the page a
+    **0-height layout viewport** (`innerHeight` looks right but `height: 100%` resolves to 0), so
+    xterm fits to 1 row and the terminal looks blank forever. `#term` is `position: fixed` for the
+    same reason. Diagnostics go to logcat tag `XtermTerminal` (`OC start …`/`OC first-write …`).
+    Needs WebView Chromium 80+ — `MIN_WEBVIEW_CHROME` gates back to the native renderer otherwise.
+    Kotlin keeps owning the socket; `TerminalViewModel` exposes `rawOutput: ReceiveChannel<String>`
+    when in raw mode (`setRawMode`), buffers output until the page reports ready, and bumps
+    `attachGeneration` per attach so the page can `__ocReset()` before the replayed stream.
 - OpenCode Go usage: `GET https://opencode.ai/zen/go/v1/usage` with `Authorization: Bearer <go key>`
   → `usage.{rolling,weekly,monthly}.{status,percent,resetsAt}`. **Not** on the local server — the app
   stores the user's Go API key (`ServerStore` `opencode_go_api_key`) and calls opencode.ai directly

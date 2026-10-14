@@ -90,6 +90,8 @@ internal fun XtermTerminalView(vm: TerminalViewModel, onUseNative: () -> Unit) {
 
     val holder = remember { WebViewHolder() }
     var ready by remember { mutableIntStateOf(0) }
+    var frames by remember { mutableIntStateOf(0) }
+    var termSize by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var jsError by remember { mutableStateOf<String?>(null) }
 
     // If xterm never reports ready the terminal would silently stay blank — say so instead.
@@ -110,6 +112,7 @@ internal fun XtermTerminalView(vm: TerminalViewModel, onUseNative: () -> Unit) {
                         holder = holder,
                         backgroundArgb = defaultBg.toArgb(),
                         onReady = { ready++ },
+                        onResized = { colsF, rowsF -> holder.web?.post { termSize = colsF to rowsF } },
                         onFail = { message ->
                             android.util.Log.e("XtermTerminal", message)
                             jsError = message
@@ -174,7 +177,12 @@ internal fun XtermTerminalView(vm: TerminalViewModel, onUseNative: () -> Unit) {
                 Text(
                     when {
                         jsError != null -> "xterm.js error — see banner"
-                        ui.connected -> "tap the terminal to type"
+                        ready == 0 -> "starting xterm.js…"
+                        frames == 0 -> {
+                            val size = termSize?.let { "${it.first}×${it.second}" } ?: "no size reported"
+                            "xterm ready · $size · no output received"
+                        }
+                        ui.connected -> "tap to type"
                         else -> ui.status
                     },
                     style = MaterialTheme.typography.labelSmall,
@@ -237,6 +245,7 @@ internal fun XtermTerminalView(vm: TerminalViewModel, onUseNative: () -> Unit) {
             }
             val b64 = Base64.encodeToString(pending.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
             pending.setLength(0)
+            frames++
             runCatching { web.evaluateJavascript("$reset window.__ocWrite && window.__ocWrite('$b64')", null) }
         }
         coroutineScope {
@@ -274,6 +283,7 @@ private fun createTerminalWebView(
     holder: WebViewHolder,
     backgroundArgb: Int,
     onReady: () -> Unit,
+    onResized: (Int, Int) -> Unit,
     onFail: (String) -> Unit,
 ): WebView = WebView(context).apply {
     settings.javaScriptEnabled = true
@@ -300,6 +310,7 @@ private fun createTerminalWebView(
                 }
             },
             failTo = { message -> post { onFail(message) } },
+            resizedTo = { cols, rows -> onResized(cols, rows) },
             ready = { post(onReady) },
         ),
         "AndroidTerminal",
@@ -315,8 +326,29 @@ private fun createTerminalWebView(
         }
     }
     webViewClient = TerminalAssetClient(context, onFail)
-    loadDataWithBaseURL(BASE_URL, readSeed(context), "text/html", "utf-8", null)
     holder.web = this
+    // Load only once the view has a real size. Loading while the WebView is still 0x0 makes the page
+    // establish its layout viewport at 0 height, so `height: 100%` resolves to 0 and the terminal
+    // lays out one row tall — and it never recovers, no matter how the view is resized afterwards.
+    var loaded = false
+    fun loadOnce() {
+        if (loaded) return
+        loaded = true
+        loadDataWithBaseURL(BASE_URL, readSeed(context), "text/html", "utf-8", null)
+    }
+    addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
+        override fun onLayoutChange(
+            v: View,
+            left: Int, top: Int, right: Int, bottom: Int,
+            oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int,
+        ) {
+            if (right - left > 0 && bottom - top > 0) {
+                v.removeOnLayoutChangeListener(this)
+                loadOnce()
+            }
+        }
+    })
+    if (width > 0 && height > 0) loadOnce()
 }
 
 /**
@@ -367,13 +399,20 @@ private class TerminalAssetClient(
         val url = request.url
         if (url.host != "terminal.local") return null
         val path = url.path?.trimStart('/') ?: return null
-        if (path == "font") {
-            val stream = runCatching { context.resources.openRawResource(FONT_RESOURCE) }.getOrNull()
-            if (stream == null) {
-                onFail("font resource missing (${FONT_RESOURCE})")
-                return null
+        when (path) {
+            // Browsers always ask for this; it is not a failure.
+            "favicon.ico" -> return WebResourceResponse(
+                "image/x-icon", null, 204, "No Content", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)),
+            )
+            "font" -> {
+                val stream = runCatching { context.resources.openRawResource(FONT_RESOURCE) }.getOrNull()
+                if (stream == null) {
+                    // Optional: xterm falls back to system monospace, so don't alarm the user.
+                    android.util.Log.w("XtermTerminal", "font resource missing (${FONT_RESOURCE})")
+                    return null
+                }
+                return response("font/ttf", stream)
             }
-            return response("font/ttf", stream)
         }
         android.util.Log.w("XtermTerminal", "unexpected subresource request: $url")
         onFail("unexpected subresource: $path")
@@ -394,16 +433,15 @@ private class TerminalAssetClient(
     }
 
     override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
-        onFail("http ${response.statusCode} for ${url(request)}")
+        if (request.isForMainFrame) onFail("http ${response.statusCode} for ${url(request)}")
     }
 
     private fun url(request: WebResourceRequest) = request.url.toString()
-}
-
-private class TerminalBridge(
+}private class TerminalBridge(
     private val vm: TerminalViewModel,
     private val copyTo: (String) -> Unit,
     private val failTo: (String) -> Unit,
+    private val resizedTo: (Int, Int) -> Unit,
     private val ready: () -> Unit,
 ) {
     @JavascriptInterface
@@ -413,7 +451,10 @@ private class TerminalBridge(
 
     @JavascriptInterface
     fun onResized(cols: Int, rows: Int) {
-        if (cols > 1 && rows > 1) vm.resize(cols, rows)
+        if (cols > 1 && rows > 1) {
+            vm.resize(cols, rows)
+            resizedTo(cols, rows)
+        }
     }
 
     @JavascriptInterface

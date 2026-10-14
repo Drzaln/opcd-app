@@ -1,4 +1,4 @@
-<!-- ship: v0.1.48 (versionCode 49) -->
+<!-- ship: v0.1.49 (versionCode 50) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -161,22 +161,36 @@ V2 differences that matter (verified against 2.0.26):
       (auth + 1.x/2.x URL split stay in one place); the page is fed the raw PTY stream and calls back
       for input/resize.
       **The engine is inlined, not fetched:** `readSeed()` splices `xterm.js`/`xterm.css`/`addon-fit.js`
-      into `terminal.html`'s `<link>`/`<script src>` tags before `loadDataWithBaseURL`. Loading them as
-      subresources depended on `shouldInterceptRequest` serving a fake `https://terminal.local/`
-      origin — if any of that misfires the engine never loads and the terminal is silently blank.
-      Inlining keeps the critical path free of subresources; the only intercepted request left is the
-      **optional font**, served from `res/font` via `openRawResource` (no second 2.4 MB copy in
-      assets; `file://` can't reach `res/` on targetSdk 30+). A font failure just falls back to
-      system monospace.
-      **Version gate:** the 5.5 bundle uses ES2020 (`?.`, `??`) so it needs **Chromium 80+**;
-      `MIN_WEBVIEW_CHROME` + `webViewChromeMajor()` (parsed from the default user agent) make
-      `TerminalScreen` fall back to the native canvas with an explanatory banner instead of showing a
-      blank WebView on old/Huawei-class WebViews, where the bundle is a *parse* error.
-      **Failures are visible:** `window.onerror`/`onunhandledrejection`, `onConsoleMessage`,
-      `onReceivedError/HttpError` and a 7 s "never reported ready" watchdog all route into a banner
-      over the terminal with a **Use native renderer** button (+ `Log.e("XtermTerminal", …)`).
-      DoFit is guarded against a 0×0 surface (a 0-column terminal never recovers) and polls until the
-      WebView has a real size.
+      into `terminal.html`'s `<link>`/`<script src>` tags before loading. Loading them as subresources
+      depended on `shouldInterceptRequest` serving a fake `https://terminal.local/` origin — if any of
+      that misfires the engine never loads and the terminal is silently blank. Inlining keeps the
+      critical path free of subresources; the only intercepted request left is the **optional font**,
+      served from `res/font` via `openRawResource` (no second 2.4 MB copy in assets; `file://` can't
+      reach `res/` on targetSdk 30+). A font failure is logged, not fatal — xterm falls back to
+      system monospace. `/favicon.ico` is answered with a silent 204 (it is a normal browser request,
+      not an error).
+      **★ Gotcha — load the page only when the view has a size.** `loadDataWithBaseURL` used to run in
+      the WebView factory, i.e. while the view was still **0×0** (Compose creates it during measure).
+      The page then established a **0-height layout viewport**: `window.innerHeight` was 667 but
+      `getComputedStyle(documentElement).height` was `0px`, so `height: 100%` resolved to 0, `#term`
+      collapsed to its 10 px padding, `fit()` produced **1 row**, and the shell's whole output was
+      painted into a 10 px strip at the top-left — and it never recovered however the view was resized.
+      Fix: load via `addOnLayoutChangeListener` on the first non-zero layout (+ immediate load if
+      already sized, guarded so it loads once). Belt-and-braces: `#term` is `position: fixed` (sized
+      from the visual viewport, which stays correct even when the document box collapses).
+      **Version gate:** the 5.5 bundle uses ES2020 (`?.`, `??`) so it needs **Chromium 80+** —
+      the engine is a *parse* error below that. `MIN_WEBVIEW_CHROME` + `webViewChromeMajor()` (parsed
+      from the default user agent) make `TerminalScreen` fall back to the native canvas with an
+      explanatory banner instead.
+      **Rendering:** `lineHeight: 1.34` (the native renderer's 16sp/12sp ratio) so Nerd Font powerline
+      glyphs don't overlap neighbouring rows, plus `term.refresh()` after a fit to clear stale cells.
+      Diagnostics (verified on-device, Android 16 / Chromium 154): `console.*` is forwarded by
+      `WebChromeClient.onConsoleMessage` to logcat tag **`XtermTerminal`** — `OC start host=… cols=…
+      rows=…` and `OC first-write chars=… rows=…` are the two lines that pinpoint geometry vs. stream
+      problems. Plus `window.onerror`/`onunhandledrejection`, `onReceivedError/HttpError` (main frame),
+      a 7 s "never reported ready" watchdog, and a red banner over the terminal with a **Use native
+      renderer** button. The bottom bar shows `xterm ready · 50×34 · no output received` when the
+      engine started but nothing has been streamed yet.
     **Renderer plumbing:** `TerminalViewModel.setRawMode(raw)` flips the output sink and re-attaches
     (full replay, so the newly selected renderer starts clean); in raw mode bytes go to a bounded
     `Channel<String>` (`rawOutput`) instead of the emulator, so a WebView that is still loading simply
