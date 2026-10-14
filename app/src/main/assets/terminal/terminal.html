@@ -3,9 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<!--
+  Kotlin (XtermTerminalView) loads this file and inlines the three tags below, so the engine needs
+  no subresource fetch at all. The only external request left is the font, which is optional: if it
+  fails, xterm falls back to system monospace. Tags must stay byte-identical for the splice.
+-->
 <link rel="stylesheet" href="xterm.css">
 <style>
-  /* Served from res/font by the WebViewClient (no duplicate copy in assets). */
   @font-face { font-family: 'JBMono'; src: url('font') format('truetype'); font-display: block; }
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #11131a; }
   #term { position: absolute; top: 0; left: 0; right: 0; bottom: 0; padding: 8px 8px 2px 8px; }
@@ -26,6 +30,9 @@ window.onerror = function (message, source, line) {
   if (bridge && bridge.onError) bridge.onError(String(message) + " @" + String(line));
   return false;
 };
+window.onunhandledrejection = function (e) {
+  if (bridge && bridge.onError) bridge.onError("promise: " + String(e && e.reason));
+};
 
 var term = new Terminal({
   fontFamily: "'JBMono', ui-monospace, monospace",
@@ -45,8 +52,14 @@ term.onData(function (data) { if (bridge) bridge.onInput(data); });
 
 var started = false;
 var lastCols = 0, lastRows = 0, resizeTimer = null;
+
+function hostReady() {
+  return host && host.clientWidth >= 8 && host.clientHeight >= 8;
+}
+
 function doFit() {
-  if (!started) return;
+  // fit() on a 0x0 surface would resize the terminal to 0 columns and never recover.
+  if (!started || !hostReady()) return;
   try { fit.fit(); } catch (e) { return; }
   if (term.cols < 2 || term.rows < 2) return;
   if (term.cols === lastCols && term.rows === lastRows) return;
@@ -62,14 +75,19 @@ function doFit() {
 new ResizeObserver(function () { doFit(); }).observe(host);
 window.addEventListener('resize', doFit);
 window.addEventListener('orientationchange', function () { setTimeout(doFit, 300); });
+// The WebView can be laid out after the page loads, so keep retrying until the surface has a size.
+setInterval(function () { if (started && (term.cols < 2 || term.rows < 2)) doFit(); }, 500);
 
 // ---- Kotlin -> JS -------------------------------------------------------------------------------
 // Output arrives base64-encoded so escape sequences/UTF-8 survive the bridge untouched.
-window.__ocWrite = function (b64) {
+function bytesOf(b64) {
   var bin = atob(b64);
   var bytes = new Uint8Array(bin.length);
   for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  term.write(new TextDecoder('utf-8').decode(bytes));
+  return bytes;
+}
+window.__ocWrite = function (b64) {
+  term.write(new TextDecoder('utf-8').decode(bytesOf(b64)));
 };
 window.__ocReset = function () {
   term.reset();
@@ -77,12 +95,8 @@ window.__ocReset = function () {
   lastRows = 0;
 };
 window.__ocPaste = function (text) { term.paste(text); };
-window.__ocPaste64 = function (b64) {
-  var bin = atob(b64);
-  var bytes = new Uint8Array(bin.length);
-  for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  term.paste(new TextDecoder('utf-8').decode(bytes));
-};window.__ocTheme = function (json) {
+window.__ocPaste64 = function (b64) { term.paste(new TextDecoder('utf-8').decode(bytesOf(b64))); };
+window.__ocTheme = function (json) {
   try {
     var t = JSON.parse(json);
     var th = {
@@ -114,10 +128,12 @@ window.__ocBottom = function () { term.scrollToBottom(); };
 function announceReady() {
   if (started) return;
   started = true;
+  if (!bridge) term.write("\r\n[opencode JS bridge missing]\r\n");
   doFit();
   if (bridge) bridge.onReady();
 }
 // Fit only once the Nerd Font is loaded, otherwise the first layout uses fallback cell metrics.
+// A font failure must not block startup (the timeout covers a hung/failed font request).
 var fontReady = (document.fonts && document.fonts.load)
   ? document.fonts.load('12px JBMono').catch(function () { })
   : Promise.resolve();

@@ -130,12 +130,13 @@ Single `:app` module. No DI framework.
   - `ui/terminal/TerminalScreen.kt` → `TerminalView` = the native Compose `Canvas` over
     `terminal/TerminalEmulator.kt`.
   - `ui/terminal/XtermTerminalView.kt` = a WebView over vendored **xterm.js** in
-    `app/src/main/assets/terminal/` (MIT; `NOTICE.txt` has versions + hashes). Kotlin keeps owning the
+    `app/src/main/assets/terminal/` (MIT; `NOTICE.txt` has versions + hashes). The engine is
+    **inlined** into `terminal.html` by `readSeed()` (never fetched as a subresource); only the
+    optional font is served via `shouldInterceptRequest` from `res/font`. Needs WebView Chromium
+    80+ — `MIN_WEBVIEW_CHROME` gates back to the native renderer otherwise. Kotlin keeps owning the
     socket; `TerminalViewModel` exposes `rawOutput: ReceiveChannel<String>` when in raw mode
     (`setRawMode`), buffers output until the page reports ready, and bumps `attachGeneration` per
-    attach so the page can `__ocReset()` before the replayed stream. The page is served from
-    `https://terminal.local/` via `shouldInterceptRequest`, which also serves the Nerd Font from
-    `res/font` (don't duplicate it into assets).
+    attach so the page can `__ocReset()` before the replayed stream.
 - OpenCode Go usage: `GET https://opencode.ai/zen/go/v1/usage` with `Authorization: Bearer <go key>`
   → `usage.{rolling,weekly,monthly}.{status,percent,resetsAt}`. **Not** on the local server — the app
   stores the user's Go API key (`ServerStore` `opencode_go_api_key`) and calls opencode.ai directly

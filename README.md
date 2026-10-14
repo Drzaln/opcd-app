@@ -189,6 +189,7 @@ Screens use standard Android navigation animations (slide in/out on push, revers
 | `Unexpected JSON token … had '<'` after upgrading opencode | Old build hitting the 2.0 web UI on old paths. Update the app — it now auto-detects 1.x vs 2.0. |
 | `Send failed: HTTP 400 …` | Update the app — an old build omitted the part `type` field. |
 | Terminal doesn't update live | You must run the **TUI** with `--port` (not a separate `opencode serve`). |
+| Terminal is blank / no prompt (xterm.js renderer) | Needs system WebView Chromium **80+** (older ones can't parse it). The app detects this and falls back to the native canvas automatically — check your WebView version in Play Store. |
 | Input hidden behind keyboard | Fixed in current builds; update the app. |
 | Can't see sessions from another folder | Tap the folder bar on the Sessions screen and pick the project folder. |
 | Auto-detect only finds the LAN IP | mDNS advertises the LAN address; use the **Tailscale (remote)** field instead. |

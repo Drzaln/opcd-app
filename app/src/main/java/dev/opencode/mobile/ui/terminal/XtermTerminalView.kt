@@ -57,6 +57,21 @@ private const val BASE_URL = "https://terminal.local/"
 private const val FONT_RESOURCE = R.font.jetbrains_mono_nerd_regular
 
 /**
+ * Minimum Chromium major for the vendored xterm.js: the published bundle uses ES2020 syntax
+ * (`?.`), so anything older fails to *parse* — the page dies, `onReady` never fires and the
+ * terminal is silently blank. Old/Huawei-class WebViews are a real population.
+ */
+internal const val MIN_WEBVIEW_CHROME = 80
+
+/** Chrome/Chromium major reported by the system WebView, or null when it can't be read. */
+internal fun webViewChromeMajor(context: Context): Int? =
+    runCatching { android.webkit.WebSettings.getDefaultUserAgent(context) }.getOrNull()
+        ?.let { Regex("Chrome/(\\d+)").find(it)?.groupValues?.get(1)?.toIntOrNull() }
+
+internal fun webViewVersionLabel(context: Context): String =
+    webViewChromeMajor(context)?.let { if (it > 0) "Chromium $it" else "unknown" } ?: "unknown"
+
+/**
  * xterm.js renderer: a WebView running a vendored xterm.js, fed the same PTY stream as the native
  * canvas (see [TerminalViewModel.rawOutput]). Kotlin keeps owning the WebSocket so auth, the 1.x/2.x
  * URL split and reconnection stay in one place; this file only bridges bytes ↔ terminal.
@@ -65,16 +80,24 @@ private const val FONT_RESOURCE = R.font.jetbrains_mono_nerd_regular
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-internal fun XtermTerminalView(vm: TerminalViewModel) {
+internal fun XtermTerminalView(vm: TerminalViewModel, onUseNative: () -> Unit) {
     val ui by vm.ui.collectAsState()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val defaultBg = MaterialTheme.colorScheme.surface
     val defaultFg = MaterialTheme.colorScheme.onSurface
+    val webVersion = remember(context) { webViewVersionLabel(context) }
 
     val holder = remember { WebViewHolder() }
     var ready by remember { mutableIntStateOf(0) }
     var jsError by remember { mutableStateOf<String?>(null) }
+
+    // If xterm never reports ready the terminal would silently stay blank — say so instead.
+    LaunchedEffect(ready) {
+        if (ready != 0) return@LaunchedEffect
+        delay(7000)
+        if (ready == 0) jsError = "xterm.js never reported ready (WebView $webVersion)"
+    }
 
     Column(Modifier.fillMaxSize().background(defaultBg)) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -95,6 +118,30 @@ internal fun XtermTerminalView(vm: TerminalViewModel) {
                 },
                 onRelease = { holder.web = null },
             )
+
+            jsError?.let { message ->
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter),
+                ) {
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        Text(
+                            "xterm.js problem",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                        Text(
+                            "$message · WebView $webVersion",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = onUseNative) { Text("Use native renderer") }
+                            TextButton(onClick = { jsError = null }) { Text("Dismiss") }
+                        }
+                    }
+                }
+            }
         }
 
         KeyRow(
@@ -126,7 +173,7 @@ internal fun XtermTerminalView(vm: TerminalViewModel) {
             ) {
                 Text(
                     when {
-                        jsError != null -> "xterm.js error: $jsError"
+                        jsError != null -> "xterm.js error — see banner"
                         ui.connected -> "tap the terminal to type"
                         else -> ui.status
                     },
@@ -252,19 +299,46 @@ private fun createTerminalWebView(
                     }
                 }
             },
-            failTo = onFail,
+            failTo = { message -> post { onFail(message) } },
             ready = { post(onReady) },
         ),
         "AndroidTerminal",
     )
-    webViewClient = TerminalAssetClient(context)
+    webChromeClient = object : android.webkit.WebChromeClient() {
+        override fun onConsoleMessage(msg: android.webkit.ConsoleMessage): Boolean {
+            val line = "console: ${msg.message()} (${msg.sourceId()}:${msg.lineNumber()})"
+            android.util.Log.i("XtermTerminal", line)
+            if (msg.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR) {
+                post { onFail(line) }
+            }
+            return true
+        }
+    }
+    webViewClient = TerminalAssetClient(context, onFail)
     loadDataWithBaseURL(BASE_URL, readSeed(context), "text/html", "utf-8", null)
     holder.web = this
 }
 
-private fun readSeed(context: Context): String =
-    runCatching { context.assets.open("terminal/terminal.html").bufferedReader().use { it.readText() } }
-        .getOrDefault("<html><body>terminal.html missing from assets</body></html>")
+/**
+ * Reads `terminal.html` and inlines xterm.js/xterm.css/the fit addon into it. Loading the engine as
+ * subresources relied on `shouldInterceptRequest` handling a fake https origin; inlining removes the
+ * engine from the failure path entirely (only the optional font is still intercepted).
+ */
+private fun readSeed(context: Context): String {
+    val page = readAsset(context, "terminal/terminal.html")
+        ?: return "<html><body style='font:12px monospace;color:#c00'>terminal.html missing from assets</body></html>"
+    return page
+        .replace("<link rel=\"stylesheet\" href=\"xterm.css\">", "<style>${readAsset(context, "terminal/xterm.css").orEmpty()}</style>")
+        .replace("<script src=\"xterm.js\"></script>", "<script>${scriptOf(context, "terminal/xterm.js")}</script>")
+        .replace("<script src=\"addon-fit.js\"></script>", "<script>${scriptOf(context, "terminal/addon-fit.js")}</script>")
+}
+
+private fun readAsset(context: Context, path: String): String? =
+    runCatching { context.assets.open(path).bufferedReader().use { it.readText() } }.getOrNull()
+
+/** Inline scripts must not contain a literal `</script`. */
+private fun scriptOf(context: Context, path: String): String =
+    readAsset(context, path).orEmpty().replace("</script", "<\\/script")
 
 private fun themeJson(bg: Color, fg: Color): String {
     val ansi = Ansi16.joinToString(",\"", "\"", "\"") { hex(it) }
@@ -280,21 +354,30 @@ private const val ANSI_NAMES =
         "\"brightMagenta\",\"brightCyan\",\"brightWhite\"]"
 
 /**
- * Serves the bundled page from a fake https origin and the terminal font straight out of `res/font`,
- * so the Nerd Font isn't duplicated into assets. (`file://` can't reach res/ for targetSdk 30+.)
+ * Serves the terminal font straight out of `res/font`, so the Nerd Font isn't duplicated into assets.
+ * (`file://` can't reach res/ for targetSdk 30+.) Everything else is inlined into the page, and a
+ * failure here is non-fatal: xterm falls back to system monospace.
  */
-private class TerminalAssetClient(private val context: Context) : WebViewClient() {
+private class TerminalAssetClient(
+    private val context: Context,
+    private val onFail: (String) -> Unit,
+) : WebViewClient() {
 
     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
         val url = request.url
         if (url.host != "terminal.local") return null
         val path = url.path?.trimStart('/') ?: return null
         if (path == "font") {
-            val stream = runCatching { context.resources.openRawResource(FONT_RESOURCE) }.getOrNull() ?: return null
+            val stream = runCatching { context.resources.openRawResource(FONT_RESOURCE) }.getOrNull()
+            if (stream == null) {
+                onFail("font resource missing (${FONT_RESOURCE})")
+                return null
+            }
             return response("font/ttf", stream)
         }
-        val stream: InputStream = runCatching { context.assets.open("terminal/$path") }.getOrNull() ?: return null
-        return response(mimeOf(path.substringAfterLast('.', "")), stream)
+        android.util.Log.w("XtermTerminal", "unexpected subresource request: $url")
+        onFail("unexpected subresource: $path")
+        return null
     }
 
     private fun response(mime: String, stream: InputStream) = WebResourceResponse(
@@ -306,13 +389,15 @@ private class TerminalAssetClient(private val context: Context) : WebViewClient(
         stream,
     )
 
-    private fun mimeOf(ext: String) = when (ext) {
-        "js" -> "text/javascript"
-        "css" -> "text/css"
-        "html" -> "text/html"
-        "ttf" -> "font/ttf"
-        else -> "application/octet-stream"
+    override fun onReceivedError(view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError) {
+        if (request.isForMainFrame) onFail("load error: ${error.description} (${url(request)})")
     }
+
+    override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
+        onFail("http ${response.statusCode} for ${url(request)}")
+    }
+
+    private fun url(request: WebResourceRequest) = request.url.toString()
 }
 
 private class TerminalBridge(

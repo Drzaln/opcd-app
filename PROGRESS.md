@@ -1,4 +1,4 @@
-<!-- ship: v0.1.47 (versionCode 48) -->
+<!-- ship: v0.1.48 (versionCode 49) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -159,10 +159,24 @@ V2 differences that matter (verified against 2.0.26):
       `assets/terminal/NOTICE.txt`). Full xterm fidelity: reflow, mouse, DEC charset, bracketed
       paste, IME, hardware keys, 8000-line scrollback + search. Kotlin still owns the WebSocket
       (auth + 1.x/2.x URL split stay in one place); the page is fed the raw PTY stream and calls back
-      for input/resize. The page is served through `WebViewClient.shouldInterceptRequest` from a fake
-      `https://terminal.local/` origin, which is also how the **Nerd Font is served out of `res/font`**
-      (`openRawResource`) instead of a second 2.4 MB copy in assets — `file://` can't reach `res/` on
-      targetSdk 30+.
+      for input/resize.
+      **The engine is inlined, not fetched:** `readSeed()` splices `xterm.js`/`xterm.css`/`addon-fit.js`
+      into `terminal.html`'s `<link>`/`<script src>` tags before `loadDataWithBaseURL`. Loading them as
+      subresources depended on `shouldInterceptRequest` serving a fake `https://terminal.local/`
+      origin — if any of that misfires the engine never loads and the terminal is silently blank.
+      Inlining keeps the critical path free of subresources; the only intercepted request left is the
+      **optional font**, served from `res/font` via `openRawResource` (no second 2.4 MB copy in
+      assets; `file://` can't reach `res/` on targetSdk 30+). A font failure just falls back to
+      system monospace.
+      **Version gate:** the 5.5 bundle uses ES2020 (`?.`, `??`) so it needs **Chromium 80+**;
+      `MIN_WEBVIEW_CHROME` + `webViewChromeMajor()` (parsed from the default user agent) make
+      `TerminalScreen` fall back to the native canvas with an explanatory banner instead of showing a
+      blank WebView on old/Huawei-class WebViews, where the bundle is a *parse* error.
+      **Failures are visible:** `window.onerror`/`onunhandledrejection`, `onConsoleMessage`,
+      `onReceivedError/HttpError` and a 7 s "never reported ready" watchdog all route into a banner
+      over the terminal with a **Use native renderer** button (+ `Log.e("XtermTerminal", …)`).
+      DoFit is guarded against a 0×0 surface (a 0-column terminal never recovers) and polls until the
+      WebView has a real size.
     **Renderer plumbing:** `TerminalViewModel.setRawMode(raw)` flips the output sink and re-attaches
     (full replay, so the newly selected renderer starts clean); in raw mode bytes go to a bounded
     `Channel<String>` (`rawOutput`) instead of the emulator, so a WebView that is still loading simply

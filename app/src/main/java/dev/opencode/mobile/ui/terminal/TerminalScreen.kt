@@ -168,7 +168,11 @@ fun TerminalScreen(
     // Renderer selection is a device-level preference; flipping it re-attaches so the new renderer
     // gets a full replay of the PTY.
     val renderer by app.serverStore.terminalRenderer.collectAsState(initial = "xterm")
-    val useXterm = renderer != "native"
+    // xterm.js 5.5 is ES2020 — an older system WebView fails to parse it and the page dies silently,
+    // so gate on the version and fall back to the native canvas instead of showing a blank terminal.
+    val webViewMajor = remember(app) { webViewChromeMajor(app) }
+    val xtermSupported = webViewMajor == null || webViewMajor >= MIN_WEBVIEW_CHROME
+    val useXterm = renderer != "native" && xtermSupported
     LaunchedEffect(useXterm) { vm.setRawMode(useXterm) }
 
     Scaffold(
@@ -242,9 +246,28 @@ fun TerminalScreen(
                     onCreate = { vm.create() },
                 )
             } else if (useXterm) {
-                XtermTerminalView(vm = vm)
+                XtermTerminalView(
+                    vm = vm,
+                    onUseNative = { scope.launch { app.serverStore.setTerminalRenderer("native") } },
+                )
             } else {
-                TerminalView(vm = vm)
+                Column(Modifier.fillMaxSize()) {
+                    if (renderer != "native" && !xtermSupported) {
+                        Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                                Text(
+                                    "xterm.js needs WebView Chromium $MIN_WEBVIEW_CHROME+ (this device: ${webViewVersionLabel(app)}). Using the native renderer.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                )
+                                TextButton(onClick = { scope.launch { app.serverStore.setTerminalRenderer("native") } }) {
+                                    Text("Always use native")
+                                }
+                            }
+                        }
+                    }
+                    TerminalView(vm = vm)
+                }
             }
         }
     }
