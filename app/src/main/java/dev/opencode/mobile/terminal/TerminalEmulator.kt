@@ -48,6 +48,12 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24, private val scrollbackLim
     var version: Long = 0
         private set
 
+    // Writes run on a background thread while the UI reads a frame, so all mutation and reads are
+    // serialized on this lock (the UI reads rows under readLocked).
+    private val lock = Any()
+
+    fun <T> readLocked(block: () -> T): T = synchronized(lock) { block() }
+
     private val scrollback = ArrayDeque<MutableList<Cell>>()
     private var screen = Array(this.rows) { MutableList(this.cols) { Cell() } }
 
@@ -110,7 +116,9 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24, private val scrollbackLim
 
     // ---------- input ----------
 
-    fun write(text: String) {
+    fun write(text: String) = synchronized(lock) { writeLocked(text) }
+
+    private fun writeLocked(text: String) {
         var i = 0
         while (i < text.length) {
             val c = text[i]
@@ -132,7 +140,7 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24, private val scrollbackLim
                     '7' -> { savedX = cursorX; savedY = cursorY; savedPen.set(pen); state = 0 }
                     '8' -> { cursorX = savedX; cursorY = savedY; pen.set(savedPen); state = 0 }
                     '=', '>', 'M' -> state = 0
-                    'c' -> { reset(); state = 0 }
+                    'c' -> { resetLocked(); state = 0 }
                     'D' -> { lineFeed(); state = 0 }
                     'E' -> { cursorX = 0; lineFeed(); state = 0 }
                     else -> state = 0
@@ -191,12 +199,16 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24, private val scrollbackLim
         pendingWrap = false
     }
 
+    private fun pushScrollback(line: MutableList<Cell>, force: Boolean = false) {
+        if (altActive && !force) return
+        if (scrollbackLimit <= 0) return
+        scrollback.addLast(line)
+        while (scrollback.size > scrollbackLimit) scrollback.removeFirst()
+    }
+
     private fun scrollUp(n: Int) {
         repeat(n.coerceAtMost(scrollBottom - scrollTop + 1)) {
-            if (scrollTop == 0 && !altActive && scrollbackLimit > 0) {
-                scrollback.addLast(screen[scrollTop])
-                while (scrollback.size > scrollbackLimit) scrollback.removeFirst()
-            }
+            if (scrollTop == 0) pushScrollback(screen[scrollTop])
             for (r in scrollTop until scrollBottom) screen[r] = screen[r + 1]
             screen[scrollBottom] = MutableList(cols) { Cell() }
         }
@@ -409,16 +421,19 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24, private val scrollbackLim
         if (!altActive) return
         screen = primaryScreen ?: Array(rows) { MutableList(cols) { Cell() } }
         primaryScreen = null
-        cursorX = primaryX
-        cursorY = primaryY
-        scrollTop = primaryTop
-        scrollBottom = primaryBottom
+        cursorX = primaryX.coerceIn(0, cols - 1)
+        cursorY = primaryY.coerceIn(0, rows - 1)
+        // Clamp the margins — a resize may have happened while the alt screen was active.
+        scrollTop = primaryTop.coerceIn(0, rows - 1)
+        scrollBottom = primaryBottom.coerceIn(scrollTop, rows - 1)
         altActive = false
     }
 
     // ---------- lifecycle ----------
 
-    fun reset() {
+    fun reset() = synchronized(lock) { resetLocked() }
+
+    private fun resetLocked() {
         scrollback.clear()
         screen = Array(rows) { MutableList(cols) { Cell() } }
         cursorX = 0; cursorY = 0; savedX = 0; savedY = 0
@@ -431,20 +446,63 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24, private val scrollbackLim
         bump()
     }
 
-    fun resize(newCols: Int, newRows: Int) {
+    fun resize(newCols: Int, newRows: Int) = synchronized(lock) { resizeLocked(newCols, newRows) }
+
+    private fun resizeLocked(newCols: Int, newRows: Int) {
         val c = newCols.coerceAtLeast(2)
         val r = newRows.coerceAtLeast(2)
         if (c == cols && r == rows) return
-        val resized = Array(r) { row ->
-            val existing = screen.getOrNull(row)
-            MutableList(c) { col -> existing?.getOrNull(col)?.also { it } ?: Cell() }
+
+        // Vertical: like a real terminal's SIGWINCH handling, keep the cursor on screen by moving
+        // lines to/from scrollback instead of dropping the bottom rows (which lost the prompt when
+        // the keyboard opened). totalLines stays constant, so the viewport doesn't jump either.
+        val grow = r - rows
+        if (grow < 0) {
+            val drop = -grow
+            val kept = Array(r) { screen[it + drop] }
+            repeat(drop) { pushScrollback(screen[it]) }
+            screen = kept
+            cursorY -= drop
+        } else if (grow > 0) {
+            val pull = if (altActive) 0 else minOf(grow, scrollback.size)
+            val added = Array(r) { MutableList(cols) { Cell() } }
+            // scrollback.removeLast() yields newest first, so fill the view back-to-front.
+            for (i in pull - 1 downTo 0) added[i] = scrollback.removeLast()
+            for (row in 0 until rows) added[pull + row] = screen[row]
+            screen = added
+            cursorY += pull
         }
-        // Cells are recreated above; copy values for the overlap region.
-        for (row in 0 until minOf(r, rows)) {
-            val src = screen[row]
-            for (col in 0 until minOf(c, cols)) resized[row][col].set(src[col])
+
+        // The primary buffer is parked while the alt screen is active — resize it too, so leaving
+        // the alt screen after a resize (e.g. the keyboard opening) lines up instead of clipping.
+        primaryScreen?.let { primary ->
+            val drop = primary.size - r
+            // Lines scrolled out of the parked primary buffer still belong to its scrollback.
+            if (drop > 0) repeat(drop) { pushScrollback(primary[it], force = true) }
+            val shifted = when {
+                drop > 0 -> Array(r) { primary[it + drop] }
+                drop < 0 -> Array(r) { i -> primary.getOrNull(i) ?: MutableList(cols) { Cell() } }
+                else -> primary
+            }
+            for (row in shifted.indices) {
+                val old = shifted[row]
+                shifted[row] = MutableList(c) { col -> old.getOrNull(col) ?: Cell() }
+            }
+            primaryScreen = shifted
+            primaryY = (primaryY - drop.coerceAtLeast(0)).coerceIn(0, r - 1)
+            primaryX = primaryX.coerceIn(0, c - 1)
+            primaryTop = 0
+            primaryBottom = r - 1
         }
-        screen = resized
+
+        // Horizontal: keep the left-most columns.
+        if (c != cols) {
+            for (row in screen.indices) {
+                val old = screen[row]
+                screen[row] = MutableList(c) { col -> old.getOrNull(col) ?: Cell() }
+            }
+        }
+
         cols = c
         rows = r
         scrollTop = 0

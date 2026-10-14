@@ -8,7 +8,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,8 +19,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
@@ -40,6 +41,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -55,6 +57,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,15 +68,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
@@ -268,59 +272,72 @@ private fun TerminalView(vm: TerminalViewModel) {
     }
     val mono = remember(terminalFont) { TextStyle(fontFamily = terminalFont, fontSize = 12.sp, lineHeight = 16.sp) }
     val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
     val cellWidth = remember(measurer) { measurer.measure(AnnotatedString("M"), mono, softWrap = false).size.width }
     val rowHeight = remember(measurer) { measurer.measure(AnnotatedString("M"), mono, softWrap = false).size.height }
 
     val focusRequester = remember { FocusRequester() }
-    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
     var input by remember { mutableStateOf("") }
     var ctrl by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
-    // Scroll offset in px from the top of (scrollback + screen); follow output unless the user drags up.
-    var scrollPx by remember { mutableStateOf(0f) }
-    var following by remember { mutableStateOf(true) }
+
+    val scrollState = rememberScrollState()
+    // Follow the newest output only while parked at the bottom. A programmatic scrollTo runs at a
+    // lower scroll priority than a drag, so it can't yank the viewport away while the user reads.
+    val following by remember { derivedStateOf { scrollState.value >= scrollState.maxValue - 8 } }
+    LaunchedEffect(scrollState) {
+        snapshotFlow { scrollState.maxValue }.collect { max -> if (following) scrollState.scrollTo(max) }
+    }
+    // A freshly attached PTY starts pinned to the bottom.
+    LaunchedEffect(ui.active?.id) { scrollState.scrollTo(Int.MAX_VALUE) }
 
     val terminalPad = 16.dp
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val density = androidx.compose.ui.platform.LocalDensity.current
-        val padPx = with(density) { terminalPad.toPx() }
-        val widthPx = with(density) { maxWidth.toPx() } - padPx * 2
-        val heightPx = with(density) { maxHeight.toPx() } - padPx
-        val cell = cellWidth.coerceAtLeast(1)
-        val lineH = rowHeight.coerceAtLeast(1)
-        val cols = (widthPx / cell).toInt().coerceIn(10, 500)
-        val rows = (heightPx / lineH).toInt().coerceIn(4, 300)
-        LaunchedEffect(cols, rows, ui.active?.id) {
-            if (ui.active != null) vm.resize(cols, rows)
-        }
 
-        val totalRows = emulator.totalLines()
-        val contentHeight = totalRows * lineH
-        val maxScroll = (contentHeight - heightPx).coerceAtLeast(0f)
-        LaunchedEffect(frameState.value, following, totalRows) {
-            if (following) scrollPx = maxScroll
-        }
-        LaunchedEffect(ui.active?.id) {
-            following = true
-            scrollPx = maxScroll
-        }
+    Column(Modifier.fillMaxSize().background(defaultBg)) {
+        BoxWithConstraints(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(start = terminalPad, end = terminalPad, bottom = terminalPad),
+        ) {
+            // Measure the canvas viewport HERE (not the whole column) so the PTY grid matches what is
+            // actually visible — counting the key/status rows below over-reported `rows` and pushed
+            // the prompt off the bottom of the screen.
+            val widthPx = with(density) { maxWidth.toPx() }
+            val viewportPx = with(density) { maxHeight.toPx() }
+            val cell = cellWidth.toFloat().coerceAtLeast(1f)
+            val lineH = rowHeight.toFloat().coerceAtLeast(1f)
+            val cols = (widthPx / cell).toInt().coerceIn(10, 500)
+            val rows = (viewportPx / lineH).toInt().coerceIn(4, 400)
+            LaunchedEffect(cols, rows, ui.active?.id) {
+                if (ui.active != null) vm.resize(cols, rows)
+            }
 
-        Column(Modifier.fillMaxSize().background(defaultBg)) {
+            // Reading the frame State in composition keeps totalLines in sync with the emulator.
+            val totalLines = remember(frameState.value, cols, rows) { emulator.readLocked { emulator.totalLines() } }
+            val canvasHeight = (totalLines * lineH).coerceAtLeast(viewportPx)
+            val rowCache = remember(mono, widthPx, defaultFg, defaultBg) {
+                RowLayoutCache { annotated, maxW, maxH ->
+                    // Explicit positive Constraints — Size.Unspecified produced NaN and crashed the draw.
+                    measurer.measure(
+                        text = annotated,
+                        style = mono,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Clip,
+                        softWrap = false,
+                        maxLines = 1,
+                        constraints = Constraints(maxWidth = maxW, maxHeight = maxH),
+                    )
+                }
+            }
+
             Box(
                 Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(start = terminalPad, end = terminalPad, bottom = terminalPad)
-                    .pointerInput(Unit) {
-                        detectVerticalDragGestures { change, dragAmount ->
-                            change.consume()
-                            following = false
-                            scrollPx = (scrollPx - dragAmount).coerceIn(0f, maxScroll)
-                            if (scrollPx >= maxScroll - 1f) following = true
-                        }
-                    }
+                    .fillMaxSize()
+                    .verticalScroll(scrollState)
                     .combinedClickable(
                         onClick = {
                             focusRequester.requestFocus()
@@ -329,111 +346,114 @@ private fun TerminalView(vm: TerminalViewModel) {
                         onLongClick = { showMenu = true },
                     ),
             ) {
-                Canvas(Modifier.fillMaxSize().clipToBounds()) {
-                    val first = (scrollPx / lineH).toInt().coerceIn(0, maxOf(0, totalRows - 1))
-                    val last = (first + rows + 1).coerceAtMost(totalRows)
-                    // Read the frame state so the canvas redraws on new output.
+                Canvas(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(with(density) { canvasHeight.toDp() }),
+                ) {
+                    // Read the frame state so the canvas redraws on new output, and scrollState.value
+                    // below so it redraws while scrolling.
                     @Suppress("UNUSED_EXPRESSION") frameState.value
-                    // Measure with an explicit, positive Constraints — passing Size.Unspecified to
-                    // drawText produced NaN constraints and crashed the draw phase.
-                    val maxWidth = widthPx.toInt().coerceAtLeast(1)
-                    val maxHeight = lineH.coerceAtLeast(1)
-                    for (index in first until last) {
-                        val cells = emulator.screenLine(index) ?: continue
-                        val y = index * lineH - scrollPx
-                        val isCursorRow = index == emulator.cursorRow
-                        val annotated = rowAnnotated(
-                            cells = cells,
-                            cursorCol = if (isCursorRow) emulator.cursorCol else -1,
-                            showCursor = isCursorRow && emulator.isCursorVisible,
-                            defaultFg = defaultFg,
-                            defaultBg = defaultBg,
-                        )
-                        val layout = measurer.measure(
-                            text = annotated,
-                            style = mono,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Clip,
-                            softWrap = false,
-                            maxLines = 1,
-                            constraints = Constraints(maxWidth = maxWidth, maxHeight = maxHeight),
-                        )
-                        drawText(
-                            textLayoutResult = layout,
-                            topLeft = androidx.compose.ui.geometry.Offset(0f, y),
-                        )
+                    val first = (scrollState.value / lineH).toInt().coerceAtLeast(0)
+                    val last = (first + rows + 1).coerceAtMost(totalLines)
+                    val maxWidthPx = widthPx.toInt().coerceAtLeast(1)
+                    val maxHeightPx = lineH.toInt().coerceAtLeast(1)
+                    emulator.readLocked {
+                        for (index in first until last) {
+                            val cells = emulator.screenLine(index) ?: continue
+                            val isCursorRow = index == emulator.cursorRow
+                            val layout = rowCache.layout(
+                                index = index,
+                                cells = cells,
+                                cursorCol = if (isCursorRow) emulator.cursorCol else -1,
+                                showCursor = isCursorRow && emulator.isCursorVisible,
+                                defaultFg = defaultFg,
+                                defaultBg = defaultBg,
+                                maxWidth = maxWidthPx,
+                                maxHeight = maxHeightPx,
+                            )
+                            drawText(
+                                textLayoutResult = layout,
+                                topLeft = androidx.compose.ui.geometry.Offset(0f, index * lineH),
+                            )
+                        }
                     }
+                    rowCache.prune(first - 32, last + 32)
                 }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(
                         text = { Text("Copy visible screen") },
                         onClick = {
                             showMenu = false
-                            val first = (scrollPx / lineH).toInt().coerceIn(0, maxOf(0, totalRows - 1))
-                            copyToClipboard(context, clipboard, emulator.linesText(first, rows))
+                            val first = (scrollState.value / lineH).toInt().coerceAtLeast(0)
+                            val text = emulator.readLocked { emulator.linesText(first, rows) }
+                            copyToClipboard(context, clipboard, text)
                         },
                     )
                     DropdownMenuItem(
                         text = { Text("Copy all") },
                         onClick = {
                             showMenu = false
-                            copyToClipboard(context, clipboard, emulator.snapshotText())
+                            copyToClipboard(context, clipboard, emulator.readLocked { emulator.snapshotText() })
                         },
                     )
                 }
             }
 
-            KeyRow(
-                ctrl = ctrl,
-                onCtrlToggle = { ctrl = !ctrl },
-                onKey = { key -> vm.send(key); if (key.contains('\r')) input = "" },
-            )
-
-            if (!ui.connected) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        ui.status,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { ui.active?.let { vm.attach(it) } }) { Text("Reconnect") }
-                }
+            if (!following) {
+                FloatingActionButton(
+                    onClick = { scope.launch { scrollState.scrollTo(Int.MAX_VALUE) } },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                ) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Scroll to bottom") }
             }
+        }
 
-            Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
-                Row(
-                    Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        if (ui.connected) "tap terminal to type" else ui.status,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (!following) {
-                        TextButton(onClick = {
-                            following = true
-                            scrollPx = maxScroll
-                        }) { Text("Bottom") }
-                    }
-                    TextButton(onClick = {
-                        val text = clipboard.getText()?.text
-                        if (!text.isNullOrEmpty()) vm.send(text)
-                    }) { Text("Paste") }
-                    TextButton(onClick = {
-                        focusRequester.requestFocus()
-                        keyboard?.show()
-                    }) {
-                        Icon(Icons.Filled.Keyboard, contentDescription = "Show keyboard")
-                        Spacer(Modifier.width(4.dp))
-                        Text("Keyboard")
-                    }
-                    TextButton(onClick = { vm.detach() }) { Text("Detach") }
+        KeyRow(
+            ctrl = ctrl,
+            onCtrlToggle = { ctrl = !ctrl },
+            onKey = { key -> vm.send(key); if (key.contains('\r')) input = "" },
+        )
+
+        if (!ui.connected) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    ui.status,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { ui.active?.let { vm.attach(it) } }) { Text("Reconnect") }
+            }
+        }
+
+        Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (ui.connected) "tap terminal to type" else ui.status,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = {
+                    val text = clipboard.getText()?.text
+                    if (!text.isNullOrEmpty()) vm.send(text)
+                }) { Text("Paste") }
+                TextButton(onClick = {
+                    focusRequester.requestFocus()
+                    keyboard?.show()
+                }) {
+                    Icon(Icons.Filled.Keyboard, contentDescription = "Show keyboard")
+                    Spacer(Modifier.width(4.dp))
+                    Text("Keyboard")
                 }
+                TextButton(onClick = { vm.detach() }) { Text("Detach") }
             }
         }
 
@@ -558,6 +578,77 @@ private fun rowAnnotated(
             textDecoration = if (cell.attr and Attr.UNDERLINE != 0) TextDecoration.Underline else null,
         )
         withStyle(span) { append(if (cell.ch == '\u0000') ' ' else cell.ch) }
+    }
+}
+
+/**
+ * Per-row layout cache: rebuilding a styled [AnnotatedString] and re-measuring it for every visible
+ * row on every frame was the main source of terminal jank. A row is only re-laid-out when its cells
+ * or cursor state actually change; the check compares the raw cell attributes (no allocation).
+ */
+private class RowLayoutCache(
+    private val measure: (AnnotatedString, Int, Int) -> TextLayoutResult,
+) {
+    private class Entry(
+        val ch: CharArray,
+        val fg: IntArray,
+        val bg: IntArray,
+        val attr: IntArray,
+    ) {
+        var cursorCol = Int.MIN_VALUE
+        var showCursor = false
+        var layout: TextLayoutResult? = null
+
+        fun matches(cells: List<Cell>): Boolean {
+            val size = ch.size
+            if (cells.size != size) return false
+            for (i in 0 until size) {
+                val c = cells[i]
+                if (ch[i] != c.ch || fg[i] != c.fg || bg[i] != c.bg || attr[i] != c.attr) return false
+            }
+            return true
+        }
+
+        fun copyFrom(cells: List<Cell>) {
+            for (i in ch.indices) {
+                val c = cells[i]
+                ch[i] = c.ch; fg[i] = c.fg; bg[i] = c.bg; attr[i] = c.attr
+            }
+        }
+    }
+
+    private val entries = HashMap<Int, Entry>()
+
+    fun layout(
+        index: Int,
+        cells: List<Cell>,
+        cursorCol: Int,
+        showCursor: Boolean,
+        defaultFg: Color,
+        defaultBg: Color,
+        maxWidth: Int,
+        maxHeight: Int,
+    ): TextLayoutResult {
+        val cached = entries[index]
+        if (cached?.layout != null && cached.cursorCol == cursorCol &&
+            cached.showCursor == showCursor && cached.matches(cells)
+        ) {
+            return cached.layout!!
+        }
+        val entry = cached?.takeIf { it.ch.size == cells.size }
+            ?: Entry(CharArray(cells.size), IntArray(cells.size), IntArray(cells.size), IntArray(cells.size))
+        entry.copyFrom(cells)
+        entry.cursorCol = cursorCol
+        entry.showCursor = showCursor
+        entry.layout = measure(rowAnnotated(cells, cursorCol, showCursor, defaultFg, defaultBg), maxWidth, maxHeight)
+        entries[index] = entry
+        return entry.layout!!
+    }
+
+    /** Drop rows that scrolled far out of the viewport so the cache can't grow without bound. */
+    fun prune(lo: Int, hi: Int) {
+        if (entries.size <= 128) return
+        entries.entries.removeAll { it.key < lo || it.key > hi }
     }
 }
 

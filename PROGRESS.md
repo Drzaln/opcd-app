@@ -1,4 +1,4 @@
-<!-- ship: v0.1.44 (versionCode 45) -->
+<!-- ship: v0.1.45 (versionCode 46) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -143,9 +143,23 @@ V2 differences that matter (verified against 2.0.26):
     (`res/font/jetbrains_mono_nerd_{regular,bold}.ttf`, OFL-1.1) so zsh/powerline prompt glyphs
     render instead of tofu; PTYs are created as **login** interactive shells (`-l`, or no command
     → server default `$SHELL`) so dotfiles/aliases/PATH match the local terminal.
+    **Rendering:** the canvas viewport is measured by the `BoxWithConstraints` that wraps *only* the
+    canvas (not the whole column) so `rows`/`cols` match the visible area — measuring the full column
+    over-reported `rows` by the key/status rows and pushed the prompt below the canvas. Output is
+    scrolled with a plain `verticalScroll` + a tall `Canvas` (native fling, no custom drag detector),
+    and a `RowLayoutCache` skips re-building/re-measuring rows whose cells didn't change (the
+    per-frame `AnnotatedString` rebuild was the main jank source).
+    **Threading:** PTY parsing runs on `Dispatchers.Default.limitedParallelism(1)` in the ViewModel;
+    `TerminalEmulator` guards every mutation/read on an internal lock (`write`/`resize`/`reset` are
+    `synchronized`, the UI draws inside `readLocked { … }`), so a background writer can't mutate rows
+    mid-frame. `attach()` cancels + joins the previous socket before `reset()`.
+    **Resize (keyboard):** shrinking/growing the grid scrolls rows to/from scrollback (like a real
+    terminal's SIGWINCH) instead of dropping the bottom rows, so opening the keyboard no longer loses
+    the prompt and `totalLines` stays constant (the viewport doesn't jump).
     **Gotcha:** the grid lives in a plain (non-`State`) emulator object, so a `LazyColumn` item
      that only reads it will be *skipped* by Compose and never redraw — read the `frame` State inside
-     the item scope (or the list stays blank while data is actually arriving).
+     the item scope (or the list stays blank while data is actually arriving). The terminal canvas does
+     this in its draw lambda (`@Suppress("UNUSED_EXPRESSION") frameState.value`).
 16. **OpenCode Go plan usage (Settings → OpenCode Go):** `GET https://opencode.ai/zen/go/v1/usage`
     with `Authorization: Bearer <go-api-key>` returns
     `{"usage":{"rolling":{status,percent,resetsAt},"weekly":{…},"monthly":{…}}}` — 5h/weekly/monthly

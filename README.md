@@ -155,8 +155,10 @@ Screens use standard Android navigation animations (slide in/out on push, revers
 - **Files** — browse the project; search box switches between **Files** (fuzzy names) and **Content**
   (grep). Tap a result to open it with syntax highlighting.
 - **Terminal** — open from the Sessions screen. Tap it to type; the key row gives esc/tab/arrows/^C etc.
-  **Paste** sends your clipboard to the shell; **long-press** the terminal to copy the visible screen
-  or the whole scrollback.
+  Scroll the output with a normal drag (with fling); the view sticks to the newest line while you're
+  at the bottom, and a **↓** button jumps back down if you've scrolled up. **Paste** sends your
+  clipboard to the shell; **long-press** the terminal to copy the visible screen or the whole
+  scrollback.
 - **Notifications** — Servers screen → toggle **Notify when a turn finishes**, grant the permission.
   You'll get a notification when opencode finishes or needs input, even with the app backgrounded.
 - **OpenCode Go usage** (optional) — Settings → **OpenCode Go** → paste your Go API key (copy it from

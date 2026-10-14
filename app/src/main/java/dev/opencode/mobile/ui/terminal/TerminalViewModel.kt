@@ -13,6 +13,7 @@ import dev.opencode.mobile.terminal.OkHttpPtyTransport
 import dev.opencode.mobile.terminal.PtyEvent
 import dev.opencode.mobile.terminal.PtyTransport
 import dev.opencode.mobile.terminal.TerminalEmulator
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,8 +41,12 @@ class TerminalViewModel(
     private val _frame = MutableStateFlow(0L)
     val frame: StateFlow<Long> = _frame
 
+    // PTY parsing is CPU work: keep it off the UI thread. Confined to one thread so the emulator
+    // bytes are applied in order (the lock in TerminalEmulator keeps UI reads consistent).
+    private val termDispatcher = Dispatchers.Default.limitedParallelism(1)
+
     private val api = app.repository.apiFor(server)
-    private var transport: PtyTransport? = null
+    @Volatile private var transport: PtyTransport? = null
     private var connectJob: Job? = null
     private var lastCursor: Long? = null
 
@@ -91,13 +96,17 @@ class TerminalViewModel(
     }
 
     fun attach(pty: PtyInfo) {
-        connectJob?.cancel()
+        val previous = connectJob
+        previous?.cancel()
         transport?.close()
-        emulator.reset()
+        transport = null
         lastCursor = null
-        _frame.value = emulator.version
         _ui.value = _ui.value.copy(active = pty, status = "connecting…", connected = false)
-        connectJob = viewModelScope.launch {
+        connectJob = viewModelScope.launch(termDispatcher) {
+            // Wait out the old socket so its last chunk can't land after the reset below.
+            previous?.join()
+            emulator.reset()
+            _frame.value = emulator.version
             try {
                 val protocol = api.protocol()
                 val ticket = api.ptyTicket(pty.id, projectDir())
@@ -152,10 +161,10 @@ class TerminalViewModel(
     }
 
     fun resize(cols: Int, rows: Int) {
-        emulator.resize(cols, rows)
-        _frame.value = emulator.version
         val pty = _ui.value.active ?: return
-        viewModelScope.launch {
+        viewModelScope.launch(termDispatcher) {
+            emulator.resize(cols, rows)
+            _frame.value = emulator.version
             runCatching { api.ptyUpdate(pty.id, PtyUpdateBody(size = PtySize(rows = rows, cols = cols)), projectDir()) }
         }
     }

@@ -185,7 +185,11 @@ curl -u opencode:secret http://127.0.0.1:4199/file/content?path=settings.gradle.
   watch service, toggle in Servers screen), **OpenCode Go plan usage in Settings**, shortened project
   paths (`ui/common.shortenPath`), chat follow-tail that never yanks you away while reading old
   messages (send always snaps to bottom via `scrollToBottomSignal`), terminal clipboard (paste button
-  + long-press copy of visible/whole scrollback, `TerminalEmulator.linesText`), connection status chip
+  + long-press copy of visible/whole scrollback, `TerminalEmulator.linesText`), terminal scroll
+  smoothness (row layout cache + off-main PTY parsing + serialized emulator reads; `verticalScroll`
+  with fling and a follow-tail that never yanks you up, plus an exact canvas viewport so the prompt
+  isn't clipped; keyboard resize scrolls rows through scrollback instead of dropping them),
+  connection status chip
   in the Sessions/Chat app bars (`ConnectionIndicator` + `AppViewModel.connection`, `/global/health`
   every 30 s), new-session auto-navigate (`createSession` → `onChat` opens the created session).
   SSE events are filtered by `sessionID` (`ChatViewModel.isOwnSession`) — the directory-scoped stream
