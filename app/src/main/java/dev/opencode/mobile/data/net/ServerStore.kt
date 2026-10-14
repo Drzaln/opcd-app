@@ -38,6 +38,7 @@ class ServerStore(private val context: Context) {
     private val themeKey = stringPreferencesKey("theme_mode")
     private val busySessionsKey = androidx.datastore.preferences.core.stringSetPreferencesKey("busy_sessions")
     private val goApiKey = stringPreferencesKey("opencode_go_api_key")
+    private val terminalRendererKey = stringPreferencesKey("terminal_renderer")
 
     val servers: Flow<List<ServerConfig>> = context.dataStore.data.map { prefs ->
         val raw = prefs[serversKey] ?: "[]"
@@ -81,6 +82,13 @@ class ServerStore(private val context: Context) {
     val busySessions: Flow<Set<String>> = context.dataStore.data.map { it[busySessionsKey] ?: emptySet() }
 
     val openCodeGoApiKey: Flow<String> = context.dataStore.data.map { it[goApiKey] ?: "" }
+
+    /** "xterm" (WebView + vendored xterm.js, default) or "native" (the Compose canvas renderer). */
+    val terminalRenderer: Flow<String> = context.dataStore.data.map { it[terminalRendererKey] ?: "xterm" }
+
+    suspend fun setTerminalRenderer(value: String) {
+        context.dataStore.edit { it[terminalRendererKey] = value }
+    }
 
     suspend fun setOpenCodeGoApiKey(value: String?) {
         context.dataStore.edit { prefs ->

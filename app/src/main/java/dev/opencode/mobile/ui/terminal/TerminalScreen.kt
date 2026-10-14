@@ -30,9 +30,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
@@ -106,7 +108,7 @@ import dev.opencode.mobile.terminal.TRUE_RGB_BASE
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
-private val Ansi16 = arrayOf(
+internal val Ansi16 = arrayOf(
     Color(0xFF000000), Color(0xFFCD3131), Color(0xFF0DBC79), Color(0xFFE5E510),
     Color(0xFF2472C8), Color(0xFFBC3FBC), Color(0xFF11A8CD), Color(0xFFE5E5E5),
     Color(0xFF666666), Color(0xFFF14C4C), Color(0xFF23D18B), Color(0xFFF5F543),
@@ -159,7 +161,15 @@ fun TerminalScreen(
         },
     )
     val ui by vm.ui.collectAsState()
+    val scope = rememberCoroutineScope()
     var shellsMenu by remember { mutableStateOf(false) }
+    var rendererMenu by remember { mutableStateOf(false) }
+
+    // Renderer selection is a device-level preference; flipping it re-attaches so the new renderer
+    // gets a full replay of the PTY.
+    val renderer by app.serverStore.terminalRenderer.collectAsState(initial = "xterm")
+    val useXterm = renderer != "native"
+    LaunchedEffect(useXterm) { vm.setRawMode(useXterm) }
 
     Scaffold(
         modifier = Modifier.imePadding(),
@@ -173,6 +183,29 @@ fun TerminalScreen(
                     if (ui.active != null) {
                         IconButton(onClick = { vm.kill(ui.active!!) }) {
                             Icon(Icons.Filled.Delete, contentDescription = "Kill session")
+                        }
+                    }
+                    Box {
+                        IconButton(onClick = { rendererMenu = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Renderer")
+                        }
+                        DropdownMenu(expanded = rendererMenu, onDismissRequest = { rendererMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("xterm.js renderer") },
+                                leadingIcon = { if (useXterm) Icon(Icons.Filled.Check, contentDescription = null) },
+                                onClick = {
+                                    rendererMenu = false
+                                    scope.launch { app.serverStore.setTerminalRenderer("xterm") }
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Native renderer") },
+                                leadingIcon = { if (!useXterm) Icon(Icons.Filled.Check, contentDescription = null) },
+                                onClick = {
+                                    rendererMenu = false
+                                    scope.launch { app.serverStore.setTerminalRenderer("native") }
+                                },
+                            )
                         }
                     }
                     Box {
@@ -208,6 +241,8 @@ fun TerminalScreen(
                     onKill = { vm.kill(it) },
                     onCreate = { vm.create() },
                 )
+            } else if (useXterm) {
+                XtermTerminalView(vm = vm)
             } else {
                 TerminalView(vm = vm)
             }
@@ -498,7 +533,7 @@ private fun copyToClipboard(
 }
 
 @Composable
-private fun KeyRow(ctrl: Boolean, onCtrlToggle: () -> Unit, onKey: (String) -> Unit) {
+internal fun KeyRow(ctrl: Boolean, onCtrlToggle: () -> Unit, onKey: (String) -> Unit, showCtrl: Boolean = true) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -507,10 +542,12 @@ private fun KeyRow(ctrl: Boolean, onCtrlToggle: () -> Unit, onKey: (String) -> U
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (ctrl) {
-            AssistChip(onClick = onCtrlToggle, label = { Text("CTRL") })
-        } else {
-            AssistChip(onClick = onCtrlToggle, label = { Text("ctrl") })
+        if (showCtrl) {
+            if (ctrl) {
+                AssistChip(onClick = onCtrlToggle, label = { Text("CTRL") })
+            } else {
+                AssistChip(onClick = onCtrlToggle, label = { Text("ctrl") })
+            }
         }
         TerminalKey("esc") { onKey("\u001b") }
         TerminalKey("tab") { onKey("\t") }

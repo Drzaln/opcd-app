@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<link rel="stylesheet" href="xterm.css">
+<style>
+  /* Served from res/font by the WebViewClient (no duplicate copy in assets). */
+  @font-face { font-family: 'JBMono'; src: url('font') format('truetype'); font-display: block; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #11131a; }
+  #term { position: absolute; top: 0; left: 0; right: 0; bottom: 0; padding: 8px 8px 2px 8px; }
+  .xterm .xterm-viewport { overflow-y: auto; scrollbar-width: none; }
+  .xterm .xterm-viewport::-webkit-scrollbar { width: 0; height: 0; }
+</style>
+</head>
+<body>
+<div id="term"></div>
+<script src="xterm.js"></script>
+<script src="addon-fit.js"></script>
+<script>
+"use strict";
+var bridge = window.AndroidTerminal || null;
+var host = document.getElementById('term');
+
+window.onerror = function (message, source, line) {
+  if (bridge && bridge.onError) bridge.onError(String(message) + " @" + String(line));
+  return false;
+};
+
+var term = new Terminal({
+  fontFamily: "'JBMono', ui-monospace, monospace",
+  fontSize: 12,
+  lineHeight: 1.2,
+  scrollback: 8000,
+  cursorBlink: true,
+  convertEol: false,
+  theme: { background: '#11131a', foreground: '#e6e6e6' }
+});
+var fit = new FitAddon.FitAddon();
+term.loadAddon(fit);
+term.open(host);
+
+// Input: xterm handles the IME, hardware keys, paste and mouse itself.
+term.onData(function (data) { if (bridge) bridge.onInput(data); });
+
+var started = false;
+var lastCols = 0, lastRows = 0, resizeTimer = null;
+function doFit() {
+  if (!started) return;
+  try { fit.fit(); } catch (e) { return; }
+  if (term.cols < 2 || term.rows < 2) return;
+  if (term.cols === lastCols && term.rows === lastRows) return;
+  lastCols = term.cols;
+  lastRows = term.rows;
+  // Debounce: the keyboard animation fires a ResizeObserver event per pixel.
+  if (resizeTimer) clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(function () {
+    if (bridge) bridge.onResized(term.cols, term.rows);
+  }, 80);
+}
+
+new ResizeObserver(function () { doFit(); }).observe(host);
+window.addEventListener('resize', doFit);
+window.addEventListener('orientationchange', function () { setTimeout(doFit, 300); });
+
+// ---- Kotlin -> JS -------------------------------------------------------------------------------
+// Output arrives base64-encoded so escape sequences/UTF-8 survive the bridge untouched.
+window.__ocWrite = function (b64) {
+  var bin = atob(b64);
+  var bytes = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  term.write(new TextDecoder('utf-8').decode(bytes));
+};
+window.__ocReset = function () {
+  term.reset();
+  lastCols = 0;
+  lastRows = 0;
+};
+window.__ocPaste = function (text) { term.paste(text); };
+window.__ocPaste64 = function (b64) {
+  var bin = atob(b64);
+  var bytes = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  term.paste(new TextDecoder('utf-8').decode(bytes));
+};window.__ocTheme = function (json) {
+  try {
+    var t = JSON.parse(json);
+    var th = {
+      background: t.bg, foreground: t.fg, cursor: t.cursor, cursorAccent: t.bg,
+      selectionBackground: t.selection,
+    };
+    for (var i = 0; i < t.names.length; i++) th[t.names[i]] = t.ansi[i];
+    term.options.theme = th;
+  } catch (e) { }
+};
+window.__ocFocus = function () { try { term.focus(); } catch (e) { } };
+window.__ocCopy = function (visibleOnly) {
+  var text = term.getSelection();
+  if (!text) {
+    var buf = term.buffer.active;
+    var end = visibleOnly ? buf.viewportY + term.rows : buf.length;
+    var out = [];
+    for (var i = buf.viewportY; i < end; i++) {
+      var line = buf.getLine(i);
+      if (line) out.push(line.translateToString(true));
+    }
+    text = out.join('\n').replace(/\s+$/, '');
+  }
+  if (bridge && text) bridge.onCopy(text);
+};
+window.__ocBottom = function () { term.scrollToBottom(); };
+
+// Tell Kotlin the surface is laid out: it then replays the buffered PTY stream into the terminal.
+function announceReady() {
+  if (started) return;
+  started = true;
+  doFit();
+  if (bridge) bridge.onReady();
+}
+// Fit only once the Nerd Font is loaded, otherwise the first layout uses fallback cell metrics.
+var fontReady = (document.fonts && document.fonts.load)
+  ? document.fonts.load('12px JBMono').catch(function () { })
+  : Promise.resolve();
+fontReady.then(announceReady);
+setTimeout(announceReady, 2000);
+</script>
+</body>
+</html>

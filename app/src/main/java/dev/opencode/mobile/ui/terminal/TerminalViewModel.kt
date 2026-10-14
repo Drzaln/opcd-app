@@ -15,6 +15,9 @@ import dev.opencode.mobile.terminal.PtyTransport
 import dev.opencode.mobile.terminal.TerminalEmulator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -41,6 +44,22 @@ class TerminalViewModel(
     private val _frame = MutableStateFlow(0L)
     val frame: StateFlow<Long> = _frame
 
+    // "xterm.js" renderer mode: PTY bytes are handed to the WebView instead of the Kotlin emulator.
+    // The channel buffers while the WebView is still loading, so no data is lost on attach and the
+    // consumer just drains backlog + live stream in order. Bounded: if it overflows we flag it and
+    // the renderer re-attaches for a clean full replay.
+    private val rawChannel = Channel<String>(capacity = 8192, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    val rawOutput: ReceiveChannel<String> get() = rawChannel
+
+    // Bumped on every attach: the raw renderer uses it to clear its own buffer before a replay lands
+    // (the server replays the whole PTY from the start when we connect with cursor=null).
+    private val _attachGeneration = MutableStateFlow(0)
+    val attachGeneration: StateFlow<Int> = _attachGeneration
+
+    @Volatile private var rawMode = false
+
+    @Volatile private var rawDropped = false
+
     // PTY parsing is CPU work: keep it off the UI thread. Confined to one thread so the emulator
     // bytes are applied in order (the lock in TerminalEmulator keeps UI reads consistent).
     private val termDispatcher = Dispatchers.Default.limitedParallelism(1)
@@ -53,6 +72,31 @@ class TerminalViewModel(
     init {
         refresh()
         loadShells()
+    }
+
+    /** Switches the output sink and re-attaches, so the new renderer gets a full replay. */
+    fun setRawMode(raw: Boolean) {
+        if (raw == rawMode) return
+        rawMode = raw
+        rawDropped = false
+        drainRaw()
+        _ui.value.active?.let { attach(it) }
+    }
+
+    /** True when the buffer overflowed since the last call — the renderer should re-attach. */
+    fun consumeRawDropped(): Boolean {
+        val dropped = rawDropped
+        rawDropped = false
+        return dropped
+    }
+
+    /** Reconnects the active PTY (full replay) — used when a renderer switches or lost buffered data. */
+    fun reattach() {
+        _ui.value.active?.let { attach(it) }
+    }
+
+    private fun drainRaw() {
+        while (rawChannel.tryReceive().isSuccess) Unit
     }
 
     fun refresh() {
@@ -101,11 +145,13 @@ class TerminalViewModel(
         transport?.close()
         transport = null
         lastCursor = null
+        _attachGeneration.value++
         _ui.value = _ui.value.copy(active = pty, status = "connecting…", connected = false)
         connectJob = viewModelScope.launch(termDispatcher) {
             // Wait out the old socket so its last chunk can't land after the reset below.
             previous?.join()
             emulator.reset()
+            drainRaw()
             _frame.value = emulator.version
             try {
                 val protocol = api.protocol()
@@ -115,9 +161,13 @@ class TerminalViewModel(
                 t.events.collect { event ->
                     when (event) {
                         is PtyEvent.Data -> {
-                            emulator.write(event.text)
+                            if (rawMode) {
+                                if (rawChannel.trySend(event.text).isFailure) rawDropped = true
+                            } else {
+                                emulator.write(event.text)
+                                _frame.value = emulator.version
+                            }
                             if (!_ui.value.connected) _ui.value = _ui.value.copy(connected = true, status = "connected")
-                            _frame.value = emulator.version
                         }
                         is PtyEvent.Meta -> {
                             lastCursor = event.cursor
@@ -141,6 +191,7 @@ class TerminalViewModel(
         transport = null
         connectJob?.cancel()
         connectJob = null
+        drainRaw()
         _ui.value = _ui.value.copy(active = null, connected = false, status = "idle")
     }
 
@@ -162,9 +213,12 @@ class TerminalViewModel(
 
     fun resize(cols: Int, rows: Int) {
         val pty = _ui.value.active ?: return
+        val raw = rawMode
         viewModelScope.launch(termDispatcher) {
-            emulator.resize(cols, rows)
-            _frame.value = emulator.version
+            if (!raw) {
+                emulator.resize(cols, rows)
+                _frame.value = emulator.version
+            }
             runCatching { api.ptyUpdate(pty.id, PtyUpdateBody(size = PtySize(rows = rows, cols = cols)), projectDir()) }
         }
     }

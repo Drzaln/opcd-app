@@ -1,4 +1,4 @@
-<!-- ship: v0.1.46 (versionCode 47) -->
+<!-- ship: v0.1.47 (versionCode 48) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -149,6 +149,30 @@ V2 differences that matter (verified against 2.0.26):
     scrolled with a plain `verticalScroll` + a tall `Canvas` (native fling, no custom drag detector),
     and a `RowLayoutCache` skips re-building/re-measuring rows whose cells didn't change (the
     per-frame `AnnotatedString` rebuild was the main jank source).
+16b. **Two terminal renderers** (top-bar ⋮ → Renderer, persisted as `ServerStore.terminalRenderer`,
+    default `xterm`):
+    - **`native`** — the Compose `Canvas` + `TerminalEmulator` described in 15. Compact ANSI/xterm
+      subset: no DEC graphics charset, no mouse reporting, no device-status replies, no hardware-key
+      handling (soft keyboard only), 2000-line scrollback.
+    - **`xterm`** — `ui/terminal/XtermTerminalView.kt`: a WebView running vendored **xterm.js 5.5.0**
+      (`app/src/main/assets/terminal/{xterm.js,xterm.css,addon-fit.js}`, MIT, see
+      `assets/terminal/NOTICE.txt`). Full xterm fidelity: reflow, mouse, DEC charset, bracketed
+      paste, IME, hardware keys, 8000-line scrollback + search. Kotlin still owns the WebSocket
+      (auth + 1.x/2.x URL split stay in one place); the page is fed the raw PTY stream and calls back
+      for input/resize. The page is served through `WebViewClient.shouldInterceptRequest` from a fake
+      `https://terminal.local/` origin, which is also how the **Nerd Font is served out of `res/font`**
+      (`openRawResource`) instead of a second 2.4 MB copy in assets — `file://` can't reach `res/` on
+      targetSdk 30+.
+    **Renderer plumbing:** `TerminalViewModel.setRawMode(raw)` flips the output sink and re-attaches
+    (full replay, so the newly selected renderer starts clean); in raw mode bytes go to a bounded
+    `Channel<String>` (`rawOutput`) instead of the emulator, so a WebView that is still loading simply
+    drains the backlog when it reports ready (`consumeRawDropped()` → `reattach()` if it overflowed).
+    `attachGeneration` is bumped per attach; the WebView prepends `__ocReset()` to the first chunk of a
+    new generation so a reconnect doesn't duplicate the replay. Output is coalesced to one
+    `evaluateJavascript` per 16 ms (base64 → `atob` → `TextDecoder`), because a build log arrives as
+    thousands of tiny chunks.
+    `Ansi16` and `KeyRow` are `internal` so both renderers share them (`KeyRow(showCtrl = false)` in
+    xterm mode — xterm handles ctrl itself).
     **Threading:** PTY parsing runs on `Dispatchers.Default.limitedParallelism(1)` in the ViewModel;
     `TerminalEmulator` guards every mutation/read on an internal lock (`write`/`resize`/`reset` are
     `synchronized`, the UI draws inside `readLocked { … }`), so a background writer can't mutate rows
