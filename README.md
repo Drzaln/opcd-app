@@ -15,7 +15,7 @@ Kotlin · Jetpack Compose · Material 3 · dark theme · minSdk 26.
 |---|---|
 | Sessions | List/resume, new (opens it immediately), rename (long-press), delete, per-session folder picker, git branch bar (switch/create), status dots, tokens + cost |
 | Chat | Live streaming (SSE, incremental), markdown + code highlighting, reasoning + tool cards, todos panel, copy message (long-press), queued indicator |
-| Agents/models | Pick agent + model per message; selection persisted per server; per-message model name |
+| Agents/models | Pick agent + model per message; selection remembered **per session** (last pick becomes the default for new sessions); per-message model name |
 | Commands | `/` picker for opencode slash commands |
 | Context | Header shows `N tokens · N% used · $N spent` (same formula as the TUI) |
 | Files | Folder browser, code viewer with syntax highlighting, fuzzy file search + content grep |
@@ -149,7 +149,7 @@ Screens use standard Android navigation animations (slide in/out on push, revers
   branch bar under the folder to see the current git branch and switch/create branches,
   green/orange dot = idle/busy.
 - **Chat** — type and send. `/` opens the slash-command picker. The agent/model chips above the input
-  choose who answers (remembered per server). Long-press a message to copy. `± diff` under your
+  choose who answers (remembered **per session**; your last pick becomes the default for new sessions). Long-press a message to copy. `± diff` under your
   message shows that turn's changes. `Abort` stops a running turn. Todos appear in a collapsible panel.
 - **Header** — `N tokens · N% used · $N spent` for the current session (matches the TUI).
 - **Files** — browse the project; search box switches between **Files** (fuzzy names) and **Content**

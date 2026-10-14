@@ -123,13 +123,19 @@ class ChatViewModel(
 
     fun selectAgent(name: String?) {
         _ui.update { it.copy(selectedAgent = name) }
-        viewModelScope.launch { app.serverStore.setSelectedAgent(server.id, name) }
+        viewModelScope.launch {
+            app.serverStore.setSessionAgent(server.id, sessionId, name)
+            // Also remember it as the default for new sessions on this server.
+            app.serverStore.setSelectedAgent(server.id, name)
+        }
     }
 
     fun selectModel(model: ModelOption?) {
         _ui.update { it.copy(selectedModel = model) }
         viewModelScope.launch {
-            app.serverStore.setSelectedModel(server.id, model?.let { "${it.providerId}/${it.modelId}" })
+            val ref = model?.let { "${it.providerId}/${it.modelId}" }
+            app.serverStore.setSessionModel(server.id, sessionId, ref)
+            app.serverStore.setSelectedModel(server.id, ref)
         }
     }
 
@@ -152,8 +158,11 @@ class ChatViewModel(
                         )
                     }
                 }
-            val storedModel = app.serverStore.selectedModels.first()[server.id]
-            val storedAgent = app.serverStore.selectedAgents.first()[server.id]
+            // Session-level pick wins; otherwise fall back to the server default set by the last pick.
+            val storedModel = app.serverStore.sessionModel(server.id, sessionId)
+                ?: app.serverStore.selectedModels.first()[server.id]
+            val storedAgent = app.serverStore.sessionAgent(server.id, sessionId)
+                ?: app.serverStore.selectedAgents.first()[server.id]
             val selectedModel = storedModel?.let { ref ->
                 val parts = ref.split("/", limit = 2)
                 if (parts.size == 2) {

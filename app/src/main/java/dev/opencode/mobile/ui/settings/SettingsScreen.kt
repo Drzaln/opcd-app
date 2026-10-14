@@ -86,6 +86,7 @@ fun SettingsScreen(
     val themeMode by appVm.themeMode.collectAsState()
     val notificationsEnabled by appVm.notificationsEnabled.collectAsState()
     val updateMessage by appVm.updateMessage.collectAsState()
+    val checkingUpdate by appVm.checkingUpdate.collectAsState()
     val version = remember {
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull().orEmpty()
     }
@@ -258,10 +259,25 @@ fun SettingsScreen(
                     HorizontalDivider()
                     ListItem(
                         headlineContent = { Text("Check for updates") },
-                        supportingContent = { Text(updateMessage ?: "Fetched from GitHub Releases") },
-                        leadingContent = { Icon(Icons.Filled.Refresh, contentDescription = null) },
+                        supportingContent = {
+                            val message = updateMessage
+                            Text(
+                                when {
+                                    checkingUpdate -> "Checking…"
+                                    !message.isNullOrBlank() -> message
+                                    else -> "Fetched from GitHub Releases"
+                                },
+                            )
+                        },
+                        leadingContent = {
+                            if (checkingUpdate) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Filled.Refresh, contentDescription = null)
+                            }
+                        },
                         colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                        modifier = Modifier.clickable { appVm.checkForUpdate(force = true) },
+                        modifier = Modifier.clickable(enabled = !checkingUpdate) { appVm.checkForUpdate(force = true) },
                     )
                 }
             }

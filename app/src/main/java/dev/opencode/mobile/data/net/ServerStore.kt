@@ -30,6 +30,8 @@ class ServerStore(private val context: Context) {
     private val activeKey = stringPreferencesKey("active")
     private val selectedModelKey = stringPreferencesKey("selected_model")
     private val selectedAgentKey = stringPreferencesKey("selected_agent")
+    private val sessionModelKey = stringPreferencesKey("session_selected_model")
+    private val sessionAgentKey = stringPreferencesKey("session_selected_agent")
     private val notifyKey = androidx.datastore.preferences.core.booleanPreferencesKey("notifications_enabled")
     private val directoryKey = stringPreferencesKey("current_directory")
     private val skippedUpdateKey = stringPreferencesKey("skipped_update_version")
@@ -51,6 +53,22 @@ class ServerStore(private val context: Context) {
     val selectedAgents: Flow<Map<String, String>> = context.dataStore.data.map {
         decodeStringMap(it[selectedAgentKey])
     }
+
+    // Per-session overrides, keyed "<serverId>|<sessionId>". Selecting in a session also updates the
+    // per-server value, which stays the default for new sessions.
+    private val sessionModels: Flow<Map<String, String>> = context.dataStore.data.map {
+        decodeStringMap(it[sessionModelKey])
+    }
+
+    private val sessionAgents: Flow<Map<String, String>> = context.dataStore.data.map {
+        decodeStringMap(it[sessionAgentKey])
+    }
+
+    suspend fun sessionModel(serverId: String, sessionId: String): String? =
+        sessionModels.first()["$serverId|$sessionId"]
+
+    suspend fun sessionAgent(serverId: String, sessionId: String): String? =
+        sessionAgents.first()["$serverId|$sessionId"]
 
     val notificationsEnabled: Flow<Boolean> = context.dataStore.data.map { it[notifyKey] ?: false }
 
@@ -109,6 +127,24 @@ class ServerStore(private val context: Context) {
             val map = decodeStringMap(prefs[selectedAgentKey]).toMutableMap()
             if (value == null) map.remove(serverId) else map[serverId] = value
             prefs[selectedAgentKey] = json.encodeToString(map)
+        }
+    }
+
+    suspend fun setSessionModel(serverId: String, sessionId: String, value: String?) {
+        context.dataStore.edit { prefs ->
+            val map = decodeStringMap(prefs[sessionModelKey]).toMutableMap()
+            val key = "$serverId|$sessionId"
+            if (value == null) map.remove(key) else map[key] = value
+            prefs[sessionModelKey] = json.encodeToString(map)
+        }
+    }
+
+    suspend fun setSessionAgent(serverId: String, sessionId: String, value: String?) {
+        context.dataStore.edit { prefs ->
+            val map = decodeStringMap(prefs[sessionAgentKey]).toMutableMap()
+            val key = "$serverId|$sessionId"
+            if (value == null) map.remove(key) else map[key] = value
+            prefs[sessionAgentKey] = json.encodeToString(map)
         }
     }
 

@@ -91,25 +91,42 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
 
     private var updateChecked = false
 
+    private val _checkingUpdate = MutableStateFlow(false)
+    val checkingUpdate: StateFlow<Boolean> = _checkingUpdate
+
     private val _updateMessage = MutableStateFlow<String?>(null)
     val updateMessage: StateFlow<String?> = _updateMessage
 
     fun checkForUpdate(force: Boolean = false) {
         if (updateChecked && !force) return
+        if (_checkingUpdate.value) return
         updateChecked = true
-        if (force) _update.value = UpdateState.Idle
+        _checkingUpdate.value = true
+        if (force) {
+            // Clear stale feedback right away so the tap always visibly does something. Leave a live
+            // download/install prompt alone.
+            _updateMessage.value = null
+            if (_update.value is UpdateState.Available || _update.value is UpdateState.Failed) {
+                _update.value = UpdateState.Idle
+            }
+        }
         viewModelScope.launch {
-            val latest = runCatching { updater.latestVersion() }.getOrNull()
-            if (latest == null) {
-                if (force) _updateMessage.value = "Could not reach GitHub"
-                return@launch
+            try {
+                val latest = runCatching { updater.latestVersion() }.getOrNull()
+                if (latest == null) {
+                    if (force) _updateMessage.value = "Could not reach GitHub — check your connection"
+                    return@launch
+                }
+                if (!updater.isNewer(latest, updater.currentVersion)) {
+                    if (force) _updateMessage.value = "You're on the latest version (v${updater.currentVersion})"
+                    return@launch
+                }
+                if (!force && store.skippedUpdateVersion.first() == latest) return@launch
+                _update.value = UpdateState.Available(latest)
+                if (force) _updateMessage.value = "v$latest is available"
+            } finally {
+                _checkingUpdate.value = false
             }
-            if (!updater.isNewer(latest, updater.currentVersion)) {
-                if (force) _updateMessage.value = "You're on the latest version (v${updater.currentVersion})"
-                return@launch
-            }
-            if (!force && store.skippedUpdateVersion.first() == latest) return@launch
-            _update.value = UpdateState.Available(latest)
         }
     }
 

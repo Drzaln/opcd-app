@@ -83,19 +83,15 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
 
                 val update by appVm.update.collectAsState()
-                var updateDismissed by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { appVm.checkForUpdate() }
-                if (!updateDismissed) {
-                    UpdateDialog(
-                        state = update,
-                        onDownload = { version -> appVm.downloadUpdate(version) },
-                        onInstall = { file -> appVm.installUpdate(file) },
-                        onDismiss = {
-                            updateDismissed = true
-                            appVm.dismissUpdate((update as? UpdateState.Available)?.version)
-                        },
-                    )
-                }
+                // No sticky "dismissed" flag: a manual check in Settings must be able to re-open the
+                // prompt. Skipping from the launch check is remembered in DataStore instead.
+                UpdateDialog(
+                    state = update,
+                    onDownload = { version -> appVm.downloadUpdate(version) },
+                    onInstall = { file -> appVm.installUpdate(file) },
+                    onDismiss = { appVm.dismissUpdate((update as? UpdateState.Available)?.version) },
+                )
 
                 // App-wide blocking prompts (permission + question sheets) so they are never missed.
                 val prompts by appVm.prompts.collectAsState()

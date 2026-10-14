@@ -1,4 +1,4 @@
-<!-- ship: v0.1.45 (versionCode 46) -->
+<!-- ship: v0.1.46 (versionCode 47) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -185,7 +185,7 @@ V2 differences that matter (verified against 2.0.26):
 ## Features done
 
 Incremental SSE part patching · adaptive power-aware polling (3s busy / 15s fg / 60s bg) · todos
-panel · agent+model switcher (persisted per server) · slash commands (`/command`) · copy message ·
+panel · agent+model switcher (per session, last pick = default for new sessions) · slash commands (`/command`) · copy message ·
 session status dots · rename session · per-message model/tokens/ctx/$ · session totals · queued
 indicator · per-message diff · project search (`/find`, `/find/file`) · offline cache (Room) ·
 notifications (foreground service toggle) · mDNS scan + Tailscale remote field · **redesigned folder
@@ -270,6 +270,13 @@ switch, or create one — git runs server-side through a one-shot PTY, see integ
   `ACTION_MANAGE_UNKNOWN_APP_SOURCES`. **Caveat:** the release APK must be signed with the same key as
   the installed app (CI falls back to the debug key) or the install fails. "Later" persists a skipped
   version until a newer one appears.
+  **Manual check (Settings → About):** `checkForUpdate(force = true)` sets a `checkingUpdate` flag
+  (the row shows a spinner + "Checking…" and ignores repeat taps), clears the stale message, and
+  reports the outcome in the row's supporting text ("You're on the latest version (v…)" / "v… is
+  available" / "Could not reach GitHub"). There is **no sticky "dismissed" flag** in MainActivity —
+  it used to suppress the prompt for the rest of the process, so after tapping "Later" once a manual
+  check set `Available` but showed nothing at all (looked unresponsive). Dismissing still records the
+  skipped version so the launch-time check stays quiet.
 
 ## Open / next ideas
 

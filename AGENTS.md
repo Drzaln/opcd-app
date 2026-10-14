@@ -140,7 +140,9 @@ Single `:app` module. No DI framework.
 - Chat renders messages by `part.type` in `PartView` (ChatScreen.kt). Add new part types there.
 - Chat has slash-command support: input matching `/<name> args` where `<name>` is a known `/command`
   is routed to `session/{id}/command` (with the selected agent/model); otherwise it goes to `prompt_async`.
-  Agent + model selectors are persisted per server via `ServerStore`.
+  Agent + model selectors are persisted **per session** via `ServerStore` (`session_selected_model` /
+  `session_selected_agent`, keyed `"<serverId>|<sessionId>"`); picking one also updates the per-server
+  value (`selected_model` / `selected_agent`), which remains the default for new sessions.
 - Chat message flow: SSE `message.part.updated` (with `delta` for text streaming) is patched
   incrementally in `ChatViewModel`; `message.updated`/`part.removed`/`message.removed`/`todo.updated`
   apply the same way. Fallback: debounced 400ms full refetch (`scheduleFullRefresh`), plus adaptive
@@ -179,7 +181,8 @@ curl -u opencode:secret http://127.0.0.1:4199/file/content?path=settings.gradle.
 ## Status / next ideas
 
 - Done: incremental SSE part patching, adaptive power-aware polling, todos panel, agent/model
-  switcher (persisted per server), copy message, session status dots, rename, per-message
+  switcher (per session, with the last pick as the default for new sessions), copy message, session
+  status dots, rename, per-message
   model/tokens/context/cost meta, session totals, queued indicator, slash commands, per-message diff,
   project search (`/find` + `/find/file`), offline cache (Room), local notifications (foreground
   watch service, toggle in Servers screen), **OpenCode Go plan usage in Settings**, shortened project

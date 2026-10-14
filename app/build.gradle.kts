@@ -21,8 +21,8 @@ android {
         applicationId = "dev.opencode.mobile"
         minSdk = 26
         targetSdk = 36
-        versionCode = 46
-        versionName = "0.1.45"
+        versionCode = 47
+        versionName = "0.1.46"
     }
 
     signingConfigs {
