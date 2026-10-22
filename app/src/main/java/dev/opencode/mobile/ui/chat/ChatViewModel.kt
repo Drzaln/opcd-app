@@ -49,6 +49,7 @@ data class ModelOption(
     val label: String,
     val contextLimit: Long = 0,
     val variants: List<String> = emptyList(),
+    val shortLabel: String = label,
 )
 
 private fun modelRef(providerId: String, modelId: String, variant: String?): String =
@@ -172,6 +173,7 @@ class ChatViewModel(
                             "${provider.name} · ${model.name}",
                             model.limit?.context ?: 0L,
                             model.variants.map { it.id }.filter { it.isNotBlank() },
+                            model.name,
                         )
                     }
                 }

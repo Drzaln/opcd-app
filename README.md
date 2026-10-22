@@ -151,7 +151,8 @@ Screens use standard Android navigation animations (slide in/out on push, revers
 - **Chat** — type and send. `/` opens the slash-command picker. The agent/model chips above the input
   choose who answers (remembered **per session**; your last pick becomes the default for new sessions).
   When the model exposes reasoning variants, a **Variant** chip appears next to it (e.g. low/high/max;
-  default = the model's own default). Long-press a message to copy. `± diff` under your
+  default = the model's own default). The chip row scrolls horizontally; the selected model uses its
+  short name, with the full `provider · model` label in the dropdown. Long-press a message to copy. `± diff` under your
   message shows that turn's changes. `Abort` stops a running turn. Todos appear in a collapsible panel.
 - **Header** — `N tokens · N% used · $N spent` for the current session (matches the TUI).
 - **Files** — browse the project; search box switches between **Files** (fuzzy names) and **Content**

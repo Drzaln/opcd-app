@@ -385,7 +385,10 @@ private fun InputBar(
             }
             if (agents.isNotEmpty() || models.isNotEmpty()) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 10.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (agents.isNotEmpty()) {
@@ -403,6 +406,7 @@ private fun InputBar(
                             options = models,
                             optionLabel = { it.label },
                             selected = selectedModel,
+                            selectedLabel = { it.shortLabel },
                             onSelect = onSelectModel,
                         )
                     }
@@ -416,8 +420,6 @@ private fun InputBar(
                             onSelect = onSelectVariant,
                         )
                     }
-                    Spacer(Modifier.weight(1f))
-                    Text("·", color = OcTheme.colors.textSecondary)
                 }
             }
             if (queued > 0) {
@@ -520,12 +522,13 @@ private fun <T> SelectionChip(
     optionLabel: (T) -> String,
     selected: T?,
     onSelect: (T?) -> Unit,
+    selectedLabel: (T) -> String = optionLabel,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { expanded = true }) {
             Text(
-                selected?.let(optionLabel) ?: label,
+                selected?.let(selectedLabel) ?: label,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.labelMedium,

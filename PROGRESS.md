@@ -1,4 +1,4 @@
-<!-- ship: v0.1.50 (versionCode 51) -->
+<!-- ship: v0.1.51 (versionCode 52) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -239,7 +239,7 @@ V2 differences that matter (verified against 2.0.26):
 ## Features done
 
 Incremental SSE part patching · adaptive power-aware polling (3s busy / 15s fg / 60s bg) · todos
-panel · agent+model switcher + reasoning-variant chip (per session, last pick = default for new sessions) · slash commands (`/command`) · copy message ·
+panel · agent+model switcher + reasoning-variant chip (per session, last pick = default for new sessions; scrollable chip row, short model name) · slash commands (`/command`) · copy message ·
 session status dots · rename session · per-message model/tokens/ctx/$ · session totals · queued
 indicator · per-message diff · project search (`/find`, `/find/file`) · offline cache (Room) ·
 notifications (foreground service toggle) · mDNS scan + Tailscale remote field · **redesigned folder
