@@ -1,4 +1,4 @@
-<!-- ship: v0.1.49 (versionCode 50) -->
+<!-- ship: v0.1.50 (versionCode 51) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -55,7 +55,9 @@ V2 differences that matter (verified against 2.0.26):
   load-older, or the chat renders reversed.
 - **Sending:** `/api/session/{id}/prompt` `{text, files:[{uri,name}]}` (no inline model/agent) — the
   client first POSTs `/agent` and `/model`; commands go to `/api/session/{id}/command` `{name,text}`;
-  abort is `/interrupt`.
+  abort is `/interrupt`. Model payloads are `Model.Ref` `{id, providerID, variant?}` — reasoning
+  variants (low/medium/high/xhigh/max) come from `/api/model` → `variants[].id` and apply to both
+  prompt and command turns.
 - **Files:** `/api/fs/list` `{path,type}` (dirs have a trailing `/`), `/api/fs/read/<path>` returns
   raw bytes (content sniffed for binary), `/api/fs/find?type=file|directory`. **No content grep** →
   the Content search tab returns nothing.
@@ -237,7 +239,7 @@ V2 differences that matter (verified against 2.0.26):
 ## Features done
 
 Incremental SSE part patching · adaptive power-aware polling (3s busy / 15s fg / 60s bg) · todos
-panel · agent+model switcher (per session, last pick = default for new sessions) · slash commands (`/command`) · copy message ·
+panel · agent+model switcher + reasoning-variant chip (per session, last pick = default for new sessions) · slash commands (`/command`) · copy message ·
 session status dots · rename session · per-message model/tokens/ctx/$ · session totals · queued
 indicator · per-message diff · project search (`/find`, `/find/file`) · offline cache (Room) ·
 notifications (foreground service toggle) · mDNS scan + Tailscale remote field · **redesigned folder

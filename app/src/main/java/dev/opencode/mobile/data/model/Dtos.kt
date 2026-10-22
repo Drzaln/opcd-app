@@ -411,6 +411,7 @@ data class QuestionReplyBody(
 data class ModelRef(
     val providerID: String = "",
     val modelID: String = "",
+    val variant: String? = null,
 )
 
 @Serializable
@@ -449,6 +450,8 @@ data class CommandBody(
     val messageID: String? = null,
     val agent: String? = null,
     val model: String? = null,
+    val providerID: String? = null,
+    val variant: String? = null,
     val command: String,
     val arguments: String = "",
 )
@@ -467,6 +470,12 @@ data class ModelInfo(
     val id: String = "",
     val name: String = "",
     val limit: ModelLimit? = null,
+    val variants: List<ModelVariant> = emptyList(),
+)
+
+@Serializable
+data class ModelVariant(
+    val id: String = "",
 )
 
 @Serializable

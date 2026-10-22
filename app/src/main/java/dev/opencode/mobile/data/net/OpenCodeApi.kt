@@ -18,6 +18,7 @@ import dev.opencode.mobile.data.model.MessageTime
 import dev.opencode.mobile.data.model.ModelInfo
 import dev.opencode.mobile.data.model.ModelLimit
 import dev.opencode.mobile.data.model.ModelRef
+import dev.opencode.mobile.data.model.ModelVariant
 import dev.opencode.mobile.data.model.Part
 import dev.opencode.mobile.data.model.PartTime
 import dev.opencode.mobile.data.model.PermissionReplyBody
@@ -290,7 +291,7 @@ class OpenCodeApi(
     }
 
     suspend fun sendMessage(id: String, body: SendMessageBody, directory: String?): MessageData = when (protocol()) {
-        Protocol.V1 -> v1.sendMessage(id, body, directory)
+        Protocol.V1 -> v1.sendMessage(id, body.copy(model = body.model?.copy(variant = null)), directory)
         Protocol.V2 -> {
             v2ApplySelection(id, body)
             val resp = v2.prompt(id, promptPayload(body, body.parts))
@@ -299,7 +300,8 @@ class OpenCodeApi(
     }
 
     suspend fun sendMessageAsync(id: String, body: SendMessageBody, directory: String?): Response<Unit> = when (protocol()) {
-        Protocol.V1 -> v1.sendMessageAsync(id, body, directory)
+        // The 1.x prompt schema has no variant; keep its payload byte-compatible.
+        Protocol.V1 -> v1.sendMessageAsync(id, body.copy(model = body.model?.copy(variant = null)), directory)
         Protocol.V2 -> {
             v2ApplySelection(id, body)
             runCatching { v2.prompt(id, promptPayload(body, body.parts)) }
@@ -308,9 +310,14 @@ class OpenCodeApi(
     }
 
     suspend fun command(id: String, body: CommandBody, directory: String?): MessageData = when (protocol()) {
-        Protocol.V1 -> v1.command(id, body, directory)
+        Protocol.V1 -> v1.command(id, body.copy(providerID = null, variant = null), directory)
         Protocol.V2 -> {
             body.agent?.let { v2.setAgent(id, buildJsonObject { put("agent", it) }) }
+            if (body.model != null && body.providerID != null) {
+                v2.setModel(id, buildJsonObject {
+                    put("model", modelRefJson(ModelRef(body.providerID, body.model, body.variant)))
+                })
+            }
             val payload = buildJsonObject {
                 put("name", body.command)
                 put("text", body.arguments)
@@ -430,6 +437,9 @@ class OpenCodeApi(
                                     context = it.field("context").long() ?: 0,
                                     output = it.field("output").long() ?: 0,
                                 )
+                            },
+                            variants = m.field("variants").arr().orEmpty().mapNotNull { v ->
+                                v.asObjectOrNull()?.field("id")?.str()?.let { ModelVariant(it) }
                             },
                         )
                     },
@@ -567,6 +577,7 @@ class OpenCodeApi(
     private fun modelRefJson(model: ModelRef): JsonObject = buildJsonObject {
         put("id", model.modelID)
         put("providerID", model.providerID)
+        model.variant?.takeIf { it.isNotBlank() }?.let { put("variant", it) }
     }
 
     private fun promptPayload(body: SendMessageBody, parts: List<dev.opencode.mobile.data.model.PartInput>): JsonObject = buildJsonObject {

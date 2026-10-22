@@ -266,8 +266,10 @@ fun ChatScreen(
                 models = ui.models,
                 selectedAgent = ui.selectedAgent,
                 selectedModel = ui.selectedModel,
+                selectedVariant = ui.selectedVariant,
                 onSelectAgent = { vm.selectAgent(it) },
                 onSelectModel = { vm.selectModel(it) },
+                onSelectVariant = { vm.selectVariant(it) },
                 attachments = attachments,
                 onRemoveAttachment = { vm.removeAttachment(it) },
                 onPickPhoto = { photoPicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
@@ -341,8 +343,10 @@ private fun InputBar(
     models: List<ModelOption>,
     selectedAgent: String?,
     selectedModel: ModelOption?,
+    selectedVariant: String?,
     onSelectAgent: (String?) -> Unit,
     onSelectModel: (ModelOption?) -> Unit,
+    onSelectVariant: (String?) -> Unit,
     attachments: List<Attachment>,
     onRemoveAttachment: (String) -> Unit,
     onPickPhoto: () -> Unit,
@@ -400,6 +404,16 @@ private fun InputBar(
                             optionLabel = { it.label },
                             selected = selectedModel,
                             onSelect = onSelectModel,
+                        )
+                    }
+                    val variants = selectedModel?.variants.orEmpty()
+                    if (variants.isNotEmpty()) {
+                        SelectionChip(
+                            label = "Variant",
+                            options = variants,
+                            optionLabel = { it },
+                            selected = selectedVariant?.takeIf { it in variants },
+                            onSelect = onSelectVariant,
                         )
                     }
                     Spacer(Modifier.weight(1f))

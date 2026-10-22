@@ -158,7 +158,9 @@ Single `:app` module. No DI framework.
   is routed to `session/{id}/command` (with the selected agent/model); otherwise it goes to `prompt_async`.
   Agent + model selectors are persisted **per session** via `ServerStore` (`session_selected_model` /
   `session_selected_agent`, keyed `"<serverId>|<sessionId>"`); picking one also updates the per-server
-  value (`selected_model` / `selected_agent`), which remains the default for new sessions.
+  value (`selected_model` / `selected_agent`), which remains the default for new sessions. The model
+  value may carry a reasoning variant as `provider/model#variant`; V2 sends it as `Model.Ref.variant`
+  on `/api/session/{id}/model` (both prompt and command turns), V1 strips it.
 - Chat message flow: SSE `message.part.updated` (with `delta` for text streaming) is patched
   incrementally in `ChatViewModel`; `message.updated`/`part.removed`/`message.removed`/`todo.updated`
   apply the same way. Fallback: debounced 400ms full refetch (`scheduleFullRefresh`), plus adaptive
@@ -197,7 +199,7 @@ curl -u opencode:secret http://127.0.0.1:4199/file/content?path=settings.gradle.
 ## Status / next ideas
 
 - Done: incremental SSE part patching, adaptive power-aware polling, todos panel, agent/model
-  switcher (per session, with the last pick as the default for new sessions), copy message, session
+  switcher + reasoning-variant chip (per session, with the last pick as the default for new sessions), copy message, session
   status dots, rename, per-message
   model/tokens/context/cost meta, session totals, queued indicator, slash commands, per-message diff,
   project search (`/find` + `/find/file`), offline cache (Room), local notifications (foreground

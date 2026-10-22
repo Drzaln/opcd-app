@@ -48,7 +48,11 @@ data class ModelOption(
     val modelId: String,
     val label: String,
     val contextLimit: Long = 0,
+    val variants: List<String> = emptyList(),
 )
+
+private fun modelRef(providerId: String, modelId: String, variant: String?): String =
+    "$providerId/$modelId" + (variant?.takeIf { it.isNotBlank() }?.let { "#$it" } ?: "")
 
 data class Attachment(
     val uri: String,
@@ -74,6 +78,7 @@ class ChatViewModel(
         val commands: List<Command> = emptyList(),
         val selectedAgent: String? = null,
         val selectedModel: ModelOption? = null,
+        val selectedVariant: String? = null,
         val queued: Int = 0,
         val loading: Boolean = true,
         val loadingOlder: Boolean = false,
@@ -131,9 +136,20 @@ class ChatViewModel(
     }
 
     fun selectModel(model: ModelOption?) {
-        _ui.update { it.copy(selectedModel = model) }
+        val variant = model?.let { next -> _ui.value.selectedVariant?.takeIf { it in next.variants } }
+        _ui.update { it.copy(selectedModel = model, selectedVariant = variant) }
         viewModelScope.launch {
-            val ref = model?.let { "${it.providerId}/${it.modelId}" }
+            val ref = model?.let { modelRef(it.providerId, it.modelId, variant) }
+            app.serverStore.setSessionModel(server.id, sessionId, ref)
+            app.serverStore.setSelectedModel(server.id, ref)
+        }
+    }
+
+    fun selectVariant(variant: String?) {
+        val model = _ui.value.selectedModel ?: return
+        _ui.update { it.copy(selectedVariant = variant) }
+        viewModelScope.launch {
+            val ref = modelRef(model.providerId, model.modelId, variant)
             app.serverStore.setSessionModel(server.id, sessionId, ref)
             app.serverStore.setSelectedModel(server.id, ref)
         }
@@ -155,6 +171,7 @@ class ChatViewModel(
                             model.id,
                             "${provider.name} · ${model.name}",
                             model.limit?.context ?: 0L,
+                            model.variants.map { it.id }.filter { it.isNotBlank() },
                         )
                     }
                 }
@@ -166,11 +183,23 @@ class ChatViewModel(
             val selectedModel = storedModel?.let { ref ->
                 val parts = ref.split("/", limit = 2)
                 if (parts.size == 2) {
-                    models.firstOrNull { it.providerId == parts[0] && it.modelId == parts[1] }
+                    val modelId = parts[1].substringBefore('#')
+                    models.firstOrNull { it.providerId == parts[0] && it.modelId == modelId }
                 } else null
             }
+            val selectedVariant = storedModel
+                ?.substringAfterLast('#', "")
+                ?.ifBlank { null }
+                ?.takeIf { variant -> selectedModel?.variants?.contains(variant) == true }
             _ui.update {
-                it.copy(agents = agents, models = models, commands = commands, selectedAgent = storedAgent, selectedModel = selectedModel)
+                it.copy(
+                    agents = agents,
+                    models = models,
+                    commands = commands,
+                    selectedAgent = storedAgent,
+                    selectedModel = selectedModel,
+                    selectedVariant = selectedVariant,
+                )
             }
         }
     }
@@ -267,6 +296,8 @@ class ChatViewModel(
                         CommandBody(
                             agent = _ui.value.selectedAgent,
                             model = _ui.value.selectedModel?.modelId,
+                            providerID = _ui.value.selectedModel?.providerId,
+                            variant = _ui.value.selectedVariant,
                             command = commandName,
                             arguments = commandArgs,
                         ),
@@ -283,7 +314,7 @@ class ChatViewModel(
                         sessionId,
                         SendMessageBody(
                             agent = _ui.value.selectedAgent,
-                            model = _ui.value.selectedModel?.let { ModelRef(it.providerId, it.modelId) },
+                            model = _ui.value.selectedModel?.let { ModelRef(it.providerId, it.modelId, _ui.value.selectedVariant) },
                             parts = parts,
                         ),
                         projectDir(),
