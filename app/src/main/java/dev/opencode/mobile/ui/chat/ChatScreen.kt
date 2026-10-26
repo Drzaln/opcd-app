@@ -10,6 +10,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -73,8 +75,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -946,7 +953,7 @@ private fun PartView(
             val sourcePath = part.source?.get("path")?.let { it.toString().trim('"') }
             val display = part.filename ?: sourcePath ?: part.url
             if (part.mime.startsWith("image/") && part.url.startsWith("data:")) {
-                ImagePart(url = part.url, filename = display, sourcePath = sourcePath, onOpenFile = onOpenFile)
+                ImagePart(url = part.url, filename = display)
             } else {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -974,25 +981,63 @@ private fun PartView(
 private fun ImagePart(
     url: String,
     filename: String,
-    sourcePath: String?,
-    onOpenFile: (String) -> Unit,
 ) {
     val bitmap by produceState<android.graphics.Bitmap?>(initialValue = null, url) {
         value = withContext(Dispatchers.IO) { decodeDataUrl(url) }
     }
     val image = bitmap
-    if (image != null) {
-        Image(
-            bitmap = image.asImageBitmap(),
-            contentDescription = filename,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp)
-                .clickable { sourcePath?.let(onOpenFile) },
-        )
-    } else {
+    if (image == null) {
         MutedLabel(filename, modifier = Modifier.padding(vertical = 2.dp))
+        return
+    }
+    var viewer by rememberSaveable(url) { mutableStateOf(false) }
+    Image(
+        bitmap = image.asImageBitmap(),
+        contentDescription = filename,
+        contentScale = ContentScale.Fit,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clickable { viewer = true },
+    )
+    if (viewer) ImageViewerDialog(bitmap = image, filename = filename, onDismiss = { viewer = false })
+}
+
+@Composable
+private fun ImageViewerDialog(
+    bitmap: android.graphics.Bitmap,
+    filename: String,
+    onDismiss: () -> Unit,
+) {
+    var scale by remember { mutableStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    val transform = rememberTransformableState { zoomChange, panChange, _ ->
+        scale = (scale * zoomChange).coerceIn(1f, 6f)
+        offset = if (scale == 1f) Offset.Zero else offset + panChange
+    }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = filename,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(
+                        scaleX = scale,
+                        scaleY = scale,
+                        translationX = offset.x,
+                        translationY = offset.y,
+                    )
+                    .transformable(transform),
+            )
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = "Close image", tint = Color.White)
+            }
+        }
     }
 }
 

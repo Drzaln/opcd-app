@@ -212,14 +212,17 @@ curl -u opencode:secret http://127.0.0.1:4199/file/content?path=settings.gradle.
   isn't clipped; keyboard resize scrolls rows through scrollback instead of dropping them),
   connection status chip
   in the Sessions/Chat app bars (`ConnectionIndicator` + `AppViewModel.connection`, `/global/health`
-  every 30 s), new-session auto-navigate (`createSession` → `onChat` opens the created session).
+  every 30 s), new-session auto-navigate (`createSession` → `onChat` opens the created session),
+  image/file attachments from the phone (inline images; tap for fullscreen pinch-zoom), V2 user
+  attachment mapping (`files:[{data,mime,source,name?}]` → `Part(type="file")`).
   SSE events are filtered by `sessionID` (`ChatViewModel.isOwnSession`) — the directory-scoped stream
   carries every session in the folder, so unfiltered patching glitched the open chat.
 - Chat header shows session totals using the TUI's exact formula (`packages/tui/src/feature-plugins/sidebar/context.tsx`):
   tokens = last assistant message `input + output + reasoning + cache.read + cache.write`;
   % = tokens / model context limit; $ = `session.cost`.
-- Remaining ideas: image attachments (image/* file parts), share-session links, LazyColumn line
-  virtualization for very large files, WorkManager/notification fallback instead of a foreground service.
+- Remaining ideas: remote `http(s)` image parts (only `data:` URLs render inline), share-session
+  links, LazyColumn line virtualization for very large files, WorkManager/notification fallback
+  instead of a foreground service.
 - Verified against opencode 1.18.31 live server (sessions, messages, prompt_async, command, diff,
   SSE, file list/content, find/find-file, provider/agent lists) **and opencode 2.0.26** (V2 `/api/*`
   surface: auto-detect, sessions + directory filter, projects, vcs branch, chat load/render/send +

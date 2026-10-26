@@ -671,7 +671,28 @@ class OpenCodeApi(
             finish = o.field("finish").str(),
         )
         val parts = when (type) {
-            "user" -> listOf(Part(id = "${id}_text", sessionID = info.sessionID, messageID = id, type = "text", text = o.field("text").str().orEmpty()))
+            "user" -> buildList {
+                add(Part(id = "${id}_text", sessionID = info.sessionID, messageID = id, type = "text", text = o.field("text").str().orEmpty()))
+                (o.field("files").arr() ?: JsonArray(emptyList())).forEachIndexed { index, element ->
+                    val file = element.asObjectOrNull() ?: return@forEachIndexed
+                    val mime = file.field("mime").str().orEmpty()
+                    val data = file.field("data").str()
+                    val uri = file.field("source")?.asObjectOrNull()?.field("uri").str()
+                    val path = uri?.let(::filePathOf)
+                    add(
+                        Part(
+                            id = "${id}_file_$index",
+                            sessionID = info.sessionID,
+                            messageID = id,
+                            type = "file",
+                            mime = mime,
+                            filename = file.field("name").str(),
+                            url = if (!data.isNullOrBlank() && mime.startsWith("image/")) "data:$mime;base64,$data" else uri.orEmpty(),
+                            source = path?.let { buildJsonObject { put("path", it) } },
+                        ),
+                    )
+                }
+            }
             "assistant" -> (o.field("content").arr() ?: JsonArray(emptyList())).mapIndexedNotNull { index, e ->
                 e.asObjectOrNull()?.let { c -> mapContent(c, id, info.sessionID, index) }
             }
@@ -734,6 +755,11 @@ class OpenCodeApi(
     private fun JsonElement.dataObject(): JsonObject = dataOf() ?: asJsonObject()
     private fun JsonElement.arrayData(): JsonArray = (this as? JsonObject)?.field("data")?.arr() ?: JsonArray(emptyList())
     private fun JsonElement.arrayOrData(): JsonArray = (this as? JsonArray) ?: arrayData()
+}
+
+private fun filePathOf(uri: String): String? {
+    if (!uri.startsWith("file://")) return null
+    return runCatching { java.net.URI(uri).path }.getOrNull()?.takeIf { it.isNotBlank() }
 }
 
 /** Maps a V2 `Form.Info` payload to the app's question model so the shared prompt UI can render it. */

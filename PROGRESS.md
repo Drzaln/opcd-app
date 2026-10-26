@@ -1,4 +1,4 @@
-<!-- ship: v0.1.51 (versionCode 52) -->
+<!-- ship: v0.1.52 (versionCode 53) -->
 
 # PROGRESS — OpenCode Mobile (Android)
 
@@ -50,7 +50,10 @@ V2 differences that matter (verified against 2.0.26):
   status is `/api/session/active` (`{data:{<id>:{type:"running"}}}` → mapped to busy/idle).
 - **Messages are a different model:** `{type:"user|assistant", content:[{type:"text|reasoning|tool"}]}`
   (no `parts`/`role`). Mapped to the app's `MessageData`/`Part` (tool `state.content[]` joined to
-  `output`); reasoning/tool/text render unchanged. **Quirk:** the endpoint returns **newest-first**
+  `output`); reasoning/tool/text render unchanged. User messages carry attachments in
+  `files:[{data,mime,source,name?}]`; inline images are rebuilt as `data:<mime>;base64,…` file parts
+  so the chat renders them (and `file://` sources keep an openable `source.path`).
+  **Quirk:** the endpoint returns **newest-first**
   (`order=desc` by default) — the client reverses each page to ascending and uses `cursor.next` for
   load-older, or the chat renders reversed.
 - **Sending:** `/api/session/{id}/prompt` `{text, files:[{uri,name}]}` (no inline model/agent) — the
@@ -246,7 +249,8 @@ notifications (foreground service toggle) · mDNS scan + Tailscale remote field 
 picker** (tappable folder card + scrollable sheet, filter when the project list grows, active-folder
 checkmark, server-default + custom-path entries, no stale-session flash on switch) ·
 message pagination (load-older on scroll + pull-to-refresh) · in-app permission prompts
-(Allow once / Always / Deny) · image + file attachments from the phone (rendered inline) ·
+(Allow once / Always / Deny) · image + file attachments from the phone (rendered inline; tap an image
+for fullscreen pinch-zoom; V2 user `files` attachments are mapped back on load) ·
 agent questions in-app (single/multi-select + custom text, answer or dismiss) ·
 in-app update check (launch-time prompt → download → install APK) · session actions (fork / revert /
 unrevert / delete message, from long-press menus) · share/unshare session links · sessions search +
@@ -351,3 +355,7 @@ list + `?directory=` filtering, project/folder picker, git branch bar, chat load
 (text/reasoning/tool), send + live SSE streaming, agent/model/command lists, files list/navigate/read
 (+ syntax highlighting), file find, terminal create + shells + ticket + websocket, session diff
 (patch rendering). V1 path is unchanged.
+
+Checked against **2.1.4**: user-message attachment shape (`files:[{data,mime,source,name?}]`, inline
+base64 for phone/clipboard images) and V2 image mapping. (The 2.1.4 checks were API-level; the
+fullscreen image viewer is Compose-only and needs a device smoke test.)
