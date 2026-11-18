@@ -44,6 +44,39 @@ else if (cmd === "logcat" && a.includes("-d")) {
 } else { console.error("unknown " + a.join(" ")); process.exit(1) }
 `
 
+// Stand-in xcrun (simctl list/boot/shutdown/log) and simslim; a booted.json file holds the state.
+const SIM_A = "0C0FFEE0-1111-4222-8333-944455556666"
+const SIM_B = "AF3FBBFD-9BB6-4145-A832-88DB874CD364"
+const FAKE_XCRUN = `#!/usr/bin/env node
+const fs = require("fs"), f = process.env.OC_TEST_HOME + "/booted.json"
+const booted = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : ["${SIM_A}"]
+const a = process.argv.slice(2)
+if (a[0] !== "simctl") process.exit(1)
+if (a[1] === "list") console.log(JSON.stringify({ devices: {
+  "com.apple.CoreSimulator.SimRuntime.iOS-27-0": [
+    { udid: "${SIM_A}", name: "iPhone 17", state: booted.includes("${SIM_A}") ? "Booted" : "Shutdown", isAvailable: true },
+    { udid: "${SIM_B}", name: "iPad mini", state: booted.includes("${SIM_B}") ? "Booted" : "Shutdown", isAvailable: true }],
+  "com.apple.CoreSimulator.SimRuntime.watchOS-12-0": [{ udid: "00000000-0000-0000-0000-000000000000", name: "Watch", state: "Shutdown", isAvailable: true }],
+} }))
+else if (a[1] === "spawn" && a[3] === "log" && a[4] === "show") console.log("Timestamp               Ty Process[PID:TID]\\n2026-11-19 05:40:00.000 Df MyApp[100:1a] [com.facebook.react.log:javascript] from the backlog")
+else if (a[1] === "spawn" && a[3] === "log") {
+  console.log("Filtering the log data using the predicate")
+  console.log("2026-11-19 05:44:00.502 Df MyApp[100:1a] [com.facebook.react.log:javascript] hello from JS")
+  console.log("2026-11-19 05:44:00.600 E  MyApp[100:1b] [com.apple.network:path] boom")
+  setTimeout(() => {}, 60000)
+} else process.exit(2)
+`
+const FAKE_SIMSLIM = `#!/usr/bin/env node
+const fs = require("fs"), f = process.env.OC_TEST_HOME + "/booted.json"
+const booted = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : ["${SIM_A}"]
+const [cmd, udid] = process.argv.slice(2)
+fs.appendFileSync(process.env.OC_TEST_HOME + "/simslim.log", process.argv.slice(2).join(" ") + "\\n")
+if (cmd === "list") console.log(JSON.stringify(booted.map((u) => ({ udid: u, state: "Booted", managedDisabled: u === "${SIM_A}" ? 173 : 0, managedTotal: 173, memory: { bytes: 900000000 } }))))
+else if (cmd === "on" || cmd === "off" || cmd === "boot") { console.log("Done. " + cmd); fs.writeFileSync(f, JSON.stringify([...new Set([...booted, udid])])) }
+else if (cmd === "shutdown") fs.writeFileSync(f, JSON.stringify(booted.filter((u) => u !== udid)))
+`
+const fakeXcrun = join(home, "fake-xcrun")
+const fakeSimslim = join(home, "fake-simslim")
 const fakeEmulator = join(home, "fake-emulator")
 const fakeAvdslim = join(home, "fake-avdslim")
 
@@ -54,12 +87,16 @@ before(async () => {
   chmodSync(fakeEmulator, 0o755)
   writeFileSync(fakeAvdslim, "#!/bin/sh\necho \"avdslim $*\"\ntouch \"$OC_TEST_HOME/pixel9-started\"\n")
   chmodSync(fakeAvdslim, 0o755)
+  writeFileSync(fakeXcrun, FAKE_XCRUN)
+  chmodSync(fakeXcrun, 0o755)
+  writeFileSync(fakeSimslim, FAKE_SIMSLIM)
+  chmodSync(fakeSimslim, 0o755)
   mkdirSync(join(project, "src"), { recursive: true })
   writeFileSync(join(project, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, jsx: "react-jsx", target: "es2022", module: "esnext", moduleResolution: "bundler" } }))
   writeFileSync(join(project, "src", "a.ts"), "export const greeting = 'hi'\nexport function shout(s: string) { return s.toUpperCase() }\n")
   writeFileSync(join(project, "src", "b.ts"), "import { shout } from './a'\nconst n: number = 'oops'\nshout('x').toLower\n")
   helper = spawn(process.execPath, ["dist/helper.mjs", "--port", String(port), "--host", "127.0.0.1"], {
-    env: { ...process.env, HOME: home, OC_HELPER_AUTO_APPROVE: "1", OC_HELPER_ADB: fakeAdb, OC_HELPER_EMULATOR: fakeEmulator, OC_HELPER_AVDSLIM: fakeAvdslim, OC_TEST_HOME: home },
+    env: { ...process.env, HOME: home, OC_HELPER_AUTO_APPROVE: "1", OC_HELPER_ADB: fakeAdb, OC_HELPER_EMULATOR: fakeEmulator, OC_HELPER_AVDSLIM: fakeAvdslim, OC_HELPER_XCRUN: fakeXcrun, OC_HELPER_SIMSLIM: fakeSimslim, OC_TEST_HOME: home },
     stdio: ["ignore", "pipe", "pipe"],
   })
   await new Promise((resolve, reject) => {
@@ -316,5 +353,59 @@ test("emulators: list AVDs with running serials, start through avdslim", async (
   await until(() => states.includes("booted"), `boots: ${states}`)
   assert.ok(logs.includes("avdslim start Pixel_9 --ram=2048 --headless"), `AVD named explicitly: ${logs}`)
   assert.match((await rpc("emu.stop", { serial: "10DE5B08CN0006A" })).error.message, /Only emulators/)
+  ws.close()
+})
+
+test("ios simulators: list, start slim / stock through simslim, stop, log, build & run", async () => {
+  const ws = await connect(token)
+  let nextId = 1
+  const waiting = new Map()
+  const states = []
+  const logcat = []
+  ws.on("message", (raw) => {
+    const m = JSON.parse(String(raw))
+    if (m.id != null && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id) }
+    else if (m.method === "sim.status") states.push(`${m.params.name}:${m.params.state}`)
+    else if (m.method === "logcat.lines") logcat.push(...m.params.lines)
+  })
+  const rpc = (method, params) => new Promise((resolve) => { const id = nextId++; waiting.set(id, resolve); ws.send(JSON.stringify({ id, method, params })) })
+  const until = async (pred, what) => { for (let i = 0; i < 50 && !pred(); i++) await new Promise((r) => setTimeout(r, 100)); assert.ok(pred(), what) }
+
+  assert.ok((await (await fetch(base + "/helper/info")).json()).features.includes("ios"))
+  const list = (await rpc("sim.list", {})).result
+  assert.equal(list.simslim, true)
+  assert.deepEqual(list.sims.map((s) => [s.name, s.runtime, s.booted, s.slim]), [["iPhone 17", "iOS 27.0", true, true], ["iPad mini", "iOS 27.0", false, null]], "iOS only, booted first, slim from simslim")
+  assert.match((await rpc("sim.start", { udid: SIM_A })).error.message, /already running/)
+  assert.match((await rpc("sim.start", { udid: "nope; rm -rf /" })).error.message, /simulator/)
+
+  assert.equal((await rpc("sim.start", { udid: SIM_B, slim: false })).result.via, "simslim")
+  await until(() => states.includes("iPad mini:booted"), `boots: ${states}`)
+  assert.ok(readFileSync(join(home, "simslim.log"), "utf8").includes(`off ${SIM_B}\nboot ${SIM_B}`), "stock start: simslim off, then boot")
+  assert.ok((await rpc("sim.stop", { udid: SIM_B })).result.ok)
+  assert.equal((await rpc("sim.start", { udid: SIM_B })).result.state, "starting")
+  await until(() => states.filter((s) => s === "iPad mini:booted").length === 2, `boots slim: ${states}`)
+  assert.ok(readFileSync(join(home, "simslim.log"), "utf8").includes(`on ${SIM_B}`), "slim start: simslim on")
+  await rpc("sim.stop", { udid: SIM_B })
+
+  // The Logs tab: same logcat.* calls, a UDID as the serial.
+  const { id } = (await rpc("logcat.start", { serial: SIM_A, mode: "app" })).result
+  await until(() => logcat.length >= 3, `backlog + live: ${JSON.stringify(logcat)}`)
+  assert.deepEqual(logcat.map((l) => [l.level, l.text]), [
+    ["info", "05:40:00 I MyApp: from the backlog"],
+    ["info", "05:44:00 I MyApp: hello from JS"],
+    ["error", "05:44:00 E MyApp: [com.apple.network:path] boom"],
+  ])
+  await rpc("logcat.stop", { id })
+  assert.match((await rpc("screen.start", { serial: SIM_A })).error.message, /iOS simulators/)
+
+  // Build & run: a simulator UDID picks run:ios (no adb reverse).
+  const app = mkdtempSync(join(tmpdir(), "oc-helper-ios-"))
+  writeFileSync(join(app, "package.json"), JSON.stringify({ dependencies: { expo: "54.0.0" } }))
+  const st = (await rpc("run.status", { root: app })).result
+  assert.equal(st.detectedIos, "npx expo run:ios --device <device> --no-bundler")
+  assert.equal(st.detected, "npx expo run:android --device <device> --no-bundler")
+  const bare = mkdtempSync(join(tmpdir(), "oc-helper-gradle-"))
+  writeFileSync(join(bare, "gradlew"), "#!/bin/sh\n")
+  assert.match((await rpc("run.status", { root: bare })).result.detectIosError, /Expo or React Native/)
   ws.close()
 })

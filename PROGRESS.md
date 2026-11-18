@@ -319,7 +319,7 @@ V2 differences that matter (verified against 2.0.26):
   `git diff HEAD` (untracked: `--no-index /dev/null`) rendered with `DiffLines.parsePatch`; Commit… runs
   `git add -A && git commit -q -m '<quoted>'`. No push.
 
-## Phase 2 — optional Mac helper (slices 1–4 built: pairing + TypeScript + format on save, Metro, adb, device screen + emulators)
+## Phase 2 — optional Mac helper (slices 1–4 built: pairing + TypeScript + format on save, Metro, adb, device screen + emulators; then iOS simulators slice 1)
 
 **Built (branch `feat/mac-helper`):** `helper/` (Node/TS, esbuild → `dist/helper.mjs`, `npm start`,
 `npm test`; see `helper/README.md` for setup, security and the wire protocol).
@@ -512,6 +512,61 @@ separate round trips).
   Tailscale), a phone as the mirrored device, avdslim's slimming path through the app (only `--no-slim` was run).
 
 **Phase 2 is complete** (all five `tuc` slices). Design notes below are kept for reference.
+
+### iOS simulators — slice 1 (`opencode-android-app-scg`)
+
+Asked after Phase 2: "is it possible to have iOS simulator with simslim like the android emulator?"
+Slice 1 = everything except the live screen.
+- **Helper `sim.ts`:** `findXcrun` (`xcrun --find simctl`, cached 60 s; `OC_HELPER_XCRUN` for tests) →
+  feature `ios` (advertised even without adb). `listSims` = `simctl list devices available -j`, iOS
+  runtimes only, booted first, newest runtime first; `simslim list --json --booted` adds `slim`
+  (`managedDisabled > 0`) and `memory` — simslim can only read the state of a *running* simulator, so
+  `slim` is null while it's off. `SimulatorManager.start`: slim → `simslim on <udid>` (reconfigures while
+  off, then boots — one step, ~17 s first time); stock → `simslim off <udid>` (also boots) then
+  `simslim boot` (no-op "already booted"); no simslim → `simctl boot` + `bootstatus -b`; `window` →
+  `open -a Simulator --args -CurrentDeviceUDID`. `stop` → `simslim shutdown` / `simctl shutdown`,
+  verified against the list. Notifications `sim.log` / `sim.status`.
+- **A UDID is a "serial":** `run.start` with a UDID → `expo run:ios --device <udid> --no-bundler` /
+  `react-native run-ios --udid <udid> --no-packager` (no `adb reverse`, no `ANDROID_SERIAL`, `LANG`
+  defaulted to UTF-8 for CocoaPods); plain gradle/Xcode projects → "needs an Expo or React Native
+  project". `run.status` adds `detectedIos` / `detectIosError`. `logcat.start` with a UDID → `SimLogStream`
+  (`simctl spawn <udid> log stream --style compact --predicate …`, backlog from `log show --last 5m`,
+  same batching and `logcat.*` notifications); lines compacted to `HH:MM:SS L Process: [sub:cat] msg`
+  (RN's `com.facebook.react.log` bracket dropped). Predicates: App JS = RN subsystem or the app's
+  errors; Errors = errors/faults from processes under `/Containers/Bundle/Application/`; All = everything
+  those processes log (the simulator's own daemons are never shown — they're hundreds of lines/s).
+  `screen.start` refuses a UDID.
+- **App:** booted simulators are merged into the device list as `AdbDevice(transport = "ios")`
+  ("<name> · iOS · slim · 0.9 GB"), so Run / Logs reuse the Android panel; a "iOS simulators on the Mac
+  · simslim" section lists Start…/Stop; `StartSimulatorDialog` (Slim, Show the Simulator window). The
+  Logcat chip reads "Logs" for a simulator; the Screen tab / right column explain it's not available
+  yet. `AndroidController.available` = adb **or** ios.
+- **Tests:** helper test 7 (fake `xcrun` + fake `simslim` with a booted.json state file): list/sort/slim,
+  already-running and bad-UDID refusals, stock start = `off` then `boot`, slim start = `on`, stop, Logs
+  backlog + live lines and levels, screen refusal, `detectedIos` / iOS detect error. 9/9 pass.
+- **Test environment:** a throwaway simulator "OC Helper Test" (`simctl create`, iPhone 17 / iOS 27.0)
+  was used for every real run, so the user's simulators were never booted or slimmed.
+- **Verified on the Mac** (loopback helper, scratch Expo SDK 58 blank-typescript project): `sim.list`
+  (11 simulators, booted one with slim/memory); simslim slim start (~17 s), stock start (`off` → boots,
+  6 s), stop (0.4 s); Metro start, then **real `expo run:ios --device <udid> --no-bundler`**: prebuild,
+  CocoaPods, Xcode "Build Succeeded", installed and launched on the simulator → `succeeded`. Logs
+  (App JS) showed `hello from the iOS simulator` / the `console.warn` line and the app's UIKit errors;
+  a Metro reload re-ran the JS and the lines arrived again. `console.warn` comes through os_log at the
+  same type as `console.log`, so it's not orange in Logs (Metro's log has it as a warning).
+- **Verified on the physical phone** (vivo I2219, release build over USB install, real helper on the
+  Tailscale IP, user's opencode service started for the test and stopped after): the device list showed
+  "OC Helper Test · iOS · stock · 14.6 GB" as a device plus the "iOS simulators on the Mac · simslim"
+  section (all 11); **Stop OC Helper Test** → "Stopped OC Helper Test" (simctl: Shutdown);
+  **Start OC Helper Test…** → dialog (Slim on, window off) → "OC Helper Test is up", auto-selected,
+  Run line switched to `npx expo run:ios --device 1206A158-…`, the tab reads **Logs**; launching the app
+  on the simulator streamed its log live to the phone (with Metro off: "No script URL provided…" as an
+  error); Screen shows the "not available for iOS simulators yet" message. Run wasn't pressed from the
+  phone: the open folder was the user's `test-expo` (an iOS build would add `ios/` to it) — the iOS
+  build itself was verified on the Mac above.
+- **Not verified:** `react-native run-ios` (CLI path; only Expo was built), Simulator window option,
+  a Mac without simslim (simctl path is covered by code only), a Mac without adb (panel with iOS only).
+- **Next (slice 2):** the live screen — needs a tool that streams the simulator's video and injects
+  touches (`idb video-stream --format h264` + `idb ui tap/swipe`, or AXe); check which works with Xcode 27.
 
 ### Phase 2 design notes
 

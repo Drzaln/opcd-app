@@ -83,11 +83,21 @@ data class AdbDevice(val serial: String, val state: String, val model: String?, 
     val label: String get() = when (transport) {
         "emulator" -> "Emulator ${serial.removePrefix("emulator-")}"
         "wifi" -> "${model ?: "Device"} · Wi-Fi"
+        "ios" -> "${model ?: "Simulator"} · iOS"
         else -> "${model ?: serial} · USB"
     }
 }
 
 data class Avd(val name: String, val serial: String?)
+
+/** An iOS simulator on the Mac (`sim.list`); [slim] is only known while it runs. */
+data class IosSim(val udid: String, val name: String, val runtime: String, val booted: Boolean, val slim: Boolean?, val memory: Long?)
+
+/** How "Start simulator" boots one (remembered for the session). */
+data class SimOptions(val slim: Boolean = true, val window: Boolean = false)
+
+/** iOS simulators are addressed by UDID where Android devices have an adb serial. */
+fun isSimulatorSerial(serial: String) = Regex("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$").matches(serial)
 
 /** How "Start emulator" launches an AVD (remembered for the session). */
 data class EmuOptions(val headless: Boolean = true, val cold: Boolean = false, val ram: Int = 1536, val slim: Boolean = true)
@@ -116,8 +126,20 @@ data class AndroidUi(
     val avdslim: Boolean = false,
     /** AVD name → starting / booted / failed while an emulator start is in flight. */
     val emuStates: Map<String, String> = emptyMap(),
+    /** The helper can drive iOS simulators (Xcode on the Mac). */
+    val ios: Boolean = false,
+    val sims: List<IosSim> = emptyList(),
+    val simslim: Boolean = false,
+    /** UDID → starting / booted / failed while a simulator start is in flight. */
+    val simStates: Map<String, String> = emptyMap(),
+    val runDetectedIos: String? = null,
+    val runDetectIosError: String? = null,
 ) {
     val device: AdbDevice? get() = devices.firstOrNull { it.serial == selected }
+    val iosSelected: Boolean get() = device?.transport == "ios"
+    /** The build command (or why there isn't one) for the selected device's platform. */
+    val detected: String? get() = if (iosSelected) runDetectedIos else runDetected
+    val detectError: String? get() = if (iosSelected) runDetectIosError else runDetectError
     val running: Boolean get() = runState == "running"
 }
 
@@ -184,6 +206,22 @@ class AndroidController(
                         ) }
                         if (state == "booted") { pendingSelect = avd; refresh() }
                     }
+                    "sim.log" -> {
+                        val udid = params.str("udid") ?: return@collect
+                        val text = params.str("text") ?: return@collect
+                        if (_ui.value.simStates[udid] == "starting") _ui.update { it.copy(info = "${params.str("name") ?: "Simulator"}: $text") }
+                    }
+                    "sim.status" -> {
+                        val udid = params.str("udid") ?: return@collect
+                        val state = params.str("state") ?: return@collect
+                        val name = params.str("name") ?: "The simulator"
+                        _ui.update { it.copy(
+                            simStates = it.simStates + (udid to state),
+                            info = when (state) { "booted" -> "$name is up"; "failed" -> null; else -> it.info },
+                            message = if (state == "failed") "$name didn't start: ${params.str("message") ?: "see the Mac"}" else it.message,
+                        ) }
+                        if (state == "booted") { pendingSelect = udid; refresh() }
+                    }
                     "logcat.exit" -> if (params.str("id") == logcatId) {
                         logcatId = null
                         _ui.update { it.copy(info = "Logcat stopped (device gone?)") }
@@ -198,18 +236,32 @@ class AndroidController(
     fun refresh() {
         scope.launch {
             runCatching {
-                val res = helper.request("adb.devices").jsonObject
-                val devices = res["devices"]?.jsonArray?.map { e ->
+                val features = HelperManager.features(helper.state.value)
+                val res = if ("adb" in features) helper.request("adb.devices").jsonObject else null
+                val adbDevices = res?.get("devices")?.jsonArray?.map { e ->
                     val o = e.jsonObject
                     AdbDevice(o.str("serial").orEmpty(), o.str("state").orEmpty(), o.str("model"), o.str("transport") ?: "usb")
                 } ?: emptyList()
-                val emu = runCatching { helper.request("emu.list").jsonObject }.getOrNull()
+                val emu = if ("adb" in features) runCatching { helper.request("emu.list").jsonObject }.getOrNull() else null
                 val avds = emu?.get("avds")?.jsonArray?.map { e -> val o = e.jsonObject; Avd(o.str("name").orEmpty(), o.str("serial")) } ?: emptyList()
-                val booted = pendingSelect?.let { name -> avds.firstOrNull { it.name == name }?.serial }
+                val ios = "ios" in features
+                val simRes = if (ios) runCatching { helper.request("sim.list", timeoutMs = 40_000).jsonObject }.getOrNull() else null
+                val sims = simRes?.get("sims")?.jsonArray?.mapNotNull { e ->
+                    val o = e.jsonObject
+                    IosSim(o.str("udid") ?: return@mapNotNull null, o.str("name").orEmpty(), o.str("runtime").orEmpty(),
+                        (o["booted"] as? JsonPrimitive)?.content == "true",
+                        (o["slim"] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull(),
+                        (o["memory"] as? JsonPrimitive)?.longOrNull)
+                } ?: emptyList()
+                // Running simulators are devices too: Run and Logs work on them like on an emulator.
+                val devices = adbDevices + sims.filter { it.booted }.map { AdbDevice(it.udid, "device", it.name, "ios") }
+                val booted = pendingSelect?.let { p -> avds.firstOrNull { it.name == p }?.serial ?: sims.firstOrNull { it.udid == p && it.booted }?.udid }
                 if (booted != null) pendingSelect = null
                 _ui.update { ui ->
                     val keep = booted ?: ui.selected?.takeIf { s -> devices.any { it.serial == s } }
-                    ui.copy(devices = devices, avds = avds, avdslim = (emu?.get("avdslim") as? JsonPrimitive)?.content == "true", adbMissing = res["adb"] !is JsonPrimitive || (res["adb"] as JsonPrimitive).contentOrNull == null,
+                    ui.copy(devices = devices, avds = avds, avdslim = (emu?.get("avdslim") as? JsonPrimitive)?.content == "true",
+                        adbMissing = res == null || res["adb"] !is JsonPrimitive || (res["adb"] as JsonPrimitive).contentOrNull == null,
+                        ios = ios, sims = sims, simslim = (simRes?.get("simslim") as? JsonPrimitive)?.content == "true",
                         selected = keep ?: devices.firstOrNull { it.ready }?.serial)
                 }
             }.onFailure { e -> _ui.update { it.copy(message = e.message) } }
@@ -244,6 +296,31 @@ class AndroidController(
             _ui.update { it.copy(message = null, info = "Stopping $serial…") }
             runCatching { helper.request("emu.stop", buildJsonObject { put("serial", serial) }, timeoutMs = 70_000) }
                 .onSuccess { _ui.update { it.copy(info = "Stopped $serial") } }
+                .onFailure { e -> _ui.update { it.copy(message = e.message, info = null) } }
+            refresh()
+        }
+    }
+
+    var simOptions = SimOptions()
+
+    /** Boots an iOS simulator on the Mac (simslim when installed); selects it once it's up. */
+    fun startSimulator(sim: IosSim, options: SimOptions) {
+        simOptions = options
+        scope.launch {
+            _ui.update { it.copy(message = null, info = "Starting ${sim.name}…", simStates = it.simStates + (sim.udid to "starting")) }
+            try {
+                helper.request("sim.start", buildJsonObject { put("udid", sim.udid); put("slim", options.slim); put("window", options.window) }, timeoutMs = 60_000)
+            } catch (e: Exception) {
+                _ui.update { it.copy(message = e.message, info = null, simStates = it.simStates - sim.udid) }
+            }
+        }
+    }
+
+    fun stopSimulator(sim: IosSim) {
+        scope.launch {
+            _ui.update { it.copy(message = null, info = "Stopping ${sim.name}…") }
+            runCatching { helper.request("sim.stop", buildJsonObject { put("udid", sim.udid) }, timeoutMs = 100_000) }
+                .onSuccess { _ui.update { it.copy(info = "Stopped ${sim.name}", simStates = it.simStates - sim.udid) } }
                 .onFailure { e -> _ui.update { it.copy(message = e.message, info = null) } }
             refresh()
         }
@@ -325,6 +402,8 @@ class AndroidController(
         runCommand = if (o.containsKey("command")) o.str("command") else ui.runCommand,
         runDetected = if (o.containsKey("detected")) o.str("detected") else ui.runDetected,
         runDetectError = if (o.containsKey("detectError")) o.str("detectError") else ui.runDetectError,
+        runDetectedIos = if (o.containsKey("detectedIos")) o.str("detectedIos") else ui.runDetectedIos,
+        runDetectIosError = if (o.containsKey("detectIosError")) o.str("detectIosError") else ui.runDetectIosError,
     )
 
     private fun parseLines(e: JsonElement) = runCatching { e.jsonArray.mapNotNull(::parseLine) }.getOrDefault(emptyList())
@@ -342,7 +421,8 @@ class AndroidController(
         /** "11-18 17:46:29.042  4561 16184 I ReactNativeJS: hi" → "17:46:29 I ReactNativeJS: hi" (phone width). */
         fun compactLogcat(line: String): String =
             THREADTIME.matchEntire(line)?.destructured?.let { (time, level, rest) -> "$time $level $rest" } ?: line
-        fun available(state: HelperState) = "adb" in HelperManager.features(state)
+        /** The panel needs adb or (for iOS simulators) Xcode on the Mac. */
+        fun available(state: HelperState) = HelperManager.features(state).let { "adb" in it || "ios" in it }
 
         /** This phone's Tailscale IPv4 (100.64.0.0/10), to prefill "connect to this phone". */
         fun tailscaleIp(): String? = runCatching {
@@ -369,6 +449,7 @@ fun AndroidPanel(
     var tab by rememberSaveable { mutableStateOf(AndroidTab.RUN) }
     var connectOpen by remember { mutableStateOf(false) }
     var startAvd by remember { mutableStateOf<String?>(null) }
+    var startSim by remember { mutableStateOf<IosSim?>(null) }
     if (screen == null && tab == AndroidTab.SCREEN) tab = AndroidTab.RUN
     var filter by rememberSaveable { mutableStateOf("") }
     DisposableEffect(Unit) {
@@ -387,13 +468,14 @@ fun AndroidPanel(
         val wide = maxWidth >= 640.dp
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                DevicePicker(ui, onSelect = android::select, onStartAvd = { startAvd = it }, onStopEmulator = android::stopEmulator, modifier = Modifier.weight(1f, fill = false))
+                DevicePicker(ui, onSelect = android::select, onStartAvd = { startAvd = it }, onStopEmulator = android::stopEmulator,
+                    onStartSim = { startSim = it }, onStopSim = android::stopSimulator, modifier = Modifier.weight(1f, fill = false))
                 IconButton(onClick = { android.refresh() }) { Icon(Icons.Outlined.Refresh, contentDescription = "Refresh devices", tint = c.textSecondary) }
                 TextButton(onClick = { connectOpen = true }) { Text("Connect…") }
                 Spacer(Modifier.weight(1f))
-                if (wide) Tabs(tab, screen != null) { tab = it }
+                if (wide) Tabs(tab, screen != null, ui.iosSelected) { tab = it }
             }
-            if (!wide) Row(Modifier.padding(horizontal = 8.dp)) { Tabs(tab, screen != null) { tab = it } }
+            if (!wide) Row(Modifier.padding(horizontal = 8.dp)) { Tabs(tab, screen != null, ui.iosSelected) { tab = it } }
             (ui.message ?: ui.info)?.let { text ->
                 Text(
                     text,
@@ -403,7 +485,7 @@ fun AndroidPanel(
                 )
             }
             when {
-                ui.adbMissing -> Empty("adb isn't installed on the Mac. Install Android platform-tools (Android Studio → SDK Manager), then refresh.")
+                ui.adbMissing && !ui.ios -> Empty("adb isn't installed on the Mac. Install Android platform-tools (Android Studio → SDK Manager), then refresh.")
                 tab == AndroidTab.RUN -> RunView(android, ui)
                 tab == AndroidTab.SCREEN && screen != null -> DeviceScreen(
                     screen = screen,
@@ -416,6 +498,9 @@ fun AndroidPanel(
             }
         }
     }
+    startSim?.let { sim ->
+        StartSimulatorDialog(sim, ui.simslim, android.simOptions, onDismiss = { startSim = null }, onStart = { opts -> startSim = null; android.startSimulator(sim, opts) })
+    }
     startAvd?.let { avd ->
         StartEmulatorDialog(avd, ui.avdslim, android.emuOptions, onDismiss = { startAvd = null }, onStart = { opts -> startAvd = null; android.startEmulator(avd, opts) })
     }
@@ -426,16 +511,24 @@ fun AndroidPanel(
 }
 
 @Composable
-private fun Tabs(tab: AndroidTab, withScreen: Boolean, onTab: (AndroidTab) -> Unit) {
+private fun Tabs(tab: AndroidTab, withScreen: Boolean, ios: Boolean, onTab: (AndroidTab) -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         FilterChipText("Run", tab == AndroidTab.RUN) { onTab(AndroidTab.RUN) }
-        FilterChipText("Logcat", tab == AndroidTab.LOGCAT) { onTab(AndroidTab.LOGCAT) }
+        FilterChipText(if (ios) "Logs" else "Logcat", tab == AndroidTab.LOGCAT) { onTab(AndroidTab.LOGCAT) }
         if (withScreen) FilterChipText("Screen", tab == AndroidTab.SCREEN) { onTab(AndroidTab.SCREEN) }
     }
 }
 
 @Composable
-private fun DevicePicker(ui: AndroidUi, onSelect: (String) -> Unit, onStartAvd: (String) -> Unit, onStopEmulator: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun DevicePicker(
+    ui: AndroidUi,
+    onSelect: (String) -> Unit,
+    onStartAvd: (String) -> Unit,
+    onStopEmulator: (String) -> Unit,
+    onStartSim: (IosSim) -> Unit,
+    onStopSim: (IosSim) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val c = OcTheme.colors
     var open by remember { mutableStateOf(false) }
     Box(modifier) {
@@ -453,10 +546,10 @@ private fun DevicePicker(ui: AndroidUi, onSelect: (String) -> Unit, onStartAvd: 
             Icon(Icons.Outlined.ArrowDropDown, contentDescription = null, tint = c.textSecondary)
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            if (ui.devices.isEmpty()) DropdownMenuItem(text = { Text("No devices — plug one in or use Connect…") }, onClick = { open = false }, enabled = false)
+            if (ui.devices.isEmpty()) DropdownMenuItem(text = { Text(if (ui.adbMissing) "No devices — start a simulator below" else "No devices — plug one in or use Connect…") }, onClick = { open = false }, enabled = false)
             for (d in ui.devices) {
                 DropdownMenuItem(
-                    text = { Text(if (d.ready) d.label else "${d.label} (${d.state})") },
+                    text = { Text(if (d.ready) d.label + simNote(ui, d) else "${d.label} (${d.state})") },
                     onClick = { open = false; onSelect(d.serial) },
                     enabled = d.ready,
                 )
@@ -475,6 +568,30 @@ private fun DevicePicker(ui: AndroidUi, onSelect: (String) -> Unit, onStartAvd: 
                         DropdownMenuItem(
                             text = { Text(if (starting) "${avd.name} — starting…" else "Start ${avd.name}…") },
                             onClick = { open = false; onStartAvd(avd.name) },
+                            enabled = !starting,
+                        )
+                    }
+                }
+            }
+            if (ui.sims.isNotEmpty()) {
+                androidx.compose.material3.HorizontalDivider()
+                Text(
+                    if (ui.simslim) "iOS simulators on the Mac · simslim" else "iOS simulators on the Mac",
+                    fontSize = 11.sp, color = c.textSecondary, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+                for (sim in ui.sims) {
+                    val starting = ui.simStates[sim.udid] == "starting"
+                    if (sim.booted) {
+                        DropdownMenuItem(text = { Text("Stop ${sim.name}") }, onClick = { open = false; onStopSim(sim) })
+                    } else {
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(if (starting) "${sim.name} — starting…" else "Start ${sim.name}…")
+                                    Text(sim.runtime, fontSize = 11.sp, color = c.textSecondary)
+                                }
+                            },
+                            onClick = { open = false; onStartSim(sim) },
                             enabled = !starting,
                         )
                     }
@@ -499,17 +616,18 @@ private fun RunView(android: AndroidController, ui: AndroidUi) {
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
             Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = c.textPrimary, maxLines = 1)
-            val sub = ui.runCommand ?: ui.runDetected?.replace("<device>", ui.selected ?: "<device>") ?: ui.runDetectError
-            if (sub != null) Text(sub, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = if (ui.runDetected == null && ui.runCommand == null) c.errorText else c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val sub = ui.runCommand ?: ui.detected?.replace("<device>", ui.selected ?: "<device>") ?: ui.detectError
+            if (sub != null) Text(sub, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = if (ui.detected == null && ui.runCommand == null) c.errorText else c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (ui.running) TextButton(onClick = { android.stopRun() }, enabled = !ui.busy) { Text("Stop") }
-        else TextButton(onClick = { android.run() }, enabled = !ui.busy && ui.device?.ready == true && ui.runDetected != null) { Text("Run") }
+        else TextButton(onClick = { android.run() }, enabled = !ui.busy && ui.device?.ready == true && ui.detected != null) { Text("Run") }
     }
     LogList(
         lines = ui.runLines,
         empty = when {
-            ui.runDetectError != null -> ui.runDetectError
-            ui.device?.ready != true -> "Connect a device (USB on the Mac, an emulator, or Connect… for this phone over Wi-Fi), then Run builds the app and installs it."
+            ui.detectError != null -> ui.detectError!!
+            ui.device?.ready != true -> if (ui.adbMissing) "Start an iOS simulator from the device list, then Run builds the app and installs it."
+                else "Connect a device (USB on the Mac, an emulator, or Connect… for this phone over Wi-Fi), then Run builds the app and installs it."
             else -> "Run builds the app on the Mac and installs it on ${ui.device?.label}. Start Metro first for React Native / Expo."
         },
     )
@@ -641,7 +759,7 @@ fun AndroidTabBadge(ui: AndroidUi) {
 
 /** adb reports the model with underscores; Build.MODEL has spaces. A USB/Wi-Fi device with our model is us. */
 internal fun isThisPhone(d: AdbDevice): Boolean =
-    d.transport != "emulator" && d.model != null && d.model.replace(' ', '_').equals(android.os.Build.MODEL.replace(' ', '_'), ignoreCase = true)
+    d.transport != "emulator" && d.transport != "ios" && d.model != null && d.model.replace(' ', '_').equals(android.os.Build.MODEL.replace(' ', '_'), ignoreCase = true)
 
 @Composable
 private fun StartEmulatorDialog(avd: String, avdslim: Boolean, initial: EmuOptions, onDismiss: () -> Unit, onStart: (EmuOptions) -> Unit) {
@@ -676,4 +794,39 @@ private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
         Text(label, fontSize = 14.sp, modifier = Modifier.weight(1f))
         androidx.compose.material3.Switch(checked = checked, onCheckedChange = onChange)
     }
+}
+
+/** " · slim · 0.9 GB" after a running simulator's name, when simslim has measured it. */
+private fun simNote(ui: AndroidUi, d: AdbDevice): String {
+    if (d.transport != "ios") return ""
+    val sim = ui.sims.firstOrNull { it.udid == d.serial } ?: return ""
+    val parts = listOfNotNull(
+        when (sim.slim) { true -> "slim"; false -> "stock"; null -> null },
+        sim.memory?.let { "%.1f GB".format(it / 1e9) },
+    )
+    return if (parts.isEmpty()) "" else " · " + parts.joinToString(" · ")
+}
+
+@Composable
+private fun StartSimulatorDialog(sim: IosSim, simslim: Boolean, initial: SimOptions, onDismiss: () -> Unit, onStart: (SimOptions) -> Unit) {
+    var slim by rememberSaveable { mutableStateOf(initial.slim) }
+    var window by rememberSaveable { mutableStateOf(initial.window) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Start ${sim.name}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    if (simslim) "${sim.runtime}. Boots through simslim on the Mac. Slim turns off ~170 background services the simulator " +
+                        "doesn't need for development (Siri, Spotlight, iCloud…), about 4× less memory. Turn it off to boot it stock (it's slower to switch)."
+                    else "${sim.runtime}. Boots the simulator with simctl. (Install simslim on the Mac for a much lighter simulator.)",
+                    fontSize = 12.sp, color = OcTheme.colors.textSecondary,
+                )
+                if (simslim) SwitchRow("Slim", slim) { slim = it }
+                SwitchRow("Show the Simulator window on the Mac", window) { window = it }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onStart(SimOptions(slim, window)) }) { Text("Start") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

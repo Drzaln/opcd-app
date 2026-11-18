@@ -16,7 +16,7 @@ Kotlin · Jetpack Compose · Material 3 · dark theme · minSdk 26.
 | Code | **CodeMirror 6 editor that saves to your Mac**: tabs with dirty dots, undo per tab, syntax highlighting (TS/TSX, JS/JSX, JSON, Kotlin + Gradle KTS, Markdown, CSS, YAML, XML), bracket matching + auto-close, auto-indent, soft wrap, find/replace, go to line, coding key row above the keyboard, hardware shortcuts (Ctrl+S/P/F/G, Ctrl+/), "Go to file" palette, recent files. Saves are verified by SHA-256; if the file changed on the Mac you get **Reload / Overwrite / Show diff** instead of a silent overwrite |
 | Code (tablet / landscape) | File tree │ editor │ Terminal / Git / Metro / Android bottom panel side by side (≥ 720 dp); live device screen in a right-hand column (≥ 1000 dp, with the Mac helper) |
 | Git | Branch + "N changed" in the editor, Changes list with per-file diffs, **Commit…** (`git add -A && git commit`, no push) |
-| Mac helper (optional) | A small companion you run on the Mac (`helper/`, see [section 6](#6-mac-helper-optional)): **TypeScript** completions, errors, go to definition, rename, find references; **format on save** (Prettier/ESLint); **Metro** start/stop/reload with live logs; **Android** devices — build & run, wireless connect, logcat; a **live device screen** with touch; **start/stop the Mac's emulators** (uses `avdslim` when installed) |
+| Mac helper (optional) | A small companion you run on the Mac (`helper/`, see [section 6](#6-mac-helper-optional)): **TypeScript** completions, errors, go to definition, rename, find references; **format on save** (Prettier/ESLint); **Metro** start/stop/reload with live logs; **Android** devices — build & run, wireless connect, logcat; a **live device screen** with touch; **start/stop the Mac's emulators** (uses `avdslim` when installed); **iOS simulators** on the Mac — start/stop (slim with `simslim`), build & run, logs |
 | Sessions | List/resume, new (opens it immediately), rename (long-press), delete, per-session folder picker, git branch bar (switch/create), status dots, tokens + cost |
 | Chat | Live streaming (SSE, incremental), markdown + code highlighting, reasoning + tool cards, todos panel, copy message (long-press), queued indicator, image/file attachments (inline; tap an image to zoom) |
 | Agents/models | Pick agent + model per message, plus the model's reasoning variant (low/high/max, when offered); selection remembered **per session** (last pick becomes the default for new sessions); per-message model name |
@@ -218,6 +218,7 @@ is running and paired; everything else works without it.
 | Android: devices, Run, Logcat | Android platform-tools (`adb`) — comes with Android Studio |
 | Device screen | `brew install scrcpy` |
 | Start/stop emulators | The Android emulator (Android Studio); `avdslim` if you want slim, low-memory emulators |
+| iOS simulators: start/stop, Run, Logs | Xcode with an iOS simulator runtime (`xcode-select` pointing at Xcode, not just the Command Line Tools); CocoaPods for Expo/React Native builds; `simslim` (`brew install mobai-app/tap/simslim`) if you want slim, low-memory simulators |
 
 ### Set up once
 
@@ -288,6 +289,28 @@ Open the device list (top row of the Android panel). Under **Emulators on the Ma
 With `avdslim` installed the helper uses it (low-memory host flags, and slimming after boot if you
 leave that on); without it, the plain Android `emulator`.
 
+### iOS simulators on the Mac
+
+The Android panel handles iOS simulators too (the Mac must have Xcode). Open the device list: under
+**iOS simulators on the Mac**:
+
+- **Start <name>…** → choose **Slim** (only with `simslim`: turns off ~170 background services the
+  simulator doesn't need for development — Siri, Spotlight, iCloud… — for about 4× less memory; off
+  boots it stock) and **Show the Simulator window on the Mac** → **Start**. When it's up it's
+  selected automatically.
+- A running simulator appears among the devices as **<name> · iOS** (with *slim*/*stock* and its
+  memory when `simslim` is installed).
+- **Run** builds the app on the Mac and installs it on the simulator (`expo run:ios` or
+  `react-native run-ios`; plain Xcode projects aren't supported). Start Metro first — the simulator
+  reaches it on the Mac directly. The first build runs CocoaPods and Xcode and takes a few minutes.
+- **Logs** shows the simulator's log for your app: **App JS** (your `console.log` / warnings, plus
+  errors from the app), **Errors** (the app's errors) or **All** (everything your app logs).
+- **Stop <name>** shuts the simulator down.
+
+Switching a simulator between slim and stock takes a little longer (simslim reconfigures it while
+it's off). The live **Screen** isn't available for iOS simulators yet — turn on *Show the Simulator
+window* to watch it on the Mac.
+
 ### Good to know
 
 - A Metro **Reload** only reaches an app that is in the foreground on its device. If the app and the
@@ -337,6 +360,8 @@ leave that on); without it, the plain Android `emulator`.
 | Settings → Mac helper says *Not running* | Start it on the Mac (`cd helper && npm start`) and check Tailscale is on on both sides. The helper must run on the same Mac as opencode. |
 | Mac helper: *Pairing was revoked* | The Mac forgot this phone (revoked, or `~/.config/opencode-mobile-helper` deleted). Pair again. |
 | No **Android** / **Screen** / emulators in the app | The helper didn't find `adb` / `scrcpy` / the emulator. Install them (see section 6), restart the helper. |
+| No iOS simulators in the device list | The helper needs Xcode: `xcrun simctl list` must work on the Mac (`sudo xcode-select -s /Applications/Xcode.app` if it points at the Command Line Tools). Restart the helper after installing. |
+| iOS Run fails at CocoaPods | Install it (`brew install cocoapods`) and check the Run log; the first `expo run:ios` also needs `npm install` done. |
 | Screen says *Screen stream didn't start* | Update scrcpy (`brew upgrade scrcpy`) and restart the helper; make sure the device shows as *device* (not *unauthorized*) in the list. |
 | Run fails before building | Open the build log in the **Run** view; most often missing `npm install`, a missing Android SDK, or an unauthorized device. |
 | Mac asleep = no connection | Use `caffeinate -s`, or the "prevent automatic sleeping" setting. |

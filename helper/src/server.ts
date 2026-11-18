@@ -19,16 +19,18 @@ import { formatText, insideRoot } from "./format.ts"
 import { MetroManager } from "./metro.ts"
 import { ScreenSession, findScrcpyServer } from "./screen.ts"
 import { EmulatorManager, listAvds, findEmulator } from "./emu.ts"
+import { SimulatorManager, SimLogStream, listSims, findXcrun, isSimulator, type SimLogMode } from "./sim.ts"
 import { RunManager, LogcatStream, listDevices, pair, connect, disconnect, reverse, checkSerial, findAdb, type LogcatMode } from "./adb.ts"
 
 export const VERSION = "0.1.0"
 export const PROTOCOL = 1
 export const FEATURES = ["pair", "lsp", "format", "metro"]
 
-/** Features this Mac can offer right now ("adb" only when platform-tools are installed). */
+/** Features this Mac can offer right now ("adb" only when platform-tools are installed, "ios" with Xcode). */
 export function features(): string[] {
-  if (!findAdb()) return FEATURES
-  return [...FEATURES, "adb", ...(findScrcpyServer() ? ["screen"] : []), ...(findEmulator() ? ["emulator"] : [])]
+  const ios = findXcrun() ? ["ios"] : []
+  if (!findAdb()) return [...FEATURES, ...ios]
+  return [...FEATURES, "adb", ...(findScrcpyServer() ? ["screen"] : []), ...(findEmulator() ? ["emulator"] : []), ...ios]
 }
 
 /** One Metro registry for the whole helper (shared by every interface it listens on). */
@@ -40,6 +42,8 @@ const screensBySerial = new Map<string, ScreenSession>()
 
 /** Emulator starts (avdslim or the SDK emulator), helper-owned. */
 export const emulators = new EmulatorManager()
+/** iOS simulator starts (simslim or simctl), helper-owned. */
+export const simulators = new SimulatorManager()
 
 interface PendingPair {
   code: string
@@ -136,8 +140,9 @@ function onConnection(ws: WebSocket, deviceName: string) {
   const unsubscribeRuns = runs.subscribe((event, root, payload) =>
     notifyClient(event === "log" ? "run.log" : "run.status", { root, ...(payload as object) }))
   const unsubscribeEmu = emulators.subscribe((event, payload) => notifyClient(event === "log" ? "emu.log" : "emu.status", payload))
+  const unsubscribeSim = simulators.subscribe((event, payload) => notifyClient(event === "log" ? "sim.log" : "sim.status", payload))
   // Logcat streams are views: they end with this connection.
-  const logcats = new Map<string, LogcatStream>()
+  const logcats = new Map<string, LogcatStream | SimLogStream>()
   // One live screen per connection (binary frames on this socket).
   let screen: ScreenSession | null = null
 
@@ -203,13 +208,11 @@ function onConnection(ws: WebSocket, deviceName: string) {
           const mode = String(msg.params?.mode ?? "app") as LogcatMode
           if (!["app", "errors", "all"].includes(mode)) return fail("Unknown logcat mode")
           const id = randomBytes(6).toString("hex")
-          const stream = new LogcatStream(
-            id,
-            checkSerial(msg.params?.serial),
-            mode,
-            (lines, skipped) => notifyClient("logcat.lines", { id, lines, skipped }),
-            (code) => { logcats.delete(id); notifyClient("logcat.exit", { id, code }) },
-          )
+          const serial = checkSerial(msg.params?.serial)
+          const send = (lines: unknown[], skipped: number) => notifyClient("logcat.lines", { id, lines, skipped })
+          const exit = (code: number | null) => { logcats.delete(id); notifyClient("logcat.exit", { id, code }) }
+          // A simulator UDID: the iOS log (same notifications, so the app's Logs tab works for both).
+          const stream = isSimulator(serial) ? new SimLogStream(id, serial, mode as SimLogMode, send, exit) : new LogcatStream(id, serial, mode, send, exit)
           logcats.set(id, stream)
           return reply({ id })
         }
@@ -221,9 +224,18 @@ function onConnection(ws: WebSocket, deviceName: string) {
         }
         case "emu.stop":
           return reply(await emulators.stop(String(msg.params?.serial ?? "")))
+        case "sim.list":
+          return reply({ ...(await listSims()), starting: simulators.statuses() })
+        case "sim.start": {
+          const p = msg.params ?? {}
+          return reply(await simulators.start(String(p.udid ?? ""), { slim: p.slim !== false, window: p.window === true }))
+        }
+        case "sim.stop":
+          return reply(await simulators.stop(String(msg.params?.udid ?? "")))
         case "screen.start": {
           screen?.stop()
           const serial = checkSerial(msg.params?.serial)
+          if (isSimulator(serial)) return fail("The live screen isn't available for iOS simulators yet")
           // An older stream of this device (another phone, or a connection that died half-open).
           screensBySerial.get(serial)?.stop()
           const session = new ScreenSession(
@@ -279,6 +291,7 @@ function onConnection(ws: WebSocket, deviceName: string) {
     unsubscribeMetro()
     unsubscribeRuns()
     unsubscribeEmu()
+    unsubscribeSim()
     screen?.stop()
     screen = null
     for (const l of logcats.values()) l.stop()

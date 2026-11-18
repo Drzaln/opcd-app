@@ -12,6 +12,7 @@ the helper adds what opencode doesn't:
 | ✅ | **Android** — the Mac's adb devices, wireless pair/connect, build & run on a device, logcat |
 | ✅ | **Device screen** — live H.264 view of any adb device (scrcpy) with touch and Back/Home/Recents/Dev menu |
 | ✅ | **Emulators** — list the Mac's AVDs, start (through `avdslim` when installed) and stop them |
+| ✅ | **iOS simulators** — list, start (slim or stock through `simslim` when installed, else `simctl`), stop; build & run (`expo run:ios` / `react-native run-ios`); the simulator's log |
 
 The app only shows these features when the helper answers; everything else works without it.
 
@@ -38,6 +39,8 @@ Optional tools (each feature appears in the app only when its tool is found):
 | `brew install scrcpy` | Live device screen |
 | Android emulator (Android Studio) | Start/stop emulators |
 | `avdslim` on PATH (e.g. Homebrew) | Low-memory emulator starts + slimming |
+| Xcode (with an iOS simulator runtime) | iOS simulators, Run on them, their log |
+| `brew install mobai-app/tap/simslim` | Slim iOS simulators (~4× less memory) |
 
 Options: `--port 4097` (default), `--host <ip>` (repeatable; default = Tailscale IP + 127.0.0.1).
 
@@ -110,12 +113,15 @@ lsp.stop  {session}
 format    {root, path, text} → {text, changed, steps[], warnings[]}
 adb.devices                → {adb, devices: [{serial, state, model, transport}]}
 adb.pair    {host, port, code} / adb.connect {host, port} / adb.disconnect {serial} / adb.reverse {serial, port?}
-run.status  {root, tail?}  → {state, command, serial, errors, detected, detectError, lines[]}
-run.start   {root, serial} → status   (expo run:android | react-native run-android | ./gradlew installDebug)
+run.status  {root, tail?}  → {state, command, serial, errors, detected, detectError, detectedIos, detectIosError, lines[]}
+run.start   {root, serial} → status   (expo run:android | react-native run-android | ./gradlew installDebug;
+                                       a simulator UDID as serial → expo run:ios | react-native run-ios)
 run.stop    {root}         → status
-logcat.start {serial, mode: app|errors|all} → {id}     logcat.stop {id}
+logcat.start {serial, mode: app|errors|all} → {id}     logcat.stop {id}   (a UDID → the simulator's os_log)
 emu.list                   → {avds: [{name, serial}], avdslim, emulator, starting[]}
 emu.start   {avd, headless?, cold?, ram?, slim?} → {avd, state, via}   emu.stop {serial}
+sim.list                   → {sims: [{udid, name, runtime, state, booted, slim, memory}], simslim, xcode, starting[]}
+sim.start   {udid, slim?, window?} → {udid, name, state, via}   sim.stop {udid}
 screen.start {serial, maxSize?, bitRate?, maxFps?} → {width, height, deviceName}
 screen.input {action, pointer, x, y, w, h} | {key: back|home|recents|menu|power}
 screen.resize {width, height}    screen.stop
@@ -129,7 +135,8 @@ notifications: lsp.message {session, message}, lsp.exit {session, code},
                metro.status {root, state, …},
                run.log {root, line}, run.status {root, state, …},
                logcat.lines {id, lines: [{level, text}], skipped}, logcat.exit {id, code},
-               emu.log {avd, text}, emu.status {avd, state, via, message}, screen.end {reason}
+               emu.log {avd, text}, emu.status {avd, state, via, message},
+               sim.log {udid, name, text}, sim.status {udid, name, state, via, message}, screen.end {reason}
 binary frames (screen): [kind:1][ptsMicros:8][h264]   kind 1 config, 2 frame, 3 key frame
 ```
 
@@ -138,6 +145,20 @@ package). It speaks scrcpy 5's stream format: after the codec id, 12-byte *sessi
 flags, width, height — also on rotation) and media packets with bit 62 = config, bit 61 = key frame.
 **Emulators** use `avdslim` when installed (`start <avd>` always named; `stop` with stdin closed so its
 "save a Golden Snapshot? [y/N]" prompt takes the default), else the SDK `emulator`.
+
+**iOS simulators** need Xcode (`xcrun --find simctl` must work; the helper then advertises `ios`).
+`sim.list` reads `simctl list devices available -j` (iOS runtimes only — no watch/TV), and for booted
+ones asks `simslim list --json --booted` whether they're slim (it can only tell while they run) and
+their memory. Start with `slim` → `simslim on <udid>` (reconfigures while off, boots slim); without →
+`simslim off <udid>` then `simslim boot` (stock); no simslim → `simctl boot` + `bootstatus -b`.
+`window` opens Simulator.app on it. Stop → `simslim shutdown` / `simctl shutdown`, checked against
+the list. Build & run with a UDID runs `expo run:ios --device <udid> --no-bundler` or
+`react-native run-ios --udid <udid> --no-packager` (no `adb reverse`: the simulator shares the Mac's
+localhost; `LANG` defaults to UTF-8 for CocoaPods). The log is `simctl spawn <udid> log stream
+--style compact` with a predicate — App JS: `subsystem == "com.facebook.react.log"` or the app's
+errors; Errors: errors/faults from processes in an installed app bundle; All: everything those
+processes log — preceded by the last 5 minutes from `log show`, compacted to `HH:MM:SS L Process: …`.
+The live screen isn't available for simulators yet (`screen.start` refuses a UDID).
 
 **Android** needs adb (Android platform-tools; found via `ANDROID_HOME`, `~/Library/Android/sdk`,
 Homebrew or PATH) — without it the helper doesn't advertise `adb` and the app hides the panel. Build &

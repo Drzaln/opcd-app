@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { classify, type LogLevel } from "./metro.ts"
+import { isSimulator } from "./sim.ts"
 
 export interface Device { serial: string; state: string; model: string | null; transport: "usb" | "wifi" | "emulator" }
 
@@ -91,14 +92,28 @@ export async function reverse(serial: unknown, port = 8081) {
 export type RunKind = "expo" | "react-native" | "gradle"
 export interface RunCommand { kind: RunKind; bin: string; args: string[]; cwd: string; label: string }
 
-/** How "build & run" works for this project: Expo / React Native CLI, or plain Gradle. */
-export function detectRun(root: string, serial: string): RunCommand {
+/**
+ * How "build & run" works for this project: Expo / React Native CLI, or plain Gradle. A simulator
+ * UDID as the serial means iOS (Expo / React Native only: a plain Xcode project isn't detected).
+ */
+export function detectRun(root: string, serial: string, ios = isSimulator(serial)): RunCommand {
   const pkgFile = join(root, "package.json")
   const pkg = existsSync(pkgFile) ? (() => { try { return JSON.parse(readFileSync(pkgFile, "utf8")) } catch { return {} } })() : null
   const deps = pkg ? { ...(pkg.devDependencies ?? {}), ...(pkg.dependencies ?? {}) } : {}
   const local = (name: string) => existsSync(join(root, "node_modules", ".bin", name))
   const tool = (name: string, args: string[]) =>
     local(name) ? { bin: join(root, "node_modules", ".bin", name), args } : { bin: "npx", args: ["--no-install", name, ...args] }
+  if (ios) {
+    if ("expo" in deps) {
+      const args = ["run:ios", "--device", serial, "--no-bundler"]
+      return { kind: "expo", cwd: root, label: `npx expo ${args.join(" ")}`, ...tool("expo", args) }
+    }
+    if ("react-native" in deps) {
+      const args = ["run-ios", "--udid", serial, "--no-packager"]
+      return { kind: "react-native", cwd: root, label: `npx react-native ${args.join(" ")}`, ...tool("react-native", args) }
+    }
+    throw new Error("Build & run on iOS needs an Expo or React Native project")
+  }
   if ("expo" in deps) {
     // --no-bundler: Metro is the helper's (Metro tab), not a second one owned by the build.
     const args = ["run:android", "--device", serial, "--no-bundler"]
@@ -151,7 +166,9 @@ class RunTask {
     Object.assign(this.status, { state: "running", command: cmd.label, serial, startedAt: Date.now(), exitCode: null, errors: 0 })
     this.changed()
     this.push(`$ ${cmd.label}`, "info")
-    if (cmd.kind !== "gradle") {
+    const ios = isSimulator(serial)
+    // A simulator shares the Mac's localhost: no reverse needed.
+    if (cmd.kind !== "gradle" && !ios) {
       try { await reverse(serial); this.push("adb reverse tcp:8081 → the app reaches Metro on the Mac", "info") }
       catch (e: any) { this.push(`adb reverse failed: ${e.message}`, "warn") }
     }
@@ -162,7 +179,8 @@ class RunTask {
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
-        ANDROID_SERIAL: serial,
+        // CocoaPods refuses to run without a UTF-8 locale (launchd jobs have none).
+        ...(ios ? { LANG: process.env.LANG || "en_US.UTF-8" } : { ANDROID_SERIAL: serial }),
         FORCE_COLOR: "0",
         // Expo/RN CLIs and Gradle look for the SDK here; launchd-started helpers often lack it.
         ...(adbBin && !process.env.ANDROID_HOME ? { ANDROID_HOME: join(adbBin, "..", "..") } : {}),
@@ -239,9 +257,12 @@ export class RunManager {
     const t = this.tasks.get(root)
     let detected: string | null = null
     let detectError: string | null = null
-    try { detected = detectRun(root, "<device>").label } catch (e: any) { detectError = e.message }
+    try { detected = detectRun(root, "<device>", false).label } catch (e: any) { detectError = e.message }
+    let detectedIos: string | null = null
+    let detectIosError: string | null = null
+    try { detectedIos = detectRun(root, "<device>", true).label } catch (e: any) { detectIosError = e.message }
     const status = t?.status ?? { root, state: "idle", command: null, serial: null, startedAt: null, exitCode: null, errors: 0 }
-    return { ...status, detected, detectError, lines: (t?.lines ?? []).slice(-tail) }
+    return { ...status, detected, detectError, detectedIos, detectIosError, lines: (t?.lines ?? []).slice(-tail) }
   }
 
   async start(root: string, serial: string) {

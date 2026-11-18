@@ -244,7 +244,7 @@ fun DeviceScreen(screen: ScreenController, serial: String?, deviceLabel: String?
         val s = surface
         // Captured now: `wanted` is a state delegate, so reading it inside onDispose would see the
         // *new* value (false after tapping Stop) and skip telling the helper to stop.
-        val active = serial != null && s != null && wanted
+        val active = serial != null && s != null && wanted && !isSimulatorSerial(serial)
         if (active) screen.start(serial!!, s!!)
         onDispose { if (active) screen.stop() }
     }
@@ -299,6 +299,7 @@ fun DeviceScreen(screen: ScreenController, serial: String?, deviceLabel: String?
                 )
                 val overlay = when {
                     serial == null -> "Pick a device (or start an emulator) to see its screen."
+                    isSimulatorSerial(serial) -> "The live screen isn't available for iOS simulators yet. Turn on \"Show the Simulator window\" to see it on the Mac."
                     !wanted && isThisPhone -> "${deviceLabel ?: "This device"} is the phone you're holding — mirroring it shows this screen inside itself."
                     !wanted -> "Screen stopped."
                     ui.state == "starting" -> "Connecting to ${deviceLabel ?: serial}…"
@@ -308,7 +309,7 @@ fun DeviceScreen(screen: ScreenController, serial: String?, deviceLabel: String?
                 if (overlay != null) {
                     Column(Modifier.align(Alignment.Center).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(overlay, color = androidx.compose.ui.graphics.Color.White, fontSize = 12.sp, textAlign = TextAlign.Center)
-                        if (serial != null && (!wanted || ui.state == "error")) TextButton(onClick = { wanted = true; attempt++ }) { Text(if (ui.state == "error") "Retry" else "Show screen") }
+                        if (serial != null && !isSimulatorSerial(serial) && (!wanted || ui.state == "error")) TextButton(onClick = { wanted = true; attempt++ }) { Text(if (ui.state == "error") "Retry" else "Show screen") }
                     }
                 }
             }
