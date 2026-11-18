@@ -140,7 +140,9 @@ Single `:app` module. No DI framework.
   owned by `OpenCodeApp`; notifications go through one ordered queue), Settings → Mac helper, LSP
   wiring in `EditorViewModel`, Metro in `ui/editor/Metro.kt` (`MetroController` on `EditorViewModel.metro`,
   `MetroPanel` / `MetroSheet` / `MetroAction`), adb in `helper/src/adb.ts` + `ui/editor/Android.kt`
-  (`AndroidController` on `EditorViewModel.android`: devices, build & run, logcat).
+  (`AndroidController` on `EditorViewModel.android`: devices, build & run, logcat, emulators via
+  `helper/src/emu.ts`), live screen in `helper/src/screen.ts` (scrcpy 5 relay) + `ui/editor/Screen.kt`
+  (`ScreenController` on `EditorViewModel.screen`, MediaCodec decoder, `DeviceScreen`).
   Tests: `cd helper && npm test`. See `helper/README.md`.
 - Terminal has **two renderers**, picked with the top-bar ⋮ and stored in `ServerStore.terminalRenderer`
   (`"xterm"` default / `"native"`):

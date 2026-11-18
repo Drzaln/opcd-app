@@ -87,6 +87,11 @@ data class AdbDevice(val serial: String, val state: String, val model: String?, 
     }
 }
 
+data class Avd(val name: String, val serial: String?)
+
+/** How "Start emulator" launches an AVD (remembered for the session). */
+data class EmuOptions(val headless: Boolean = true, val cold: Boolean = false, val ram: Int = 1536, val slim: Boolean = true)
+
 enum class LogcatMode(val wire: String, val label: String) { APP("app", "App JS"), ERRORS("errors", "Errors"), ALL("all", "All") }
 
 data class AndroidUi(
@@ -106,6 +111,11 @@ data class AndroidUi(
     val busy: Boolean = false,
     val message: String? = null,
     val info: String? = null,
+    /** AVDs on the Mac (name → serial when running) and whether starts go through avdslim. */
+    val avds: List<Avd> = emptyList(),
+    val avdslim: Boolean = false,
+    /** AVD name → starting / booted / failed while an emulator start is in flight. */
+    val emuStates: Map<String, String> = emptyMap(),
 ) {
     val device: AdbDevice? get() = devices.firstOrNull { it.serial == selected }
     val running: Boolean get() = runState == "running"
@@ -159,6 +169,21 @@ class AndroidController(
                         if (id == logcatId) _ui.update { it.copy(logcatLines = (it.logcatLines + lines).takeLast(MAX), logcatSkipped = it.logcatSkipped + skipped) }
                         else if (early.size < 8) early.getOrPut(id) { mutableListOf() }.addAll(lines)
                     }
+                    "emu.log" -> {
+                        val avd = params.str("avd") ?: return@collect
+                        val text = params.str("text") ?: return@collect
+                        if (_ui.value.emuStates[avd] == "starting") _ui.update { it.copy(info = "$avd: $text") }
+                    }
+                    "emu.status" -> {
+                        val avd = params.str("avd") ?: return@collect
+                        val state = params.str("state") ?: return@collect
+                        _ui.update { it.copy(
+                            emuStates = it.emuStates + (avd to state),
+                            info = when (state) { "booted" -> "$avd is up"; "failed" -> null; else -> it.info },
+                            message = if (state == "failed") "$avd didn't start: ${params.str("message") ?: "see the Mac"}" else it.message,
+                        ) }
+                        if (state == "booted") { pendingSelect = avd; refresh() }
+                    }
                     "logcat.exit" -> if (params.str("id") == logcatId) {
                         logcatId = null
                         _ui.update { it.copy(info = "Logcat stopped (device gone?)") }
@@ -178,9 +203,13 @@ class AndroidController(
                     val o = e.jsonObject
                     AdbDevice(o.str("serial").orEmpty(), o.str("state").orEmpty(), o.str("model"), o.str("transport") ?: "usb")
                 } ?: emptyList()
+                val emu = runCatching { helper.request("emu.list").jsonObject }.getOrNull()
+                val avds = emu?.get("avds")?.jsonArray?.map { e -> val o = e.jsonObject; Avd(o.str("name").orEmpty(), o.str("serial")) } ?: emptyList()
+                val booted = pendingSelect?.let { name -> avds.firstOrNull { it.name == name }?.serial }
+                if (booted != null) pendingSelect = null
                 _ui.update { ui ->
-                    val keep = ui.selected?.takeIf { s -> devices.any { it.serial == s } }
-                    ui.copy(devices = devices, adbMissing = res["adb"] !is JsonPrimitive || (res["adb"] as JsonPrimitive).contentOrNull == null,
+                    val keep = booted ?: ui.selected?.takeIf { s -> devices.any { it.serial == s } }
+                    ui.copy(devices = devices, avds = avds, avdslim = (emu?.get("avdslim") as? JsonPrimitive)?.content == "true", adbMissing = res["adb"] !is JsonPrimitive || (res["adb"] as JsonPrimitive).contentOrNull == null,
                         selected = keep ?: devices.firstOrNull { it.ready }?.serial)
                 }
             }.onFailure { e -> _ui.update { it.copy(message = e.message) } }
@@ -189,6 +218,34 @@ class AndroidController(
                 val res = helper.request("run.status", buildJsonObject { put("root", r); put("tail", 500) }).jsonObject
                 _ui.update { applyRun(it, res).copy(runLines = res["lines"]?.let(::parseLines) ?: emptyList()) }
             }
+        }
+    }
+
+    @Volatile private var pendingSelect: String? = null
+    var emuOptions = EmuOptions()
+
+    /** Starts an AVD on the Mac (avdslim when installed); selects it once it has booted. */
+    fun startEmulator(avd: String, options: EmuOptions) {
+        emuOptions = options
+        scope.launch {
+            _ui.update { it.copy(message = null, info = "Starting $avd…", emuStates = it.emuStates + (avd to "starting")) }
+            try {
+                helper.request("emu.start", buildJsonObject {
+                    put("avd", avd); put("headless", options.headless); put("cold", options.cold); put("ram", options.ram); put("slim", options.slim)
+                }, timeoutMs = 30_000)
+            } catch (e: Exception) {
+                _ui.update { it.copy(message = e.message, info = null, emuStates = it.emuStates - avd) }
+            }
+        }
+    }
+
+    fun stopEmulator(serial: String) {
+        scope.launch {
+            _ui.update { it.copy(message = null, info = "Stopping $serial…") }
+            runCatching { helper.request("emu.stop", buildJsonObject { put("serial", serial) }, timeoutMs = 70_000) }
+                .onSuccess { _ui.update { it.copy(info = "Stopped $serial") } }
+                .onFailure { e -> _ui.update { it.copy(message = e.message, info = null) } }
+            refresh()
         }
     }
 
@@ -297,15 +354,22 @@ class AndroidController(
     }
 }
 
-private enum class AndroidTab { RUN, LOGCAT }
+private enum class AndroidTab { RUN, LOGCAT, SCREEN }
 
 /** Device row, then Run (build & install output) or Logcat. */
 @Composable
-fun AndroidPanel(android: AndroidController, modifier: Modifier = Modifier) {
+fun AndroidPanel(
+    android: AndroidController,
+    modifier: Modifier = Modifier,
+    /** The live screen, when the helper offers it and no other pane is already showing it. */
+    screen: ScreenController? = null,
+) {
     val ui by android.ui.collectAsState()
     val c = OcTheme.colors
     var tab by rememberSaveable { mutableStateOf(AndroidTab.RUN) }
     var connectOpen by remember { mutableStateOf(false) }
+    var startAvd by remember { mutableStateOf<String?>(null) }
+    if (screen == null && tab == AndroidTab.SCREEN) tab = AndroidTab.RUN
     var filter by rememberSaveable { mutableStateOf("") }
     DisposableEffect(Unit) {
         android.panelVisible = true
@@ -323,13 +387,13 @@ fun AndroidPanel(android: AndroidController, modifier: Modifier = Modifier) {
         val wide = maxWidth >= 640.dp
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                DevicePicker(ui, onSelect = android::select, modifier = Modifier.weight(1f, fill = false))
+                DevicePicker(ui, onSelect = android::select, onStartAvd = { startAvd = it }, onStopEmulator = android::stopEmulator, modifier = Modifier.weight(1f, fill = false))
                 IconButton(onClick = { android.refresh() }) { Icon(Icons.Outlined.Refresh, contentDescription = "Refresh devices", tint = c.textSecondary) }
                 TextButton(onClick = { connectOpen = true }) { Text("Connect…") }
                 Spacer(Modifier.weight(1f))
-                if (wide) Tabs(tab) { tab = it }
+                if (wide) Tabs(tab, screen != null) { tab = it }
             }
-            if (!wide) Row(Modifier.padding(horizontal = 8.dp)) { Tabs(tab) { tab = it } }
+            if (!wide) Row(Modifier.padding(horizontal = 8.dp)) { Tabs(tab, screen != null) { tab = it } }
             (ui.message ?: ui.info)?.let { text ->
                 Text(
                     text,
@@ -341,9 +405,19 @@ fun AndroidPanel(android: AndroidController, modifier: Modifier = Modifier) {
             when {
                 ui.adbMissing -> Empty("adb isn't installed on the Mac. Install Android platform-tools (Android Studio → SDK Manager), then refresh.")
                 tab == AndroidTab.RUN -> RunView(android, ui)
+                tab == AndroidTab.SCREEN && screen != null -> DeviceScreen(
+                    screen = screen,
+                    serial = ui.device?.takeIf { it.ready }?.serial,
+                    deviceLabel = ui.device?.label,
+                    isThisPhone = ui.device?.let { isThisPhone(it) } == true,
+                    modifier = Modifier.fillMaxSize(),
+                )
                 else -> LogcatView(android, ui, filter) { filter = it }
             }
         }
+    }
+    startAvd?.let { avd ->
+        StartEmulatorDialog(avd, ui.avdslim, android.emuOptions, onDismiss = { startAvd = null }, onStart = { opts -> startAvd = null; android.startEmulator(avd, opts) })
     }
     if (connectOpen) ConnectDialog(onDismiss = { connectOpen = false }, onConnect = { host, port, pairPort, code ->
         connectOpen = false
@@ -352,15 +426,16 @@ fun AndroidPanel(android: AndroidController, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun Tabs(tab: AndroidTab, onTab: (AndroidTab) -> Unit) {
+private fun Tabs(tab: AndroidTab, withScreen: Boolean, onTab: (AndroidTab) -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         FilterChipText("Run", tab == AndroidTab.RUN) { onTab(AndroidTab.RUN) }
         FilterChipText("Logcat", tab == AndroidTab.LOGCAT) { onTab(AndroidTab.LOGCAT) }
+        if (withScreen) FilterChipText("Screen", tab == AndroidTab.SCREEN) { onTab(AndroidTab.SCREEN) }
     }
 }
 
 @Composable
-private fun DevicePicker(ui: AndroidUi, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun DevicePicker(ui: AndroidUi, onSelect: (String) -> Unit, onStartAvd: (String) -> Unit, onStopEmulator: (String) -> Unit, modifier: Modifier = Modifier) {
     val c = OcTheme.colors
     var open by remember { mutableStateOf(false) }
     Box(modifier) {
@@ -385,6 +460,25 @@ private fun DevicePicker(ui: AndroidUi, onSelect: (String) -> Unit, modifier: Mo
                     onClick = { open = false; onSelect(d.serial) },
                     enabled = d.ready,
                 )
+            }
+            if (ui.avds.isNotEmpty()) {
+                androidx.compose.material3.HorizontalDivider()
+                Text(
+                    if (ui.avdslim) "Emulators on the Mac · avdslim" else "Emulators on the Mac",
+                    fontSize = 11.sp, color = c.textSecondary, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+                for (avd in ui.avds) {
+                    val starting = ui.emuStates[avd.name] == "starting"
+                    if (avd.serial != null) {
+                        DropdownMenuItem(text = { Text("Stop ${avd.name}") }, onClick = { open = false; onStopEmulator(avd.serial) })
+                    } else {
+                        DropdownMenuItem(
+                            text = { Text(if (starting) "${avd.name} — starting…" else "Start ${avd.name}…") },
+                            onClick = { open = false; onStartAvd(avd.name) },
+                            enabled = !starting,
+                        )
+                    }
+                }
             }
         }
     }
@@ -505,10 +599,10 @@ private fun ConnectDialog(onDismiss: () -> Unit, onConnect: (String, Int, Int?, 
 /** Phone sheet (app-bar button). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AndroidSheet(android: AndroidController, onDismiss: () -> Unit) {
+fun AndroidSheet(android: AndroidController, onDismiss: () -> Unit, screen: ScreenController? = null) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state, containerColor = OcTheme.colors.surface) {
-        AndroidPanel(android = android, modifier = Modifier.fillMaxWidth().heightIn(min = 360.dp, max = 680.dp))
+        AndroidPanel(android = android, screen = screen, modifier = Modifier.fillMaxWidth().heightIn(min = 360.dp, max = 680.dp))
     }
 }
 
@@ -527,7 +621,8 @@ fun AndroidAction(appVm: dev.opencode.mobile.AppViewModel, vm: EditorViewModel) 
             }
         }
     }
-    if (open) AndroidSheet(android = vm.android, onDismiss = { open = false })
+    val screen = vm.screen.takeIf { ScreenController.available(helperState) }
+    if (open) AndroidSheet(android = vm.android, onDismiss = { open = false }, screen = screen)
 }
 
 /** Badge next to the wide layout's Android tab. */
@@ -541,5 +636,44 @@ fun AndroidTabBadge(ui: AndroidUi) {
             modifier = Modifier.padding(start = 6.dp).clip(RoundedCornerShape(8.dp)).background(c.errorBg).padding(horizontal = 5.dp, vertical = 1.dp),
         )
         ui.running -> Box(Modifier.padding(start = 6.dp).size(6.dp).clip(CircleShape).background(c.warning))
+    }
+}
+
+/** adb reports the model with underscores; Build.MODEL has spaces. A USB/Wi-Fi device with our model is us. */
+internal fun isThisPhone(d: AdbDevice): Boolean =
+    d.transport != "emulator" && d.model != null && d.model.replace(' ', '_').equals(android.os.Build.MODEL.replace(' ', '_'), ignoreCase = true)
+
+@Composable
+private fun StartEmulatorDialog(avd: String, avdslim: Boolean, initial: EmuOptions, onDismiss: () -> Unit, onStart: (EmuOptions) -> Unit) {
+    var headless by rememberSaveable { mutableStateOf(initial.headless) }
+    var cold by rememberSaveable { mutableStateOf(initial.cold) }
+    var slim by rememberSaveable { mutableStateOf(initial.slim) }
+    var ram by rememberSaveable { mutableStateOf(initial.ram.toString()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Start $avd") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    if (avdslim) "Runs avdslim on the Mac: low-memory host flags, then slims the emulator after boot."
+                    else "Runs the Android emulator on the Mac. (Install avdslim for a lighter emulator.)",
+                    fontSize = 12.sp, color = OcTheme.colors.textSecondary,
+                )
+                SwitchRow("Headless (no window on the Mac)", headless) { headless = it }
+                SwitchRow("Cold boot", cold) { cold = it }
+                if (avdslim) SwitchRow("Slim after boot", slim) { slim = it }
+                OutlinedTextField(ram, { ram = it.filter(Char::isDigit).take(5) }, label = { Text("RAM (MB)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            }
+        },
+        confirmButton = { TextButton(onClick = { onStart(EmuOptions(headless, cold, (ram.toIntOrNull() ?: 1536).coerceIn(1024, 8192), slim)) }) { Text("Start") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        androidx.compose.material3.Switch(checked = checked, onCheckedChange = onChange)
     }
 }

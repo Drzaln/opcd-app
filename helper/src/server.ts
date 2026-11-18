@@ -17,6 +17,8 @@ import { confirmPairing, notify, type Approval } from "./confirm.ts"
 import { LspSession } from "./lsp.ts"
 import { formatText, insideRoot } from "./format.ts"
 import { MetroManager } from "./metro.ts"
+import { ScreenSession, findScrcpyServer } from "./screen.ts"
+import { EmulatorManager, listAvds, findEmulator } from "./emu.ts"
 import { RunManager, LogcatStream, listDevices, pair, connect, disconnect, reverse, checkSerial, findAdb, type LogcatMode } from "./adb.ts"
 
 export const VERSION = "0.1.0"
@@ -25,13 +27,19 @@ export const FEATURES = ["pair", "lsp", "format", "metro"]
 
 /** Features this Mac can offer right now ("adb" only when platform-tools are installed). */
 export function features(): string[] {
-  return findAdb() ? [...FEATURES, "adb"] : FEATURES
+  if (!findAdb()) return FEATURES
+  return [...FEATURES, "adb", ...(findScrcpyServer() ? ["screen"] : []), ...(findEmulator() ? ["emulator"] : [])]
 }
 
 /** One Metro registry for the whole helper (shared by every interface it listens on). */
 export const metro = new MetroManager()
 /** Build & run per project root, also helper-owned. */
 export const runs = new RunManager()
+/** Live screens by device serial, across connections: a new start replaces any older stream. */
+const screensBySerial = new Map<string, ScreenSession>()
+
+/** Emulator starts (avdslim or the SDK emulator), helper-owned. */
+export const emulators = new EmulatorManager()
 
 interface PendingPair {
   code: string
@@ -109,6 +117,15 @@ export function createHelperServer(options: ServerOptions): Server {
 
 function onConnection(ws: WebSocket, deviceName: string) {
   console.log(`  ${deviceName} connected`)
+  // Heartbeat: a phone that vanished (4G drop, Tailscale half-open socket) is dropped within ~40 s,
+  // so its screen stream / logcat don't keep running. OkHttp answers pings by itself.
+  let alive = true
+  ws.on("pong", () => { alive = true })
+  const heartbeat = setInterval(() => {
+    if (!alive) { ws.terminate(); return }
+    alive = false
+    try { ws.ping() } catch { /* closing */ }
+  }, 20_000)
   const sessions = new Map<string, LspSession>()
   const notifyClient = (method: string, params: unknown) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ method, params }))
@@ -118,8 +135,11 @@ function onConnection(ws: WebSocket, deviceName: string) {
     notifyClient(event === "log" ? "metro.log" : "metro.status", { root, ...(payload as object) }))
   const unsubscribeRuns = runs.subscribe((event, root, payload) =>
     notifyClient(event === "log" ? "run.log" : "run.status", { root, ...(payload as object) }))
+  const unsubscribeEmu = emulators.subscribe((event, payload) => notifyClient(event === "log" ? "emu.log" : "emu.status", payload))
   // Logcat streams are views: they end with this connection.
   const logcats = new Map<string, LogcatStream>()
+  // One live screen per connection (binary frames on this socket).
+  let screen: ScreenSession | null = null
 
   ws.on("message", async (raw) => {
     let msg: any
@@ -193,6 +213,55 @@ function onConnection(ws: WebSocket, deviceName: string) {
           logcats.set(id, stream)
           return reply({ id })
         }
+        case "emu.list":
+          return reply({ ...(await listAvds()), starting: emulators.statuses() })
+        case "emu.start": {
+          const p = msg.params ?? {}
+          return reply(await emulators.start(String(p.avd ?? ""), { headless: p.headless !== false, cold: p.cold === true, ram: Number(p.ram ?? 1536), slim: p.slim !== false }))
+        }
+        case "emu.stop":
+          return reply(await emulators.stop(String(msg.params?.serial ?? "")))
+        case "screen.start": {
+          screen?.stop()
+          const serial = checkSerial(msg.params?.serial)
+          // An older stream of this device (another phone, or a connection that died half-open).
+          screensBySerial.get(serial)?.stop()
+          const session = new ScreenSession(
+            serial,
+            (packet) => {
+              if (ws.readyState !== ws.OPEN) return false
+              ws.send(packet, { binary: true })
+              return ws.bufferedAmount < 2 * 1024 * 1024
+            },
+            (reason) => { if (screen === session) screen = null; notifyClient("screen.end", { reason }) },
+          )
+          screen = session
+          screensBySerial.set(serial, session)
+          const clamp = (v: unknown, lo: number, hi: number, d: number) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : d }
+          try {
+            return reply(await session.start({
+              maxSize: clamp(msg.params?.maxSize, 320, 1920, 800),
+              bitRate: clamp(msg.params?.bitRate, 250_000, 8_000_000, 1_500_000),
+              maxFps: clamp(msg.params?.maxFps, 5, 60, 30),
+            }))
+          } catch (e) {
+            if (screen === session) screen = null
+            throw e
+          }
+        }
+        case "screen.input": {
+          const p = msg.params ?? {}
+          if (typeof p.key === "string") screen?.key(p.key)
+          else screen?.touch(Number(p.action) | 0, Number(p.pointer) | 0, Number(p.x), Number(p.y), Number(p.w), Number(p.h))
+          return reply({ ok: true })
+        }
+        case "screen.resize":
+          screen?.resize(Number(msg.params?.width), Number(msg.params?.height))
+          return reply({ ok: true })
+        case "screen.stop":
+          screen?.stop()
+          screen = null
+          return reply({ ok: true })
         case "logcat.stop":
           logcats.get(String(msg.params?.id))?.stop()
           logcats.delete(String(msg.params?.id))
@@ -206,8 +275,12 @@ function onConnection(ws: WebSocket, deviceName: string) {
   })
 
   ws.on("close", () => {
+    clearInterval(heartbeat)
     unsubscribeMetro()
     unsubscribeRuns()
+    unsubscribeEmu()
+    screen?.stop()
+    screen = null
     for (const l of logcats.values()) l.stop()
     logcats.clear()
     for (const s of sessions.values()) s.dispose()

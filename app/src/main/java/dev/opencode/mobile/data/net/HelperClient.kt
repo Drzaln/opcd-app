@@ -97,6 +97,12 @@ class HelperManager(private val store: ServerStore) {
         scope.launch { for (msg in incoming) _notifications.emit(msg) }
     }
 
+    /**
+     * Binary frames (the live device screen's H.264 packets), called on OkHttp's reader thread in
+     * arrival order — the decoder needs every packet, in order, without a coroutine hop per frame.
+     */
+    @Volatile var binaryListener: ((ByteArray) -> Unit)? = null
+
     private var server: ServerConfig? = null
     private var loop: Job? = null
     @Volatile private var socket: WebSocket? = null
@@ -193,6 +199,10 @@ class HelperManager(private val store: ServerStore) {
                 } else {
                     incoming.trySend(msg)
                 }
+            }
+
+            override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
+                binaryListener?.invoke(bytes.toByteArray())
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {

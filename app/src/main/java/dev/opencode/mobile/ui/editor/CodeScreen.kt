@@ -155,6 +155,7 @@ private fun WideCode(
     val metroUi by vm.metro.ui.collectAsState()
     val androidAvailable = AndroidController.available(helperState)
     val androidUi by vm.android.ui.collectAsState()
+    val screenAvailable = ScreenController.available(helperState)
     // The helper went away (or never advertised Metro): don't leave an empty Metro panel open.
     LaunchedEffect(metroAvailable) {
         if (!metroAvailable && panel == BottomPanel.METRO) panel = BottomPanel.TERMINAL
@@ -279,17 +280,27 @@ private fun WideCode(
                     }
                     BottomPanel.GIT -> ChangesPanel(vm = vm, modifier = Modifier.fillMaxWidth().height(190.dp))
                     BottomPanel.METRO -> MetroPanel(metro = vm.metro, modifier = Modifier.fillMaxWidth().height(if (tall) 240.dp else 190.dp))
-                    BottomPanel.ANDROID -> AndroidPanel(android = vm.android, modifier = Modifier.fillMaxWidth().height(if (tall) 260.dp else 190.dp))
+                    BottomPanel.ANDROID -> AndroidPanel(android = vm.android, screen = vm.screen.takeIf { screenAvailable && !threePane }, modifier = Modifier.fillMaxWidth().height(if (tall) 260.dp else 190.dp))
                     null -> Unit
                 }
                 }
             }
             if (threePane) {
                 VerticalDivider()
-                // Reserved for the Phase 2 Mac helper's live emulator stream.
-                Box(Modifier.width(300.dp).fillMaxHeight().background(c.surface), contentAlignment = Alignment.Center) {
+                // The live device screen (scrcpy through the Mac helper), for the device picked in the
+                // Android panel.
+                if (screenAvailable) {
+                    val device = androidUi.device?.takeIf { it.ready }
+                    DeviceScreen(
+                        screen = vm.screen,
+                        serial = device?.serial,
+                        deviceLabel = device?.label,
+                        isThisPhone = device?.let { isThisPhone(it) } == true,
+                        modifier = Modifier.width(300.dp).fillMaxHeight(),
+                    )
+                } else Box(Modifier.width(300.dp).fillMaxHeight().background(c.surface), contentAlignment = Alignment.Center) {
                     Text(
-                        "Emulator preview arrives with the Mac helper",
+                        "Device screen: run the Mac helper with adb and scrcpy (brew install scrcpy)",
                         fontSize = 12.sp,
                         color = c.textSecondary,
                         maxLines = 2,

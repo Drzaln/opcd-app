@@ -10,7 +10,7 @@
   "scripts": {
     "build": "esbuild src/main.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outfile=dist/helper.mjs",
     "start": "npm run build --silent && node dist/helper.mjs",
-    "test": "npm run build --silent && node --test test/*.test.mjs"
+    "test": "npm run build --silent && esbuild src/screen.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/screen-test.mjs --log-level=warning && node --test test/*.test.mjs"
   },
   "engines": {
     "node": ">=20"

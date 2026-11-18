@@ -10,7 +10,8 @@ the helper adds what opencode doesn't:
 | ✅ | **Format on save** — Prettier (the project's own version and config), then `eslint --fix` when the project has ESLint |
 | ✅ | **Metro** — start / stop / reload for React Native and Expo projects, live logs with errors highlighted |
 | ✅ | **Android** — the Mac's adb devices, wireless pair/connect, build & run on a device, logcat |
-| ⏳ | Live emulator screen with touch |
+| ✅ | **Device screen** — live H.264 view of any adb device (scrcpy) with touch and Back/Home/Recents/Dev menu |
+| ✅ | **Emulators** — list the Mac's AVDs, start (through `avdslim` when installed) and stop them |
 
 The app only shows these features when the helper answers; everything else works without it.
 
@@ -74,6 +75,11 @@ run.status  {root, tail?}  → {state, command, serial, errors, detected, detect
 run.start   {root, serial} → status   (expo run:android | react-native run-android | ./gradlew installDebug)
 run.stop    {root}         → status
 logcat.start {serial, mode: app|errors|all} → {id}     logcat.stop {id}
+emu.list                   → {avds: [{name, serial}], avdslim, emulator, starting[]}
+emu.start   {avd, headless?, cold?, ram?, slim?} → {avd, state, via}   emu.stop {serial}
+screen.start {serial, maxSize?, bitRate?, maxFps?} → {width, height, deviceName}
+screen.input {action, pointer, x, y, w, h} | {key: back|home|recents|menu|power}
+screen.resize {width, height}    screen.stop
 metro.status {root, tail?} → {state, kind, command, port, errors, detected, detectError, lines[]}
 metro.start  {root, port?} → status   (port 8081 by default; detects Expo vs React Native)
 metro.stop   {root}        → status
@@ -83,8 +89,16 @@ notifications: lsp.message {session, message}, lsp.exit {session, code},
                metro.log {root, line: {seq, level, text, frame?}, replace},
                metro.status {root, state, …},
                run.log {root, line}, run.status {root, state, …},
-               logcat.lines {id, lines: [{level, text}], skipped}, logcat.exit {id, code}
+               logcat.lines {id, lines: [{level, text}], skipped}, logcat.exit {id, code},
+               emu.log {avd, text}, emu.status {avd, state, via, message}, screen.end {reason}
+binary frames (screen): [kind:1][ptsMicros:8][h264]   kind 1 config, 2 frame, 3 key frame
 ```
+
+**Device screen** needs Homebrew's `scrcpy` (the helper uses its `scrcpy-server`, no extra npm
+package). It speaks scrcpy 5's stream format: after the codec id, 12-byte *session* packets (bit 63:
+flags, width, height — also on rotation) and media packets with bit 62 = config, bit 61 = key frame.
+**Emulators** use `avdslim` when installed (`start <avd>` always named; `stop` with stdin closed so its
+"save a Golden Snapshot? [y/N]" prompt takes the default), else the SDK `emulator`.
 
 **Android** needs adb (Android platform-tools; found via `ANDROID_HOME`, `~/Library/Android/sdk`,
 Homebrew or PATH) — without it the helper doesn't advertise `adb` and the app hides the panel. Build &

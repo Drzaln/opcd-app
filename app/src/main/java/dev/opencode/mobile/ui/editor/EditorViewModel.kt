@@ -171,6 +171,8 @@ class EditorViewModel(
     val metro = MetroController(viewModelScope, helper) { writer.projectRoot(projectDir()) }
     /** adb devices, build & run, logcat through the helper (Android tab / sheet). */
     val android = AndroidController(viewModelScope, helper) { writer.projectRoot(projectDir()) }
+    /** Live device screen (scrcpy through the helper). */
+    val screen = ScreenController(viewModelScope, helper)
     private var webReady = false
     @Volatile private var lspSession: String? = null
     private var lspStarting = false

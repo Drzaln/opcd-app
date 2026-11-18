@@ -24,9 +24,12 @@ if (cmd === "devices") {
   console.log("emulator-5554          device product:sdk_gphone64 model:sdk_gphone64_arm64 device:emu64a transport_id:1")
   console.log("10DE5B08CN0006A        device usb:34603008X product:I2219T model:I2219 device:I2219 transport_id:2")
   console.log("100.64.1.2:5555        offline transport_id:3")
+  if (require("fs").existsSync(process.env.OC_TEST_HOME + "/pixel9-started")) console.log("emulator-5556          device product:sdk model:Pixel_9 transport_id:4")
 } else if (cmd === "connect") console.log(a[1] === "100.64.1.9:5555" ? "failed to connect to '100.64.1.9:5555': Connection refused" : "connected to " + a[1])
 else if (cmd === "pair") console.log("Successfully paired to " + a[1] + " [guid=adb-XYZ]")
 else if (cmd === "reverse") console.log("8081")
+else if (cmd === "emu" && a[1] === "avd") console.log(s === "emulator-5554" ? "Medium_Phone\\nOK" : s === "emulator-5556" ? "Pixel_9\\nOK" : "")
+else if (cmd === "shell" && a[1] === "getprop") console.log("1")
 else if (cmd === "logcat" && a.includes("-d")) {
   console.log("--------- beginning of main")
   console.log("11-18 16:00:00.000  1234  1250 I ReactNativeJS: Running \\"main\\" (from the backlog)")
@@ -41,15 +44,22 @@ else if (cmd === "logcat" && a.includes("-d")) {
 } else { console.error("unknown " + a.join(" ")); process.exit(1) }
 `
 
+const fakeEmulator = join(home, "fake-emulator")
+const fakeAvdslim = join(home, "fake-avdslim")
+
 before(async () => {
   writeFileSync(fakeAdb, FAKE_ADB)
   chmodSync(fakeAdb, 0o755)
+  writeFileSync(fakeEmulator, "#!/bin/sh\n[ \"$1\" = -list-avds ] && printf 'Medium_Phone\\nPixel_9\\n'\n")
+  chmodSync(fakeEmulator, 0o755)
+  writeFileSync(fakeAvdslim, "#!/bin/sh\necho \"avdslim $*\"\ntouch \"$OC_TEST_HOME/pixel9-started\"\n")
+  chmodSync(fakeAvdslim, 0o755)
   mkdirSync(join(project, "src"), { recursive: true })
   writeFileSync(join(project, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, jsx: "react-jsx", target: "es2022", module: "esnext", moduleResolution: "bundler" } }))
   writeFileSync(join(project, "src", "a.ts"), "export const greeting = 'hi'\nexport function shout(s: string) { return s.toUpperCase() }\n")
   writeFileSync(join(project, "src", "b.ts"), "import { shout } from './a'\nconst n: number = 'oops'\nshout('x').toLower\n")
   helper = spawn(process.execPath, ["dist/helper.mjs", "--port", String(port), "--host", "127.0.0.1"], {
-    env: { ...process.env, HOME: home, OC_HELPER_AUTO_APPROVE: "1", OC_HELPER_ADB: fakeAdb },
+    env: { ...process.env, HOME: home, OC_HELPER_AUTO_APPROVE: "1", OC_HELPER_ADB: fakeAdb, OC_HELPER_EMULATOR: fakeEmulator, OC_HELPER_AVDSLIM: fakeAvdslim, OC_TEST_HOME: home },
     stdio: ["ignore", "pipe", "pipe"],
   })
   await new Promise((resolve, reject) => {
@@ -277,5 +287,34 @@ test("adb: devices, connect, pair, build & run, logcat", async () => {
   assert.deepEqual(logcat.slice(1).map((l) => l.level), ["info", "warn", "error"])
   assert.match((await rpc("logcat.start", { serial: "emulator-5554", mode: "nope" })).error.message, /mode/)
   assert.ok((await rpc("logcat.stop", { id })).result.ok)
+  ws.close()
+})
+
+test("emulators: list AVDs with running serials, start through avdslim", async () => {
+  const ws = await connect(token)
+  let nextId = 1
+  const waiting = new Map()
+  const logs = []
+  const states = []
+  ws.on("message", (raw) => {
+    const m = JSON.parse(String(raw))
+    if (m.id != null && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id) }
+    else if (m.method === "emu.log") logs.push(m.params.text)
+    else if (m.method === "emu.status") states.push(m.params.state)
+  })
+  const rpc = (method, params) => new Promise((resolve) => { const id = nextId++; waiting.set(id, resolve); ws.send(JSON.stringify({ id, method, params })) })
+  const until = async (pred, what) => { for (let i = 0; i < 50 && !pred(); i++) await new Promise((r) => setTimeout(r, 100)); assert.ok(pred(), what) }
+
+  const info = await (await fetch(base + "/helper/info")).json()
+  assert.ok(info.features.includes("emulator"))
+  const list = (await rpc("emu.list", {})).result
+  assert.equal(list.avdslim, true)
+  assert.deepEqual(list.avds, [{ name: "Medium_Phone", serial: "emulator-5554" }, { name: "Pixel_9", serial: null }])
+  assert.match((await rpc("emu.start", { avd: "Medium_Phone" })).error.message, /already running/)
+  assert.match((await rpc("emu.start", { avd: "Nope; rm -rf" })).error.message, /No AVD/)
+  assert.equal((await rpc("emu.start", { avd: "Pixel_9", headless: true, ram: 2048 })).result.via, "avdslim")
+  await until(() => states.includes("booted"), `boots: ${states}`)
+  assert.ok(logs.includes("avdslim start Pixel_9 --ram=2048 --headless"), `AVD named explicitly: ${logs}`)
+  assert.match((await rpc("emu.stop", { serial: "10DE5B08CN0006A" })).error.message, /Only emulators/)
   ws.close()
 })

@@ -16,7 +16,7 @@ Kotlin · Jetpack Compose · Material 3 · dark theme · minSdk 26.
 | Code | **CodeMirror 6 editor that saves to your Mac**: tabs with dirty dots, undo per tab, syntax highlighting (TS/TSX, JS/JSX, JSON, Kotlin + Gradle KTS, Markdown, CSS, YAML, XML), bracket matching + auto-close, auto-indent, soft wrap, find/replace, go to line, coding key row above the keyboard, hardware shortcuts (Ctrl+S/P/F/G, Ctrl+/), "Go to file" palette, recent files. Saves are verified by SHA-256; if the file changed on the Mac you get **Reload / Overwrite / Show diff** instead of a silent overwrite |
 | Code (tablet / landscape) | File tree │ editor │ Terminal/Git bottom panel side by side (≥ 720 dp); right-hand slot reserved for a live emulator (≥ 1000 dp) |
 | Git | Branch + "N changed" in the editor, Changes list with per-file diffs, **Commit…** (`git add -A && git commit`, no push) |
-| Mac helper (optional) | Run `helper/` on the Mac and pair in Settings → **TypeScript completions, errors, go to definition, project-wide rename, find references, and Prettier/ESLint on save** in the editor, plus **Metro start/stop/reload with live logs** for React Native / Expo projects and **Android devices: build & run, wireless connect, logcat** (the emulator view is next) |
+| Mac helper (optional) | Run `helper/` on the Mac and pair in Settings → **TypeScript completions, errors, go to definition, project-wide rename, find references, and Prettier/ESLint on save** in the editor, plus **Metro start/stop/reload with live logs** for React Native / Expo projects and **Android devices: build & run, wireless connect, logcat, a live device screen with touch, and starting/stopping the Mac's emulators (avdslim-aware)** |
 | Sessions | List/resume, new (opens it immediately), rename (long-press), delete, per-session folder picker, git branch bar (switch/create), status dots, tokens + cost |
 | Chat | Live streaming (SSE, incremental), markdown + code highlighting, reasoning + tool cards, todos panel, copy message (long-press), queued indicator, image/file attachments (inline; tap an image to zoom) |
 | Agents/models | Pick agent + model per message, plus the model's reasoning variant (low/high/max, when offered); selection remembered **per session** (last pick becomes the default for new sessions); per-message model name |
@@ -186,7 +186,10 @@ Screens use standard Android navigation animations (slide in/out on push, revers
   **Connect…** — wireless debugging, prefilled with this phone's Tailscale address). **Run** builds and
   installs the app on the chosen device (`expo run:android`, `react-native run-android` or
   `./gradlew installDebug`) with the output streamed; **Logcat** shows the device log (App JS, Errors
-  or All, with a filter).
+  or All, with a filter). **Screen** shows the chosen device live (scrcpy on the Mac:
+  `brew install scrcpy`) — tap, swipe, Back/Home/Recents/Dev menu; on a tablet it fills the right-hand
+  column. The device list also has **Emulators on the Mac**: Start an AVD (headless, cold boot, RAM,
+  and avdslim's slimming when `avdslim` is installed) or Stop a running one.
 - **Files search** — the search box switches between **Files** (fuzzy names) and **Content** (grep).
 - **Terminal** — open from the Sessions screen. Two renderers, switch with the **⋮** in the top bar:
   **xterm.js** (default — real xterm behaviour: scrollback you can fling, mouse clicks/scroll in

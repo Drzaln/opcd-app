@@ -319,7 +319,7 @@ V2 differences that matter (verified against 2.0.26):
   `git diff HEAD` (untracked: `--no-index /dev/null`) rendered with `DiffLines.parsePatch`; Commit… runs
   `git add -A && git commit -q -m '<quoted>'`. No push.
 
-## Phase 2 — optional Mac helper (slices 1–3 built: pairing + TypeScript + format on save, Metro, adb)
+## Phase 2 — optional Mac helper (slices 1–4 built: pairing + TypeScript + format on save, Metro, adb, device screen + emulators)
 
 **Built (branch `feat/mac-helper`):** `helper/` (Node/TS, esbuild → `dist/helper.mjs`, `npm start`,
 `npm test`; see `helper/README.md` for setup, security and the wire protocol).
@@ -394,7 +394,7 @@ separate round trips).
   the screen — `MetroSheet` now skips the partial state. Not tried: a real RN app on a device
   fetching the bundle (needs adb — next slice).
 
-**Slice 3 — adb: devices, build & run, logcat (`tuc.4`, branch `feat/mac-helper`, uncommitted):**
+**Slice 3 — adb: devices, build & run, logcat (`tuc.4`, commit `80933de`):**
 - **Helper** (`helper/src/adb.ts`): adb found via `OC_HELPER_ADB` (tests), `ANDROID_HOME` /
   `ANDROID_SDK_ROOT`, `~/Library/Android/sdk`, Homebrew, PATH; `/helper/info` adds the `adb` feature
   only when it exists. `adb.devices` (parsed `devices -l`: serial, state, model, usb/wifi/emulator),
@@ -445,7 +445,73 @@ separate round trips).
   removed afterwards. Not tried: wireless pairing (Android's wireless debugging needs the phone on
   Wi-Fi), the vivo's floating assistant bubble can cover the sheet's Run button (tap just above it).
 
-**Next slice:** emulator screen (`tuc.5`). Design notes below still apply.
+**Slice 4 — live device screen + emulators on the Mac (`tuc.5`, branch `feat/mac-helper`):**
+- **Screen, helper** (`helper/src/screen.ts`): scrcpy-server from the user's Homebrew `scrcpy`
+  (`SCRCPY_SERVER_PATH` or `/opt/homebrew/share/scrcpy/scrcpy-server`; version from `scrcpy
+  --version`, the server insists on an exact match) — chosen over the emulator's gRPC because it works
+  for emulators *and* phones and needs no npm dependency. `screen.start {serial, maxSize 800,
+  bitRate 1.5 Mbps, maxFps 30}` pushes the jar, `adb forward`s a random `scrcpy_<scid>` socket, starts
+  `app_process … Server <ver> tunnel_forward=true audio=false control=true video_codec=h264`, connects
+  video then control (the server sends its header only after **both** are connected), reads the
+  device name, codec id and the first session packet, then relays H.264 packets as binary WebSocket
+  frames `[kind:1][pts:8][data]` (1 config, 2 frame, 3 key frame). **scrcpy 5 stream format** (found
+  by probing — differs from 3.x): after the codec id, a 12-byte *session* packet (bit 63 set:
+  `[flags][width][height]`, again on every rotation), and media packets use bit 62 = config, bit 61 =
+  key frame. Touch (`INJECT_TOUCH_EVENT`, 32 bytes) and keys (`INJECT_KEYCODE` back/home/recents/menu)
+  go back on the control socket, coordinates scaled from the app's view to the current session size.
+  Back-pressure: if the phone's socket has > 2 MB buffered, reading pauses (frames aren't dropped — a
+  dropped H.264 frame smears until the next key frame). One screen per connection; `stop()` landing
+  mid-`start()` aborts at every step (a stopped session once went on to spawn an orphan server).
+- **Screen, app** (`ui/editor/Screen.kt`): `HelperManager.binaryListener` (OkHttp reader thread, in
+  order) → `H264Decoder` (MediaCodec `video/avc` on the SurfaceView's surface, low-latency on API 30+,
+  rebuilt when a new config packet arrives after rotation; output-format crop → aspect ratio). The
+  stream runs while the surface exists and a device is picked; touches are taken in the *Initial*
+  pointer pass (otherwise the bottom sheet turns a swipe into a sheet drag); toolbar Back · Home ·
+  Recents · Dev menu · Stop. Shown as a **Screen** tab in the Android panel/sheet, and in the wide
+  layout's reserved right column (≥ 1000 dp). A USB/Wi-Fi device whose model matches `Build.MODEL` is
+  "the phone you're holding": the stream doesn't auto-start there.
+- **Emulators** (`helper/src/emu.ts`, asked for mid-slice: *"select emulator with configurable
+  avdslim"*): `emu.list` (AVDs from `emulator -list-avds` + which serial each runs as, via `adb emu avd
+  name`; whether `avdslim` is installed), `emu.start {avd, headless, cold, ram, slim}` → `avdslim start
+  <avd> --ram=… [--headless] [--cold] [--no-slim]` (always naming the AVD — without one avdslim picks
+  the first; with no avdslim: `emulator -avd … -memory … -no-audio -no-boot-anim [-no-window]
+  [-no-snapshot-load]`), boot confirmed through `sys.boot_completed` (avdslim `--no-slim` exits right
+  after spawning), `emu.stop` → `avdslim stop` with stdin closed (it asks "save a Golden Snapshot?
+  [y/N]"; with stdin open it waited forever) and success only once adb no longer lists the serial.
+  Emulator commands get the account's real home/`ANDROID_AVD_HOME`, whatever HOME the helper runs
+  with. App: the device dropdown lists "Emulators on the Mac · avdslim" — **Start <AVD>…** (dialog:
+  Headless, Cold boot, Slim after boot, RAM; remembered for the session) or **Stop <AVD>**; a booted
+  emulator is selected automatically.
+- **Verified:** `npm test` (8 tests: scrcpy control-message layout, the scrcpy 5 packet parser incl.
+  session packets across chunk boundaries, emu list/start/stop with a fake emulator + fake avdslim, plus
+  everything from earlier slices). Real scrcpy 5.0.1 against a headless emulator: 358×800 session,
+  config + key frame + frames, Home key injected; repeated start/stop and a client dropping mid-start
+  leave no server, forward or `app_process` behind. Emulator (Medium_Phone running the app, loopback
+  helper): dropdown listed the three AVDs; **Start Redmi_Note_13_pro** through avdslim (headless, slim
+  off for the test) → emulator-5556 → **Screen** showed its live home screen; a tap opened Chrome on it,
+  a swipe opened its app drawer (after the Initial-pass fix), Home/Stop worked; closing the sheet
+  stopped the stream; `emu.start`/`emu.stop` round trip (boot ~6 s from snapshot, stop 2.5 s, gone from
+  adb). Fixed on the way: decoder thread crashed on `InterruptedException` at stop.
+- **Incidents (test environment):** `avdslim start --help` doesn't print help — it launched
+  Medium_Phone and began slimming it; undone with `avdslim restore emulator-5554` (50 packages and the
+  changed settings restored). Afterwards the emulator showed Google's setup "Sign in with ease" screen
+  once (left untouched, pressed Home).
+- **Physical phone** (vivo I2219, release build, real helper over Tailscale): dropdown → **Start
+  Medium_Phone** (headless, slim off) through avdslim → "Medium_Phone is up" after ~9 s and selected;
+  **Screen** streamed the headless emulator to the phone over Tailscale; a swipe opened its app drawer,
+  Home worked; **Stop Medium_Phone** from the phone shut it down. Bugs found there and fixed: tapping
+  the stream's Stop left the scrcpy server running — `onDispose` read the `wanted` state delegate at
+  dispose time (already false) and skipped `screen.stop`; now the flag is captured when the effect
+  starts. Hardening from the same hunt: the app always sends `screen.stop`; the helper keeps one
+  session per device across connections (a new start replaces an orphan) and pings every WebSocket
+  every 20 s, terminating dead ones (a half-open Tailscale socket can't keep a stream alive); session
+  start/stop are logged with the server's pid. After the fix: live 1 server → Stop 0 → closing the
+  sheet 0.
+- **Not verified:** the ≥ 1000 dp right-column placement on a real tablet (same composable as the tab;
+  no tablet-width AVD here), rotation of the mirrored device, streaming over 4G (tested over Wi-Fi +
+  Tailscale), a phone as the mirrored device, avdslim's slimming path through the app (only `--no-slim` was run).
+
+**Phase 2 is complete** (all five `tuc` slices). Design notes below are kept for reference.
 
 ### Phase 2 design notes
 
