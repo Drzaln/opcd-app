@@ -1,7 +1,7 @@
 // scrcpy protocol pieces: control messages and the video packet splitter.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { touchMessage, keyMessage, PacketParser, framePacket, KIND_CONFIG, KIND_FRAME, KIND_KEYFRAME } from "../dist/screen-test.mjs"
+import { touchMessage, keyMessage, PacketParser, framePacket, KIND_CONFIG, KIND_FRAME, KIND_KEYFRAME } from "../dist/test/screen.js"
 
 test("touch and key control messages match scrcpy's layout", () => {
   const t = touchMessage(0, 7, 100, 200, 720, 1600)
@@ -41,4 +41,23 @@ test("packet parser (scrcpy 5): session, config, key and plain frames across chu
   assert.deepEqual(got, [["session", 358, 800], [KIND_CONFIG, 0n, 5], [KIND_KEYFRAME, 1000n, 7], [KIND_FRAME, 2000n, 5], ["session", 800, 358]])
   const f = framePacket(KIND_KEYFRAME, 1000n, Buffer.from([9, 9]))
   assert.deepEqual([f[0], f.readBigUInt64BE(1), f.length], [KIND_KEYFRAME, 1000n, 11])
+})
+
+test("iOS simulator stream (idb): an access unit → config once, then key frame / frame", async () => {
+  const { nalUnits, AccessUnitPacker } = await import("../dist/test/simscreen.js")
+  const sc4 = Buffer.from([0, 0, 0, 1]), sc3 = Buffer.from([0, 0, 1])
+  const sps = Buffer.concat([sc4, Buffer.from([0x27, 0x64, 0x00, 0x32])])
+  const pps = Buffer.concat([sc4, Buffer.from([0x28, 0xee, 0x3c, 0x80])])
+  const idr = Buffer.concat([sc3, Buffer.from([0x25, 0x88, 0x84, 0x00, 0x11])])
+  const slice = Buffer.concat([sc4, Buffer.from([0x21, 0x9a, 0x00, 0x22])])
+  assert.equal(nalUnits(Buffer.concat([sps, pps, idr])).length, 3)
+  const out = []
+  const packer = new AccessUnitPacker((kind, data) => out.push([kind, data.toString("hex")]))
+  packer.push(Buffer.concat([sps, pps, idr]))
+  packer.push(slice)
+  packer.push(Buffer.concat([sps, pps, idr])) // periodic key frame repeats SPS/PPS: no new config
+  assert.deepEqual(out.map(([k]) => k), [1, 3, 2, 3])
+  assert.equal(out[0][1], Buffer.concat([sps, pps]).toString("hex"))
+  assert.equal(out[1][1], idr.toString("hex"))
+  assert.equal(out[2][1], slice.toString("hex"))
 })

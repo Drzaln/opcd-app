@@ -77,6 +77,7 @@ else if (cmd === "shutdown") fs.writeFileSync(f, JSON.stringify(booted.filter((u
 `
 const fakeXcrun = join(home, "fake-xcrun")
 const fakeSimslim = join(home, "fake-simslim")
+const fakeCompanion = join(home, "fake-idb-companion")
 const fakeEmulator = join(home, "fake-emulator")
 const fakeAvdslim = join(home, "fake-avdslim")
 
@@ -87,6 +88,8 @@ before(async () => {
   chmodSync(fakeEmulator, 0o755)
   writeFileSync(fakeAvdslim, "#!/bin/sh\necho \"avdslim $*\"\ntouch \"$OC_TEST_HOME/pixel9-started\"\n")
   chmodSync(fakeAvdslim, 0o755)
+  writeFileSync(fakeCompanion, "#!/bin/sh\necho 'idb_companion: simulator not booted' >&2\nexit 3\n")
+  chmodSync(fakeCompanion, 0o755)
   writeFileSync(fakeXcrun, FAKE_XCRUN)
   chmodSync(fakeXcrun, 0o755)
   writeFileSync(fakeSimslim, FAKE_SIMSLIM)
@@ -96,7 +99,7 @@ before(async () => {
   writeFileSync(join(project, "src", "a.ts"), "export const greeting = 'hi'\nexport function shout(s: string) { return s.toUpperCase() }\n")
   writeFileSync(join(project, "src", "b.ts"), "import { shout } from './a'\nconst n: number = 'oops'\nshout('x').toLower\n")
   helper = spawn(process.execPath, ["dist/helper.mjs", "--port", String(port), "--host", "127.0.0.1"], {
-    env: { ...process.env, HOME: home, OC_HELPER_AUTO_APPROVE: "1", OC_HELPER_ADB: fakeAdb, OC_HELPER_EMULATOR: fakeEmulator, OC_HELPER_AVDSLIM: fakeAvdslim, OC_HELPER_XCRUN: fakeXcrun, OC_HELPER_SIMSLIM: fakeSimslim, OC_TEST_HOME: home },
+    env: { ...process.env, HOME: home, OC_HELPER_AUTO_APPROVE: "1", OC_HELPER_ADB: fakeAdb, OC_HELPER_EMULATOR: fakeEmulator, OC_HELPER_AVDSLIM: fakeAvdslim, OC_HELPER_XCRUN: fakeXcrun, OC_HELPER_SIMSLIM: fakeSimslim, OC_HELPER_IDB_COMPANION: fakeCompanion, OC_TEST_HOME: home },
     stdio: ["ignore", "pipe", "pipe"],
   })
   await new Promise((resolve, reject) => {
@@ -396,7 +399,9 @@ test("ios simulators: list, start slim / stock through simslim, stop, log, build
     ["error", "05:44:00 E MyApp: [com.apple.network:path] boom"],
   ])
   await rpc("logcat.stop", { id })
-  assert.match((await rpc("screen.start", { serial: SIM_A })).error.message, /iOS simulators/)
+  // The live screen goes through idb's companion; this stand-in fails the way a missing simulator does.
+  assert.ok((await (await fetch(base + "/helper/info")).json()).features.includes("simscreen"))
+  assert.match((await rpc("screen.start", { serial: SIM_A })).error.message, /idb_companion exited \(3\): idb_companion: simulator not booted/)
 
   // Build & run: a simulator UDID picks run:ios (no adb reverse).
   const app = mkdtempSync(join(tmpdir(), "oc-helper-ios-"))

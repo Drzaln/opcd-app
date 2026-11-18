@@ -12,7 +12,7 @@ the helper adds what opencode doesn't:
 | ✅ | **Android** — the Mac's adb devices, wireless pair/connect, build & run on a device, logcat |
 | ✅ | **Device screen** — live H.264 view of any adb device (scrcpy) with touch and Back/Home/Recents/Dev menu |
 | ✅ | **Emulators** — list the Mac's AVDs, start (through `avdslim` when installed) and stop them |
-| ✅ | **iOS simulators** — list, start (slim or stock through `simslim` when installed, else `simctl`), stop; build & run (`expo run:ios` / `react-native run-ios`); the simulator's log |
+| ✅ | **iOS simulators** — list, start (slim or stock through `simslim` when installed, else `simctl`), stop; build & run (`expo run:ios` / `react-native run-ios`); the simulator's log; live screen with touch (idb) |
 
 The app only shows these features when the helper answers; everything else works without it.
 
@@ -41,6 +41,7 @@ Optional tools (each feature appears in the app only when its tool is found):
 | `avdslim` on PATH (e.g. Homebrew) | Low-memory emulator starts + slimming |
 | Xcode (with an iOS simulator runtime) | iOS simulators, Run on them, their log |
 | `brew install mobai-app/tap/simslim` | Slim iOS simulators (~4× less memory) |
+| `brew install facebook/fb/idb-companion` | Live iOS simulator screen with touch |
 
 Options: `--port 4097` (default), `--host <ip>` (repeatable; default = Tailscale IP + 127.0.0.1).
 
@@ -122,7 +123,7 @@ emu.list                   → {avds: [{name, serial}], avdslim, emulator, start
 emu.start   {avd, headless?, cold?, ram?, slim?} → {avd, state, via}   emu.stop {serial}
 sim.list                   → {sims: [{udid, name, runtime, state, booted, slim, memory}], simslim, xcode, starting[]}
 sim.start   {udid, slim?, window?} → {udid, name, state, via}   sim.stop {udid}
-screen.start {serial, maxSize?, bitRate?, maxFps?} → {width, height, deviceName}
+screen.start {serial, maxSize?, bitRate?, maxFps?} → {width, height, deviceName}   (a UDID → idb)
 screen.input {action, pointer, x, y, w, h} | {key: back|home|recents|menu|power}
 screen.resize {width, height}    screen.stop
 metro.status {root, tail?} → {state, kind, command, port, errors, detected, detectError, lines[]}
@@ -158,7 +159,20 @@ localhost; `LANG` defaults to UTF-8 for CocoaPods). The log is `simctl spawn <ud
 --style compact` with a predicate — App JS: `subsystem == "com.facebook.react.log"` or the app's
 errors; Errors: errors/faults from processes in an installed app bundle; All: everything those
 processes log — preceded by the last 5 minutes from `log show`, compacted to `HH:MM:SS L Process: …`.
-The live screen isn't available for simulators yet (`screen.start` refuses a UDID).
+**Simulator screen** (feature `simscreen`, when `idb_companion` is found): `screen.start` with a UDID
+runs `idb_companion --udid <udid> --grpc-domain-sock <tmp>.sock --terminate-offline true` (one per
+stream, killed on stop) and talks gRPC to it with `@grpc/grpc-js` and `proto/idb.proto` (the subset of
+idb's protocol the helper uses — describe, hid, video_stream — field numbers unchanged). Video:
+`video_stream` H.264 at `scale_factor = maxSize / longest side`, `avg_bitrate = bitRate`; each message
+is one access unit, split into a config packet (SPS + PPS, only when they change) and a frame (kind 3
+with an IDR slice), so the app's decoder is the same as for scrcpy; back-pressure pauses the gRPC
+stream. Input goes over one long-lived `hid` stream, in points (`describe` gives the point size): touch
+down/move = `press DOWN` at the point, up = `press UP`, one finger (the first pointer). Keys: `home` →
+HOME button, `recents` → HOME twice 120 ms apart (the app switcher — a swipe from the bottom edge over
+HID only scrolls the app), `back` → a drag in from the left edge, `menu` → `shake` (React Native's dev
+menu). Measured against AXe's JPEG stream (Xcode 27, iPhone 17 sim): a screen change reached idb's
+stream 220–490 ms after the trigger vs 600–670 ms for AXe, and a static screen costs ~0–40 KB/s vs
+~1.1 MB/s.
 
 **Android** needs adb (Android platform-tools; found via `ANDROID_HOME`, `~/Library/Android/sdk`,
 Homebrew or PATH) — without it the helper doesn't advertise `adb` and the app hides the panel. Build &
@@ -189,5 +203,7 @@ The project's own TypeScript is used when it has one; otherwise the bundled Type
 ```bash
 npm test   # pairing, auth refusal, LSP completions/diagnostics/definition through the relay, format,
            # Metro detect/start/logs/reload/stop against a stand-in `react-native start`,
-           # adb devices/connect/pair, build & run and logcat against a fake adb + gradlew
+           # adb devices/connect/pair, build & run and logcat against a fake adb + gradlew,
+           # emulators (fake emulator + avdslim), iOS simulators (fake xcrun + simslim + idb_companion),
+           # scrcpy control messages / packet parser, idb access-unit packing
 ```

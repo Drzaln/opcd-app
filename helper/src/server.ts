@@ -19,6 +19,7 @@ import { formatText, insideRoot } from "./format.ts"
 import { MetroManager } from "./metro.ts"
 import { ScreenSession, findScrcpyServer } from "./screen.ts"
 import { EmulatorManager, listAvds, findEmulator } from "./emu.ts"
+import { SimScreenSession, findIdbCompanion } from "./simscreen.ts"
 import { SimulatorManager, SimLogStream, listSims, findXcrun, isSimulator, type SimLogMode } from "./sim.ts"
 import { RunManager, LogcatStream, listDevices, pair, connect, disconnect, reverse, checkSerial, findAdb, type LogcatMode } from "./adb.ts"
 
@@ -28,7 +29,8 @@ export const FEATURES = ["pair", "lsp", "format", "metro"]
 
 /** Features this Mac can offer right now ("adb" only when platform-tools are installed, "ios" with Xcode). */
 export function features(): string[] {
-  const ios = findXcrun() ? ["ios"] : []
+  // "simscreen": the live screen of a simulator (idb's companion); the Screen tab needs "screen" or this.
+  const ios = findXcrun() ? ["ios", ...(findIdbCompanion() ? ["simscreen"] : [])] : []
   if (!findAdb()) return [...FEATURES, ...ios]
   return [...FEATURES, "adb", ...(findScrcpyServer() ? ["screen"] : []), ...(findEmulator() ? ["emulator"] : []), ...ios]
 }
@@ -38,7 +40,7 @@ export const metro = new MetroManager()
 /** Build & run per project root, also helper-owned. */
 export const runs = new RunManager()
 /** Live screens by device serial, across connections: a new start replaces any older stream. */
-const screensBySerial = new Map<string, ScreenSession>()
+const screensBySerial = new Map<string, ScreenSession | SimScreenSession>()
 
 /** Emulator starts (avdslim or the SDK emulator), helper-owned. */
 export const emulators = new EmulatorManager()
@@ -144,7 +146,7 @@ function onConnection(ws: WebSocket, deviceName: string) {
   // Logcat streams are views: they end with this connection.
   const logcats = new Map<string, LogcatStream | SimLogStream>()
   // One live screen per connection (binary frames on this socket).
-  let screen: ScreenSession | null = null
+  let screen: ScreenSession | SimScreenSession | null = null
 
   ws.on("message", async (raw) => {
     let msg: any
@@ -235,10 +237,10 @@ function onConnection(ws: WebSocket, deviceName: string) {
         case "screen.start": {
           screen?.stop()
           const serial = checkSerial(msg.params?.serial)
-          if (isSimulator(serial)) return fail("The live screen isn't available for iOS simulators yet")
+          if (isSimulator(serial) && !findIdbCompanion()) return fail("The live iOS screen needs idb on the Mac: brew install facebook/fb/idb-companion")
           // An older stream of this device (another phone, or a connection that died half-open).
           screensBySerial.get(serial)?.stop()
-          const session = new ScreenSession(
+          const session = new (isSimulator(serial) ? SimScreenSession : ScreenSession)(
             serial,
             (packet) => {
               if (ws.readyState !== ws.OPEN) return false

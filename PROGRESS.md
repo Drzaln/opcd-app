@@ -565,8 +565,47 @@ Slice 1 = everything except the live screen.
   build itself was verified on the Mac above.
 - **Not verified:** `react-native run-ios` (CLI path; only Expo was built), Simulator window option,
   a Mac without simslim (simctl path is covered by code only), a Mac without adb (panel with iOS only).
-- **Next (slice 2):** the live screen — needs a tool that streams the simulator's video and injects
-  touches (`idb video-stream --format h264` + `idb ui tap/swipe`, or AXe); check which works with Xcode 27.
+- Committed as `3c1780f`.
+
+### iOS simulators — slice 2: live screen (`opencode-android-app-254`)
+
+- **Tool choice (measured, user asked for the lowest latency; both installed with their OK):** AXe
+  2.0.4 streams only JPEG for simulators (H.264 is physical-device only): ~19 fps, 58 KB/frame at scale
+  0.5 even on a static screen (~1.1 MB/s). idb-companion 1.7.8 H.264 via the Python client works on
+  Xcode 27: static screen ~0–40 KB/s. Same trigger, both streams at once: the change reached idb's stream
+  220 / 490 ms after the trigger, AXe's 668 / 595 ms. Taps as CLI processes: `axe tap` 0.4 s, `idb ui tap`
+  0.25 s. Chosen: talk gRPC to `idb_companion` from the helper (no Python, no CLI per event) — persistent
+  `hid` stream for touches, `video_stream` for H.264. AXe and the scratch Python venv aren't used.
+- **Helper `simscreen.ts`:** `findIdbCompanion` (`OC_HELPER_IDB_COMPANION` for tests) → feature
+  `simscreen`. `SimScreenSession` (same interface as `ScreenSession`, chosen in `screen.start` for a
+  UDID, shares `screensBySerial`): spawns `idb_companion --udid … --grpc-domain-sock <tmp>.sock
+  --terminate-offline true`, waits for the socket, `describe` → points + pixels, `video_stream`
+  H.264 (scale = maxSize / longest side → 368×800 for an iPhone 17, avg_bitrate = bitRate), `hid` stream.
+  Each gRPC payload is exactly one access unit (checked: first = SPS, PPS, IDR; then single slices), so
+  `AccessUnitPacker` emits config (SPS + PPS when changed) + frame/key frame — the app's H264Decoder is
+  unchanged. Touch: one finger (first pointer), down/move = `press DOWN`, up = `press UP`, in points.
+  Keys: home = HOME; recents = HOME twice (a bottom-edge swipe over HID only scrolled the app — tried
+  slow and fast); back = drag in from the left edge (works in navigation stacks); menu = shake. If the
+  companion dies while starting, its exit code + last stderr line is the error (not "Screen stopped").
+  Deps added, pinned: `@grpc/grpc-js` 1.14.7, `@grpc/proto-loader` 0.8.1; `helper/proto/idb.proto` is
+  the trimmed MIT proto (describe, hid, video_stream).
+- **App:** `ScreenController.available` = `screen` or `simscreen`; `supports(serial)` picks the right
+  feature per device; the Screen tab streams simulators; buttons' descriptions say Back (edge swipe) /
+  App switcher / Dev menu (shake) for iOS; missing-tool messages name scrcpy or idb-companion.
+- **Tests:** helper 10/10 — new `AccessUnitPacker` unit test (config once, IDR → kind 3, slice → 2,
+  repeated SPS/PPS not re-sent); the iOS e2e test runs a stand-in companion that exits 3 and checks the
+  error carries its reason; `simscreen` advertised.
+- **Verified on the Mac** (loopback helper, throwaway slim simulator "OC Screen Test"): stream 368×800,
+  1 config + 2 key frames + 166 frames ≈ 290 KB in 6 s; tap opened Settings, drag scrolled it, Home,
+  app switcher (double Home), Back out of General; `idb_companion` gone after `screen.stop`.
+- **Verified on the physical phone** (vivo I2219, release build, helper restarted by request on the
+  Tailscale IP): picked "OC Screen Test · iOS · slim · 3.3 GB" → Screen showed Settings live; tapping
+  General on the phone opened it, Back returned, a swipe on the stream scrolled the list, Home and the
+  app switcher worked; Stop → companion gone on the Mac, Show again → new companion, closing the sheet
+  → gone.
+- **Not verified:** the shake → React Native dev menu (no RN app running on the simulator during the
+  phone test), rotation, iPad simulators, streaming over 4G (Wi-Fi + Tailscale only), the ≥ 1000 dp
+  right column with a simulator.
 
 ### Phase 2 design notes
 

@@ -224,8 +224,12 @@ class ScreenController(private val scope: CoroutineScope, private val helper: He
         if (_ui.value.state == "live") helper.send("screen.input", buildJsonObject { put("key", name) })
     }
 
+    /** Whether the helper can stream this device: scrcpy for adb devices, idb for iOS simulators. */
+    fun supports(serial: String): Boolean =
+        (if (isSimulatorSerial(serial)) "simscreen" else "screen") in HelperManager.features(helper.state.value)
+
     companion object {
-        fun available(state: HelperState) = "screen" in HelperManager.features(state)
+        fun available(state: HelperState) = HelperManager.features(state).let { "screen" in it || "simscreen" in it }
     }
 }
 
@@ -244,16 +248,18 @@ fun DeviceScreen(screen: ScreenController, serial: String?, deviceLabel: String?
         val s = surface
         // Captured now: `wanted` is a state delegate, so reading it inside onDispose would see the
         // *new* value (false after tapping Stop) and skip telling the helper to stop.
-        val active = serial != null && s != null && wanted && !isSimulatorSerial(serial)
+        val active = serial != null && s != null && wanted && screen.supports(serial)
         if (active) screen.start(serial!!, s!!)
         onDispose { if (active) screen.stop() }
     }
     Column(modifier.background(c.bg)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
-            IconButton(onClick = { screen.key("back") }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = c.textSecondary) }
+            // On an iOS simulator: Back = swipe from the left edge, Recents = app switcher, Dev menu = shake.
+            val ios = serial != null && isSimulatorSerial(serial)
+            IconButton(onClick = { screen.key("back") }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = if (ios) "Back (edge swipe)" else "Back", tint = c.textSecondary) }
             IconButton(onClick = { screen.key("home") }) { Icon(Icons.Outlined.Circle, contentDescription = "Home", tint = c.textSecondary) }
-            IconButton(onClick = { screen.key("recents") }) { Icon(Icons.Outlined.CropSquare, contentDescription = "Recent apps", tint = c.textSecondary) }
-            IconButton(onClick = { screen.key("menu") }) { Icon(Icons.Outlined.Menu, contentDescription = "Dev menu", tint = c.textSecondary) }
+            IconButton(onClick = { screen.key("recents") }) { Icon(Icons.Outlined.CropSquare, contentDescription = if (ios) "App switcher" else "Recent apps", tint = c.textSecondary) }
+            IconButton(onClick = { screen.key("menu") }) { Icon(Icons.Outlined.Menu, contentDescription = if (ios) "Dev menu (shake)" else "Dev menu", tint = c.textSecondary) }
             IconButton(onClick = { wanted = !wanted }) {
                 Icon(Icons.Outlined.StopCircle, contentDescription = if (wanted) "Stop screen" else "Show screen", tint = if (wanted) c.errorText else c.textSecondary)
             }
@@ -299,7 +305,8 @@ fun DeviceScreen(screen: ScreenController, serial: String?, deviceLabel: String?
                 )
                 val overlay = when {
                     serial == null -> "Pick a device (or start an emulator) to see its screen."
-                    isSimulatorSerial(serial) -> "The live screen isn't available for iOS simulators yet. Turn on \"Show the Simulator window\" to see it on the Mac."
+                    !screen.supports(serial) -> if (isSimulatorSerial(serial)) "The live iOS screen needs idb on the Mac: brew install facebook/fb/idb-companion, then restart the helper."
+                        else "The live screen needs scrcpy on the Mac: brew install scrcpy, then restart the helper."
                     !wanted && isThisPhone -> "${deviceLabel ?: "This device"} is the phone you're holding — mirroring it shows this screen inside itself."
                     !wanted -> "Screen stopped."
                     ui.state == "starting" -> "Connecting to ${deviceLabel ?: serial}…"
@@ -309,7 +316,7 @@ fun DeviceScreen(screen: ScreenController, serial: String?, deviceLabel: String?
                 if (overlay != null) {
                     Column(Modifier.align(Alignment.Center).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(overlay, color = androidx.compose.ui.graphics.Color.White, fontSize = 12.sp, textAlign = TextAlign.Center)
-                        if (serial != null && !isSimulatorSerial(serial) && (!wanted || ui.state == "error")) TextButton(onClick = { wanted = true; attempt++ }) { Text(if (ui.state == "error") "Retry" else "Show screen") }
+                        if (serial != null && screen.supports(serial) && (!wanted || ui.state == "error")) TextButton(onClick = { wanted = true; attempt++ }) { Text(if (ui.state == "error") "Retry" else "Show screen") }
                     }
                 }
             }

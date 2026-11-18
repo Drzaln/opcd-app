@@ -300,7 +300,7 @@ private fun WideCode(
                     )
                 } else Box(Modifier.width(300.dp).fillMaxHeight().background(c.surface), contentAlignment = Alignment.Center) {
                     Text(
-                        "Device screen: run the Mac helper with adb and scrcpy (brew install scrcpy)",
+                        "Device screen: run the Mac helper with scrcpy (Android) or idb-companion (iOS simulators)",
                         fontSize = 12.sp,
                         color = c.textSecondary,
                         maxLines = 2,
