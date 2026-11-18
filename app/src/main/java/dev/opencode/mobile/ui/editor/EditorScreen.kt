@@ -198,6 +198,7 @@ private fun EditorAppBar(
         },
         actions = {
             IconButton(onClick = { vm.showPalette(true) }) { Icon(Icons.Outlined.Search, contentDescription = "Go to file") }
+            MetroAction(appVm = appVm, vm = vm)
             EditorOverflowMenu(vm = vm, onViewReadOnly = onViewReadOnly)
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = OcTheme.colors.bg),

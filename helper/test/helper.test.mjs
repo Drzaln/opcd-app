@@ -2,7 +2,7 @@
 import { test, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs"
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import WebSocket from "ws"
@@ -37,6 +37,7 @@ test("info + pairing", async () => {
   const info = await (await fetch(base + "/helper/info")).json()
   assert.equal(info.name, "opencode-mobile-helper")
   assert.ok(info.features.includes("lsp"))
+  assert.ok(info.features.includes("metro"))
   const start = await (await post("/helper/pair/start", { device: "Test phone" })).json()
   assert.match(start.code, /^\d{4}$/)
   const res = await post("/helper/pair/wait", { requestId: start.requestId })
@@ -113,5 +114,82 @@ test("lsp: completions + diagnostics through the relay, and format", async () =>
   assert.equal(formatted.text, "const a = { b: 1 };\n")
   assert.deepEqual(formatted.steps, ["prettier"])
   assert.match((await rpc("format", { root: project, path: "../evil.ts", text: "x" })).error.message, /outside/)
+  ws.close()
+})
+
+// A stand-in for `react-native start`: answers /status and /reload like Metro, repaints a progress
+// line with \r, and reports a resolve error on stderr.
+const FAKE_METRO = `#!/usr/bin/env node
+const http = require("http")
+const port = Number(process.argv[process.argv.indexOf("--port") + 1])
+http.createServer((req, res) => {
+  if (req.url === "/status") return res.end("packager-status:running")
+  if (req.url === "/reload") { console.log("reload received"); return res.end("OK") }
+  res.statusCode = 404; res.end()
+}).listen(port, "127.0.0.1", () => {
+  console.log("\\u001b[1mWelcome to Metro\\u001b[22m on " + port + " in " + process.cwd())
+  process.stdout.write("BUNDLE  ./index.js 10.0%\\rBUNDLE  ./index.js 55.0%\\rBUNDLE  ./index.js 100.0%\\n")
+  console.error("error: Unable to resolve module ./Missing from App.tsx")
+})
+process.on("SIGTERM", () => { console.log("bye"); process.exit(0) })
+`
+
+test("metro: detect, start, logs, reload, stop", async () => {
+  const rn = mkdtempSync(join(tmpdir(), "oc-helper-rn-"))
+  writeFileSync(join(rn, "package.json"), JSON.stringify({ name: "app", scripts: { start: "react-native start" }, dependencies: { "react-native": "0.76.0", react: "18.3.1" } }))
+  mkdirSync(join(rn, "node_modules", ".bin"), { recursive: true })
+  writeFileSync(join(rn, "node_modules", ".bin", "react-native"), FAKE_METRO)
+  chmodSync(join(rn, "node_modules", ".bin", "react-native"), 0o755)
+  const expo = mkdtempSync(join(tmpdir(), "oc-helper-expo-"))
+  writeFileSync(join(expo, "package.json"), JSON.stringify({ dependencies: { expo: "~52.0.0", "react-native": "0.76.0" } }))
+
+  const ws = await connect(token)
+  let nextId = 1
+  const waiting = new Map()
+  const logs = []
+  const states = []
+  ws.on("message", (raw) => {
+    const msg = JSON.parse(String(raw))
+    if (msg.id != null && waiting.has(msg.id)) { waiting.get(msg.id)(msg); waiting.delete(msg.id) }
+    else if (msg.method === "metro.log" && msg.params.root === rn) {
+      if (msg.params.replace && logs.length && logs[logs.length - 1].seq === msg.params.line.seq) logs[logs.length - 1] = msg.params.line
+      else logs.push(msg.params.line)
+    } else if (msg.method === "metro.status" && msg.params.root === rn) states.push(msg.params.state)
+  })
+  const rpc = (method, params) => new Promise((resolve) => { const id = nextId++; waiting.set(id, resolve); ws.send(JSON.stringify({ id, method, params })) })
+  const until = async (pred, what) => { for (let i = 0; i < 80 && !pred(); i++) await new Promise((r) => setTimeout(r, 100)); assert.ok(pred(), what) }
+
+  assert.equal((await rpc("metro.status", { root: expo })).result.detected, "npx expo start --port 8081")
+  assert.match((await rpc("metro.status", { root: project })).result.detectError, /No package.json/)
+  const web = mkdtempSync(join(tmpdir(), "oc-helper-web-"))
+  writeFileSync(join(web, "package.json"), JSON.stringify({ dependencies: { react: "18.3.1" } }))
+  assert.match((await rpc("metro.start", { root: web })).error.message, /Not a React Native/)
+  assert.match((await rpc("metro.start", { root: rn, port: 80 })).error.message, /port/)
+
+  const metroPort = 30000 + Math.floor(Math.random() * 9000)
+  const started = (await rpc("metro.start", { root: rn, port: metroPort })).result
+  assert.equal(started.state, "starting")
+  assert.equal(started.command, `npx react-native start --port ${metroPort}`)
+  await until(() => states.includes("running"), `state reaches running: ${states}`)
+  await until(() => logs.some((l) => l.level === "error"), "error line arrives")
+  const texts = logs.map((l) => l.text)
+  assert.ok(texts.some((t) => t === `Welcome to Metro on ${metroPort} in ${rn}` || t.startsWith("Welcome to Metro")), `ANSI stripped: ${texts}`)
+  assert.equal(texts.filter((t) => t.startsWith("BUNDLE")).length, 1, `progress collapsed into one line: ${texts}`)
+  assert.ok(texts.includes("BUNDLE  ./index.js 100.0%"))
+  assert.match(logs.find((l) => l.level === "error").text, /Unable to resolve module/)
+
+  // A second phone (or this one after a 4G drop) catches up from the buffer.
+  const status = (await rpc("metro.status", { root: rn })).result
+  assert.equal(status.state, "running")
+  assert.equal(status.errors, 1)
+  assert.ok(status.lines.some((l) => /Unable to resolve/.test(l.text)))
+
+  assert.equal((await rpc("metro.reload", { root: rn })).result.via, "http")
+  await until(() => logs.some((l) => l.text === "reload received"), "app reload reached Metro")
+
+  const stopped = (await rpc("metro.stop", { root: rn })).result
+  assert.equal(stopped.state, "stopped")
+  await until(() => logs.some((l) => l.text === "bye"), "Metro got SIGTERM")
+  assert.match((await rpc("metro.reload", { root: rn })).error.message, /isn't running/)
   ws.close()
 })

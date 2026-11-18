@@ -167,6 +167,8 @@ class EditorViewModel(
     val recentFiles: Flow<List<String>> get() = app.serverStore.recentFiles(server.id, projectDir())
 
     private val helper = app.helper
+    /** Metro for this project through the helper (Metro tab / sheet). */
+    val metro = MetroController(viewModelScope, helper) { writer.projectRoot(projectDir()) }
     private var webReady = false
     @Volatile private var lspSession: String? = null
     private var lspStarting = false

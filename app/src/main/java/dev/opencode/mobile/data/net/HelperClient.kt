@@ -86,8 +86,16 @@ class HelperManager(private val store: ServerStore) {
     val state: StateFlow<HelperState> = _state
 
     private val _notifications = MutableSharedFlow<JsonObject>(extraBufferCapacity = 512, onBufferOverflow = BufferOverflow.SUSPEND)
-    /** Server → app notifications (`lsp.message`, `lsp.exit`, …). */
+    /** Server → app notifications (`lsp.message`, `lsp.exit`, `metro.log`, …), in arrival order. */
     val notifications: SharedFlow<JsonObject> = _notifications
+
+    // One queue + one forwarder keeps socket order. (A `launch { emit() }` per message does not: on a
+    // multi-threaded dispatcher those coroutines race, which shuffled Metro log lines.)
+    private val incoming = kotlinx.coroutines.channels.Channel<JsonObject>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+
+    init {
+        scope.launch { for (msg in incoming) _notifications.emit(msg) }
+    }
 
     private var server: ServerConfig? = null
     private var loop: Job? = null
@@ -183,8 +191,7 @@ class HelperManager(private val store: ServerStore) {
                 if (id != null) {
                     pending.remove(id)?.complete(msg)
                 } else {
-                    // Suspends (never drops) so LSP traffic keeps its order under bursts.
-                    scope.launch { _notifications.emit(msg) }
+                    incoming.trySend(msg)
                 }
             }
 

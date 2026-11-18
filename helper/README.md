@@ -8,7 +8,7 @@ the helper adds what opencode doesn't:
 | ✅ | **Pairing** — the phone shows a 4-digit code, the Mac asks you to Allow it |
 | ✅ | **TypeScript language server** in the editor — completions, errors, hover, go to definition, project-wide rename, find references |
 | ✅ | **Format on save** — Prettier (the project's own version and config), then `eslint --fix` when the project has ESLint |
-| ⏳ | Metro start / stop / reload + logs |
+| ✅ | **Metro** — start / stop / reload for React Native and Expo projects, live logs with errors highlighted |
 | ⏳ | adb build & install, wireless pairing, logcat |
 | ⏳ | Live emulator screen with touch |
 
@@ -47,8 +47,9 @@ Create `~/Library/LaunchAgents/dev.opencode.mobile.helper.plist` pointing `Progr
   you press Allow on the Mac, and stored hashed (SHA-256) in
   `~/.config/opencode-mobile-helper/devices.json` (mode 600).
 - Only one pairing request can wait at a time, so nobody on the network can stack up dialogs.
-- A paired phone can start a language server and run Prettier/ESLint in folders it names (absolute,
-  existing, never `/`); format paths must stay inside that folder. Treat pairing like giving that
+- A paired phone can start a language server, run Prettier/ESLint, and start Metro (the project's own
+  `expo` / `react-native` CLI from `node_modules/.bin`, else `npx --no-install`) in folders it names
+  (absolute, existing, never `/`); format paths must stay inside that folder. Treat pairing like giving that
   phone your terminal — which the app already has through opencode.
 - `OC_HELPER_AUTO_APPROVE=1` skips the dialog for automated tests and is ignored unless the helper
   listens on 127.0.0.1 only.
@@ -67,9 +68,27 @@ lsp.start {root} → {session}         spawns typescript-language-server --stdio
 lsp.send  {session, message}         raw JSON-RPC to the server
 lsp.stop  {session}
 format    {root, path, text} → {text, changed, steps[], warnings[]}
+metro.status {root, tail?} → {state, kind, command, port, errors, detected, detectError, lines[]}
+metro.start  {root, port?} → status   (port 8081 by default; detects Expo vs React Native)
+metro.stop   {root}        → status
+metro.reload {root}        → {via: "http" | "stdin"}
 ping
-notifications: lsp.message {session, message}, lsp.exit {session, code}
+notifications: lsp.message {session, message}, lsp.exit {session, code},
+               metro.log {root, line: {seq, level, text, frame?}, replace},
+               metro.status {root, state, …}
 ```
+
+**Metro** runs per project root and belongs to the helper, not to a phone connection: a 4G drop
+doesn't stop the bundler, and a phone that reconnects calls `metro.status` to get the state and the
+last 500 log lines (2000 are kept). States: `stopped`, `starting` (until `GET /status` answers
+`packager-status:running`), `running`, `external` (something else already serves that port — reload
+works, logs don't), `exited` (crashed). Detection reads `package.json`: an `expo` dependency →
+`expo start` (unless the start script is `react-native start`), else `react-native` →
+`react-native start`, else it refuses. Output is split on CR/LF with ANSI stripped; the bundling
+progress line is collapsed into one entry (`replace: true`); lines are classified `info` / `warn` /
+`error`, and code-frame lines under an error carry `frame: true` (same level, not counted again).
+Reload posts to Metro's `/reload` (falls back to `r` on stdin). Stop kills the whole process group;
+the helper stops every Metro when it exits. `CI` isn't set (Expo disables reloads in CI mode).
 
 The project's own TypeScript is used when it has one; otherwise the bundled TypeScript 5.9
 (`typescript@7` is the native rewrite and has no `tsserver.js`, so it can't be the fallback).
@@ -77,5 +96,6 @@ The project's own TypeScript is used when it has one; otherwise the bundled Type
 ## Tests
 
 ```bash
-npm test   # pairing, auth refusal, LSP completions/diagnostics/definition through the relay, format
+npm test   # pairing, auth refusal, LSP completions/diagnostics/definition through the relay, format,
+           # Metro detect/start/logs/reload/stop against a stand-in `react-native start`
 ```

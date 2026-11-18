@@ -135,8 +135,11 @@ Single `:app` module. No DI framework.
   git), `EditorScreen` (phone route), `CodeScreen` (Code tab; IDE layout ≥ 720 dp). See PROGRESS.md
   "Code editor (Phase 1)" and "Phase 2 design".
 - `helper/` (Node/TS, optional Mac daemon): pairing + bearer tokens, a `typescript-language-server`
-  relay and Prettier/ESLint format-on-save over one WebSocket. App side: `data/net/HelperClient.kt`
-  (`HelperManager`, owned by `OpenCodeApp`), Settings → Mac helper, LSP wiring in `EditorViewModel`.
+  relay, Prettier/ESLint format-on-save and Metro (`helper/src/metro.ts`, one process per project root,
+  owned by the helper) over one WebSocket. App side: `data/net/HelperClient.kt` (`HelperManager`,
+  owned by `OpenCodeApp`; notifications go through one ordered queue), Settings → Mac helper, LSP
+  wiring in `EditorViewModel`, Metro in `ui/editor/Metro.kt` (`MetroController` on `EditorViewModel.metro`,
+  `MetroPanel` / `MetroSheet` / `MetroAction`).
   Tests: `cd helper && npm test`. See `helper/README.md`.
 - Terminal has **two renderers**, picked with the top-bar ⋮ and stored in `ServerStore.terminalRenderer`
   (`"xterm"` default / `"native"`):

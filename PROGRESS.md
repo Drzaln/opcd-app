@@ -319,7 +319,7 @@ V2 differences that matter (verified against 2.0.26):
   `git diff HEAD` (untracked: `--no-index /dev/null`) rendered with `DiffLines.parsePatch`; Commit… runs
   `git add -A && git commit -q -m '<quoted>'`. No push.
 
-## Phase 2 — optional Mac helper (slice 1 built: pairing + TypeScript + format on save)
+## Phase 2 — optional Mac helper (slices 1–2 built: pairing + TypeScript + format on save, Metro)
 
 **Built (branch `feat/mac-helper`):** `helper/` (Node/TS, esbuild → `dist/helper.mjs`, `npm start`,
 `npm test`; see `helper/README.md` for setup, security and the wire protocol).
@@ -355,8 +355,46 @@ macOS Allow dialog → Connected; LSP ready on `Signup.tsx`; completions (`trim�
 (Prettier output on disk). A save with formatting took ~10 s over 4G (format + write + verify are
 separate round trips).
 
-**Next slices (same order as agreed):** Metro (`tuc.3`), adb/logcat (`tuc.4`), emulator screen
-(`tuc.5`). Design notes below still apply.
+**Slice 2 — Metro (`tuc.3`, branch `feat/mac-helper`, uncommitted):**
+- **Helper** (`helper/src/metro.ts`): `MetroManager`, one Metro per project root, owned by the helper
+  (not the socket) so a 4G drop doesn't kill the bundler. `metro.status|start|stop|reload`;
+  `metro.log` / `metro.status` notifications go to every connected phone. Detection from
+  `package.json` (Expo → `expo start`, unless the start script is `react-native start`; else
+  `react-native start`; otherwise refused), run from `node_modules/.bin` (else `npx --no-install`) in
+  its own process group with `FORCE_COLOR=0` (not `NO_COLOR` too — Node then warns on every worker; not
+  `CI` — Expo disables reloads). Ready = `GET /status` → `packager-status:running`; a port already
+  serving Metro is reported as `external`. 2000-line ring buffer; ANSI stripped; CR-repainted bundle
+  progress collapsed into one entry; info/warn/error classification, code-frame lines take the level
+  of the error above (`frame`, not counted). Reload = `POST /reload` (fallback `r` on stdin). Stop =
+  SIGTERM to the group, SIGKILL after 4 s; requested stops report `stopped`, crashes `exited`. The
+  helper stops all Metros on SIGINT/SIGTERM/SIGHUP.
+- **App** (`ui/editor/Metro.kt`): `MetroController` (on `EditorViewModel.metro`) mirrors the helper —
+  `metro.status` on connect / panel open (state + last 500 lines), notifications after; a new run
+  (`starting`) clears the old log. `MetroPanel`: status dot + command, Start / Reload / Stop, All ·
+  Problems filter, Clear, log rows (errors on `errorBg`, warnings in `warning`), follows the tail until
+  you scroll up. Wide Code layout: a **Metro** tab in the bottom panel (green dot while running, red
+  count of unseen errors). Phones: a **Metro** app-bar button on the Code tab and in the editor route
+  (same dot/badge) opening `MetroSheet`. All of it only while the helper is Ready and advertises
+  `metro`.
+- **Fixed on the way (slice 1 bug):** `HelperManager` launched one coroutine per incoming message, so
+  notifications could be reordered (Metro code frames came out shuffled; LSP traffic was exposed to
+  the same race). Now one unlimited channel + one forwarder.
+- **Verified:** `npm test` (4 tests; the new one drives detect → start → running → error line →
+  catch-up → reload → stop against a stand-in `react-native start`). Real Expo SDK (blank-typescript
+  template, scratch folder) through a loopback helper: start → running, `GET /status`, a broken
+  import → "Android Bundling failed" + "Unable to resolve" as errors with the code frame attached,
+  reload via HTTP, stop closes the port. Emulator (Medium_Phone, `make serve`, loopback helper,
+  stand-in Metro in the scratch project): non-RN folder → "Not a React Native or Expo project",
+  Start → Running with highlighted warn/error, log survives an app reinstall (catch-up), Reload,
+  Stop → port free, unseen-error badge on the app-bar icon, wide layout Metro tab. **Physical phone**
+  (vivo I2219, release build, real helper on the Tailscale IP, user's opencode service): the scratch
+  Expo project detected as `npx expo start`; Start → Running; a broken import + bundle request →
+  "Android Bundling failed" / "Unable to resolve" in red with the code frame, Problems (2); Reload;
+  Stop → port free. Found there: the phone sheet opened half-expanded, so the followed tail sat below
+  the screen — `MetroSheet` now skips the partial state. Not tried: a real RN app on a device
+  fetching the bundle (needs adb — next slice).
+
+**Next slices:** adb/logcat (`tuc.4`), emulator screen (`tuc.5`). Design notes below still apply.
 
 ### Phase 2 design notes
 

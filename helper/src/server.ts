@@ -16,10 +16,14 @@ import { authenticate, issueToken, loadDevices, pairingCode, saveDevices } from 
 import { confirmPairing, notify, type Approval } from "./confirm.ts"
 import { LspSession } from "./lsp.ts"
 import { formatText, insideRoot } from "./format.ts"
+import { MetroManager } from "./metro.ts"
 
 export const VERSION = "0.1.0"
 export const PROTOCOL = 1
-export const FEATURES = ["pair", "lsp", "format"]
+export const FEATURES = ["pair", "lsp", "format", "metro"]
+
+/** One Metro registry for the whole helper (shared by every interface it listens on). */
+export const metro = new MetroManager()
 
 interface PendingPair {
   code: string
@@ -101,6 +105,9 @@ function onConnection(ws: WebSocket, deviceName: string) {
   const notifyClient = (method: string, params: unknown) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ method, params }))
   }
+  // Metro keeps running across reconnects; every connected phone sees its logs and state.
+  const unsubscribe = metro.subscribe((event, root, payload) =>
+    notifyClient(event === "log" ? "metro.log" : "metro.status", { root, ...(payload as object) }))
 
   ws.on("message", async (raw) => {
     let msg: any
@@ -136,6 +143,14 @@ function onConnection(ws: WebSocket, deviceName: string) {
           if (!insideRoot(root, file)) return fail("Path is outside the project")
           return reply(await formatText(root, file, String(msg.params?.text ?? "")))
         }
+        case "metro.status":
+          return reply(metro.status(checkRoot(msg.params?.root), Number(msg.params?.tail ?? 500)))
+        case "metro.start":
+          return reply(await metro.start(checkRoot(msg.params?.root), checkPort(msg.params?.port)))
+        case "metro.stop":
+          return reply(await metro.stop(checkRoot(msg.params?.root)))
+        case "metro.reload":
+          return reply(await metro.reload(checkRoot(msg.params?.root)))
         default:
           return fail(`Unknown method ${msg.method}`)
       }
@@ -145,6 +160,7 @@ function onConnection(ws: WebSocket, deviceName: string) {
   })
 
   ws.on("close", () => {
+    unsubscribe()
     for (const s of sessions.values()) s.dispose()
     sessions.clear()
     console.log(`  ${deviceName} disconnected`)
@@ -158,6 +174,14 @@ export function checkRoot(value: unknown): string {
   const st = statSync(root, { throwIfNoEntry: false })
   if (!st?.isDirectory()) throw new Error(`Not a folder: ${root}`)
   return resolve(root)
+}
+
+/** Metro port: 8081 unless the phone asks for another unprivileged one. */
+export function checkPort(value: unknown): number {
+  if (value == null) return 8081
+  const port = Number(value)
+  if (!Number.isInteger(port) || port < 1024 || port > 65535 || port === 4096 || port === 4097) throw new Error("Pick a port between 1024 and 65535")
+  return port
 }
 
 function json(res: ServerResponse, status: number, body: unknown) {

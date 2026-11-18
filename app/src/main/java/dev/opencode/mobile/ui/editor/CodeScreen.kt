@@ -102,6 +102,7 @@ fun CodeScreen(
                 onViewReadOnly = onViewReadOnly,
                 title = projectName,
                 bottomBar = { AppBottomBar(AppTab.CODE, onTab) },
+                actions = { MetroAction(appVm = appVm, vm = vm) },
             )
         } else {
             WideCode(
@@ -122,7 +123,7 @@ fun CodeScreen(
     }
 }
 
-private enum class BottomPanel { TERMINAL, GIT }
+private enum class BottomPanel(val label: String) { TERMINAL("Terminal"), GIT("Git"), METRO("Metro") }
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -149,6 +150,14 @@ private fun WideCode(
     var panel by rememberSaveable { mutableStateOf(if (tall) BottomPanel.TERMINAL else null) }
     var lastPanel by rememberSaveable { mutableStateOf(BottomPanel.TERMINAL) }
     LaunchedEffect(Unit) { vm.refreshGit() }
+    val helperState by appVm.helper.collectAsState()
+    val metroAvailable = MetroController.available(helperState)
+    val metroUi by vm.metro.ui.collectAsState()
+    // The helper went away (or never advertised Metro): don't leave an empty Metro panel open.
+    LaunchedEffect(metroAvailable) {
+        if (!metroAvailable && panel == BottomPanel.METRO) panel = BottomPanel.TERMINAL
+        if (!metroAvailable && lastPanel == BottomPanel.METRO) lastPanel = BottomPanel.TERMINAL
+    }
 
     Row(Modifier.fillMaxSize()) {
     if (!tall) {
@@ -220,13 +229,13 @@ private fun WideCode(
                 EditorPane(vm = vm, appVm = appVm, serverId = serverId, onViewReadOnly = onViewReadOnly, modifier = Modifier.weight(1f), showGit = false)
                 if (!imeVisible) {
                 Divider()
-                // Bottom panel tabs: Terminal · Git (Metro / Logcat arrive with the Phase 2 helper).
+                // Bottom panel tabs: Terminal · Git · Metro (only while the Mac helper offers it).
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    for (tab in BottomPanel.values()) {
+                    for (tab in BottomPanel.values().filter { it != BottomPanel.METRO || metroAvailable }) {
                         val selected = panel == tab
                         Box(
                             Modifier
@@ -237,12 +246,15 @@ private fun WideCode(
                                 .padding(horizontal = 12.dp),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(
-                                if (tab == BottomPanel.TERMINAL) "Terminal" else "Git",
-                                fontSize = 12.sp,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                color = if (selected) c.textPrimary else c.textSecondary,
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    tab.label,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                    color = if (selected) c.textPrimary else c.textSecondary,
+                                )
+                                if (tab == BottomPanel.METRO) MetroTabBadge(metroUi)
+                            }
                         }
                     }
                     Spacer(Modifier.weight(1f))
@@ -259,6 +271,7 @@ private fun WideCode(
                         TerminalScreen(appVm = appVm, serverId = serverId, onBack = {}, embedded = true)
                     }
                     BottomPanel.GIT -> ChangesPanel(vm = vm, modifier = Modifier.fillMaxWidth().height(190.dp))
+                    BottomPanel.METRO -> MetroPanel(metro = vm.metro, modifier = Modifier.fillMaxWidth().height(if (tall) 240.dp else 190.dp))
                     null -> Unit
                 }
                 }

@@ -153,6 +153,8 @@ fun FilesScreen(
     bottomBar: @Composable () -> Unit = {},
     /** Side-pane tree (tablet / landscape): small section header instead of an app bar, no mode chips. */
     compact: Boolean = false,
+    /** Extra app-bar actions before Refresh (the Code tab's Metro button). */
+    actions: @Composable () -> Unit = {},
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as OpenCodeApp
@@ -237,6 +239,7 @@ fun FilesScreen(
                     }
                 },
                 actions = {
+                    actions()
                     IconButton(onClick = { vm.refresh() }) { Icon(Icons.Filled.Refresh, contentDescription = "Refresh") }
                 },
             )
