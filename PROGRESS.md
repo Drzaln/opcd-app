@@ -319,7 +319,46 @@ V2 differences that matter (verified against 2.0.26):
   `git diff HEAD` (untracked: `--no-index /dev/null`) rendered with `DiffLines.parsePatch`; Commit… runs
   `git add -A && git commit -q -m '<quoted>'`. No push.
 
-## Phase 2 design — optional Mac helper (planned, not built)
+## Phase 2 — optional Mac helper (slice 1 built: pairing + TypeScript + format on save)
+
+**Built (branch `feat/mac-helper`):** `helper/` (Node/TS, esbuild → `dist/helper.mjs`, `npm start`,
+`npm test`; see `helper/README.md` for setup, security and the wire protocol).
+- **Pairing:** `/helper/pair/start` → the phone shows the 4-digit code, the Mac shows an osascript
+  Allow/Deny dialog with the same code (terminal `y/N` fallback); `/helper/pair/wait` → bearer token,
+  stored hashed in `~/.config/opencode-mobile-helper/devices.json`. App side: `HelperManager`
+  (`data/net/HelperClient.kt`, owned by `OpenCodeApp`, follows the active server from `AppViewModel`),
+  pairing per server in `ServerStore.helperPairing`, **Settings → Mac helper** (status, Pair with the
+  code dialog, Unpair, Format on save). The helper is looked up at the opencode server's host, :4097.
+- **TypeScript:** `@codemirror/lsp-client` 6.3.1 in the editor bundle; JS ↔ `AndroidEditor.onLsp` ↔
+  `EditorViewModel.lspSend` ↔ helper `lsp.send` ↔ `typescript-language-server --stdio`, and back via
+  `lsp.message` notifications → `__ocLspRecv`. A session starts when the helper is Ready, the page is
+  up and a TS/JS tab is open; every page (re)load gets a fresh session (a server can't be initialized
+  twice). Completions, hover, signature help, diagnostics (gutter + squiggles, ⋮ → Problems), go to
+  definition (opens the target file as a tab), find references, format document, **project-wide
+  rename** (our own: lsp-client's rename only edits files on screen, which with one shared view would
+  half-rename a project — `__ocRenameTo` opens every file in the WorkspaceEdit as a tab and edits it;
+  nothing is saved automatically). Status shows "TypeScript · LSP ready".
+- **Format on save:** before writing, `format {root, path, text}` (Prettier with the project's config,
+  then `eslint --fix` if the project has ESLint); the editor applies the result as one minimal edit
+  (`__ocReplace`, cursor kept on its line) and marks it saved.
+- **Gotchas:** tab switches must always go through Kotlin (`onOpenFile` → `vm.open`/`select`), never
+  `__ocShow` from JS — otherwise the header/path bar and the visible doc disagree. Renaming at an
+  *imported* name gives a local alias (`A as B`), like VS Code. Without a `tsconfig.json`, tsserver only
+  knows open files and their imports, so cross-file rename/references need a tsconfig (normal projects
+  have one). `typescript@7` (native) has no `tsserver.js`; the helper pins 5.9.3 as its fallback.
+- **Verified** on the emulator (helper on 127.0.0.1 with the loopback-only auto-approve): pair →
+  Connected; LSP ready on `Signup.tsx`; diagnostics; completions popup (`toUpperCase`); format on save
+  (Mac file = Prettier output, tab clean); go to definition into an unopened file; rename at the
+  definition updated both files, saved, verified on disk. **Physical device** (vivo I2219 over Tailscale
+on 4G, real opencode service on :4096, helper on the Mac's Tailscale IP): found → paired via the real
+macOS Allow dialog → Connected; LSP ready on `Signup.tsx`; completions (`trim…`); format on save
+(Prettier output on disk). A save with formatting took ~10 s over 4G (format + write + verify are
+separate round trips).
+
+**Next slices (same order as agreed):** Metro (`tuc.3`), adb/logcat (`tuc.4`), emulator screen
+(`tuc.5`). Design notes below still apply.
+
+### Phase 2 design notes
 
 opencode gives the app files, PTYs and sessions, but no code intelligence and no Android/React Native
 dev loop. A small companion daemon on the Mac would add those; the app keeps talking to opencode for

@@ -58,6 +58,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material.icons.filled.Computer
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -185,6 +187,9 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            item { SectionLabel("Mac helper") }
+            item { HelperCard(appVm) }
 
             item { SectionLabel("OpenCode Go") }
             item {
@@ -389,5 +394,79 @@ private fun SettingsCard(content: @Composable () -> Unit) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column { content() }
+    }
+}
+
+
+/**
+ * Optional companion daemon on the Mac (`helper/` in the repo): TypeScript language server for the
+ * editor and format on save; later Metro, adb and the emulator view. Lights up only when it answers.
+ */
+@Composable
+private fun HelperCard(appVm: AppViewModel) {
+    val context = LocalContext.current
+    val app = context.applicationContext as OpenCodeApp
+    val state by appVm.helper.collectAsState()
+    val formatOnSave by app.serverStore.formatOnSave.collectAsState(initial = true)
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var code by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { appVm.refreshHelper() }
+
+    val (title, detail) = when (val s = state) {
+        is dev.opencode.mobile.data.net.HelperState.Ready -> "Connected" to "${s.info.hostname} · helper ${s.info.version} · ${s.info.features.joinToString(", ")}"
+        is dev.opencode.mobile.data.net.HelperState.Unpaired -> "Found on ${s.info.hostname}" to "Pair this phone to use TypeScript completions, errors and format on save."
+        is dev.opencode.mobile.data.net.HelperState.Pairing -> "Pairing…" to "Check the Mac: allow the request if it shows ${s.code}."
+        is dev.opencode.mobile.data.net.HelperState.Connecting -> "Connecting…" to s.info.hostname
+        is dev.opencode.mobile.data.net.HelperState.Absent -> "Not running" to "Nothing answered at ${s.url}. On the Mac: cd helper && npm ci && npm start"
+        is dev.opencode.mobile.data.net.HelperState.Failed -> "Not connected" to s.message
+        dev.opencode.mobile.data.net.HelperState.Checking -> "Looking for the helper…" to ""
+        dev.opencode.mobile.data.net.HelperState.Idle -> "No server selected" to ""
+    }
+    SettingsCard {
+        ListItem(
+            headlineContent = { Text(title) },
+            supportingContent = { if (detail.isNotBlank()) Text(detail) },
+            leadingContent = { Icon(Icons.Filled.Computer, contentDescription = null) },
+            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+        )
+        error?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp))
+        }
+        androidx.compose.foundation.layout.Row(Modifier.padding(horizontal = 8.dp).padding(bottom = 8.dp)) {
+            when (state) {
+                is dev.opencode.mobile.data.net.HelperState.Unpaired -> androidx.compose.material3.TextButton(onClick = {
+                    error = null
+                    appVm.pairHelper(onCode = { code = it }, onDone = { err -> code = null; error = err })
+                }) { Text("Pair") }
+                is dev.opencode.mobile.data.net.HelperState.Ready, is dev.opencode.mobile.data.net.HelperState.Failed,
+                is dev.opencode.mobile.data.net.HelperState.Connecting -> androidx.compose.material3.TextButton(onClick = { appVm.unpairHelper() }) { Text("Unpair") }
+                else -> androidx.compose.material3.TextButton(onClick = { appVm.refreshHelper() }) { Text("Check again") }
+            }
+        }
+        ListItem(
+            headlineContent = { Text("Format on save") },
+            supportingContent = { Text("Prettier, then ESLint --fix when the project has it (needs the helper)") },
+            trailingContent = { Switch(checked = formatOnSave, onCheckedChange = { v -> scope.launch { app.serverStore.setFormatOnSave(v) } }) },
+            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+        )
+    }
+    code?.let { shown ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Confirm on your Mac") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text("Your Mac is asking whether to allow this phone. Press Allow there if it shows this code:")
+                    Text(
+                        shown,
+                        style = MaterialTheme.typography.displayMedium,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        modifier = Modifier.padding(top = 16.dp),
+                    )
+                }
+            },
+            confirmButton = {},
+        )
     }
 }

@@ -81,6 +81,28 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
         }
         watchPrompts()
         startConnectionWatch()
+        viewModelScope.launch { activeServer.collect { app.helper.attach(it) } }
+    }
+
+    val helper: StateFlow<dev.opencode.mobile.data.net.HelperState> get() = app.helper.state
+
+    fun refreshHelper() = app.helper.refresh()
+
+    fun pairHelper(onCode: (String) -> Unit, onDone: (String?) -> Unit) {
+        viewModelScope.launch {
+            val device = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".trim()
+            val error = try {
+                app.helper.pair(device, onCode)
+                null
+            } catch (e: Exception) {
+                e.message ?: "Pairing failed"
+            }
+            onDone(error)
+        }
+    }
+
+    fun unpairHelper() {
+        viewModelScope.launch { app.helper.unpair() }
     }
 
     val notificationsEnabled: StateFlow<Boolean> =

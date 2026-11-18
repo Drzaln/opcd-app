@@ -116,7 +116,12 @@ fun EditorWebView(vm: EditorViewModel, modifier: Modifier = Modifier, fontSizeSp
         vm.commands.collect { command -> holder.js(command.toJs()) }
     }
 
-    DisposableEffect(Unit) { onDispose { holder.web = null } }
+    DisposableEffect(Unit) {
+        onDispose {
+            holder.web = null
+            vm.onEditorGone()
+        }
+    }
 }
 
 private fun EditorCommand.toJs(): String = when (this) {
@@ -129,6 +134,11 @@ private fun EditorCommand.toJs(): String = when (this) {
     is EditorCommand.Insert -> "window.__ocInsert('${b64(text)}')"
     is EditorCommand.Run -> "window.__ocCommand(${quoteJs(name)})"
     is EditorCommand.Wrap -> "window.__ocSetWrap($on)"
+    is EditorCommand.LspStart -> "window.__ocLspStart(${quoteJs(rootUri)})"
+    is EditorCommand.LspRecv -> "window.__ocLspRecv('${b64(message)}')"
+    EditorCommand.LspStop -> "window.__ocLspStop()"
+    is EditorCommand.RenameTo -> "window.__ocRenameTo(${quoteJs(name)})"
+    is EditorCommand.Replace -> "window.__ocReplace($id,${quoteJs(path)},'${b64(text)}')"
 }
 
 /** Large text crosses the bridge base64-encoded (as the terminal does), so quotes/newlines/U+2028 are safe. */
@@ -226,7 +236,7 @@ private fun themeJson(c: OcColors): String {
     val tokens = linkedMapOf(
         "bg" to c.bg, "surface" to c.surface, "border" to c.border, "text" to c.textBody, "muted" to c.textSecondary,
         "lineno" to c.lineNumber, "line" to c.editorActiveLine, "selection" to c.editorLine, "link" to c.link,
-        "accentSoft" to c.accentSoft, "popup" to c.popup, "popupBorder" to c.popupBorder, "error" to c.red,
+        "accentSoft" to c.accentSoft, "popup" to c.popup, "popupBorder" to c.popupBorder, "error" to c.red, "warning" to c.warning,
         "kw" to c.syntax.keyword, "str" to c.syntax.string, "num" to c.syntax.number, "prop" to c.syntax.number,
         "fn" to c.syntax.function, "type" to c.syntax.type, "tag" to c.syntax.tag, "comment" to c.syntax.comment,
     )
@@ -284,4 +294,12 @@ private class EditorBridge(
     @JavascriptInterface fun onError(message: String) = fail(message)
 
     @JavascriptInterface fun onFocus(focused: Boolean) = vm.onFocus(focused)
+
+    @JavascriptInterface fun onLsp(message: String) = vm.lspSend(message)
+
+    @JavascriptInterface fun onOpenFile(path: String) = vm.onOpenFile(path)
+
+    @JavascriptInterface fun onRenameRequest(word: String) = vm.onRenameRequest(word)
+
+    @JavascriptInterface fun onInfo(message: String) = vm.onInfo(message)
 }

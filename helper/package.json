@@ -1,0 +1,29 @@
+{
+  "name": "opencode-mobile-helper",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Optional Mac companion for OpenCode Mobile: TypeScript language server, format on save, Metro, adb, emulator view.",
+  "type": "module",
+  "bin": {
+    "opencode-mobile-helper": "dist/helper.mjs"
+  },
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outfile=dist/helper.mjs",
+    "start": "npm run build --silent && node dist/helper.mjs",
+    "test": "npm run build --silent && node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "prettier": "3.10.1",
+    "typescript": "5.9.3",
+    "typescript-language-server": "6.1.0",
+    "ws": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "@types/ws": "8.18.2",
+    "esbuild": "0.28.2"
+  }
+}

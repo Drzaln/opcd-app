@@ -1,0 +1,175 @@
+// HTTP (discovery + pairing) and an authenticated WebSocket carrying JSON-RPC-style messages.
+//
+//   GET  /helper/info                       → { name, version, hostname, protocol, features }
+//   POST /helper/pair/start {device}        → { requestId, code }   (Mac shows Allow/Deny with the code)
+//   POST /helper/pair/wait  {requestId}     → { token, deviceId } | 403 denied | 408 timeout
+//   WS   /helper/ws  (Authorization: Bearer <token>)
+//        client → { id?, method, params }   server → { id, result } | { id, error: { message } }
+//        server notifications → { method, params }
+import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http"
+import { hostname } from "node:os"
+import { randomBytes } from "node:crypto"
+import { statSync } from "node:fs"
+import { isAbsolute, resolve } from "node:path"
+import { WebSocketServer, type WebSocket } from "ws"
+import { authenticate, issueToken, loadDevices, pairingCode, saveDevices } from "./auth.ts"
+import { confirmPairing, notify, type Approval } from "./confirm.ts"
+import { LspSession } from "./lsp.ts"
+import { formatText, insideRoot } from "./format.ts"
+
+export const VERSION = "0.1.0"
+export const PROTOCOL = 1
+export const FEATURES = ["pair", "lsp", "format"]
+
+interface PendingPair {
+  code: string
+  device: string
+  decision: Promise<Approval>
+  createdAt: number
+}
+
+export interface ServerOptions {
+  autoApprove: boolean
+  devicesFile?: string
+}
+
+export function createHelperServer(options: ServerOptions): Server {
+  const pending = new Map<string, PendingPair>()
+
+  const http = createServer(async (req, res) => {
+    try {
+      await route(req, res)
+    } catch (e: any) {
+      json(res, 500, { error: String(e?.message ?? e) })
+    }
+  })
+
+  async function route(req: IncomingMessage, res: ServerResponse) {
+    const url = new URL(req.url ?? "/", "http://helper")
+    if (req.method === "GET" && url.pathname === "/helper/info") {
+      return json(res, 200, { name: "opencode-mobile-helper", version: VERSION, hostname: hostname(), protocol: PROTOCOL, features: FEATURES })
+    }
+    if (req.method === "POST" && url.pathname === "/helper/pair/start") {
+      const body = await readJson(req)
+      const device = String(body?.device ?? "Android device").slice(0, 60)
+      // One request at a time: a stranger on the network can't queue up dialogs.
+      for (const [id, p] of pending) if (Date.now() - p.createdAt > 70_000) pending.delete(id)
+      if (pending.size > 0) return json(res, 429, { error: "Another pairing request is waiting on the Mac" })
+      const requestId = randomBytes(12).toString("base64url")
+      const code = pairingCode()
+      const decision = confirmPairing(device, code, options.autoApprove)
+      pending.set(requestId, { code, device, decision, createdAt: Date.now() })
+      return json(res, 200, { requestId, code })
+    }
+    if (req.method === "POST" && url.pathname === "/helper/pair/wait") {
+      const body = await readJson(req)
+      const p = pending.get(String(body?.requestId ?? ""))
+      if (!p) return json(res, 404, { error: "Unknown or expired pairing request" })
+      const decision = await p.decision
+      pending.delete(String(body.requestId))
+      if (decision !== "allow") return json(res, decision === "timeout" ? 408 : 403, { error: decision === "timeout" ? "Nobody answered on the Mac" : "Denied on the Mac" })
+      const { device, token } = issueToken(p.device, options.devicesFile)
+      notify("OpenCode Mobile", `Paired with ${device.name}`)
+      console.log(`  Paired with "${device.name}" (${device.id})`)
+      return json(res, 200, { token, deviceId: device.id })
+    }
+    json(res, 404, { error: "not found" })
+  }
+
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 * 1024 })
+  http.on("upgrade", (req, socket, head) => {
+    const url = new URL(req.url ?? "/", "http://helper")
+    const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1]
+    const devices = loadDevices(options.devicesFile)
+    const device = url.pathname === "/helper/ws" ? authenticate(token, devices) : null
+    if (!device) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n")
+      socket.destroy()
+      return
+    }
+    device.lastSeen = new Date().toISOString()
+    saveDevices(devices, options.devicesFile)
+    wss.handleUpgrade(req, socket, head, (ws) => onConnection(ws, device.name))
+  })
+
+  return http
+}
+
+function onConnection(ws: WebSocket, deviceName: string) {
+  console.log(`  ${deviceName} connected`)
+  const sessions = new Map<string, LspSession>()
+  const notifyClient = (method: string, params: unknown) => {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ method, params }))
+  }
+
+  ws.on("message", async (raw) => {
+    let msg: any
+    try { msg = JSON.parse(String(raw)) } catch { return }
+    const reply = (result: unknown) => msg.id != null && ws.send(JSON.stringify({ id: msg.id, result }))
+    const fail = (message: string) => msg.id != null && ws.send(JSON.stringify({ id: msg.id, error: { message } }))
+    try {
+      switch (msg.method) {
+        case "ping":
+          return reply({ pong: Date.now() })
+        case "lsp.start": {
+          const root = checkRoot(msg.params?.root)
+          const id = randomBytes(6).toString("hex")
+          const session = new LspSession(
+            id,
+            root,
+            (message) => notifyClient("lsp.message", { session: id, message }),
+            (code) => { sessions.delete(id); notifyClient("lsp.exit", { session: id, code }) },
+          )
+          sessions.set(id, session)
+          return reply({ session: id })
+        }
+        case "lsp.send":
+          sessions.get(String(msg.params?.session))?.send(String(msg.params?.message ?? ""))
+          return reply({ ok: true })
+        case "lsp.stop":
+          sessions.get(String(msg.params?.session))?.dispose()
+          sessions.delete(String(msg.params?.session))
+          return reply({ ok: true })
+        case "format": {
+          const root = checkRoot(msg.params?.root)
+          const file = resolve(root, String(msg.params?.path ?? ""))
+          if (!insideRoot(root, file)) return fail("Path is outside the project")
+          return reply(await formatText(root, file, String(msg.params?.text ?? "")))
+        }
+        default:
+          return fail(`Unknown method ${msg.method}`)
+      }
+    } catch (e: any) {
+      fail(String(e?.message ?? e))
+    }
+  })
+
+  ws.on("close", () => {
+    for (const s of sessions.values()) s.dispose()
+    sessions.clear()
+    console.log(`  ${deviceName} disconnected`)
+  })
+}
+
+/** A project root must be an existing absolute directory (never `/`). */
+export function checkRoot(value: unknown): string {
+  const root = String(value ?? "")
+  if (!isAbsolute(root) || root.includes("\0") || resolve(root) === "/") throw new Error("Project root must be an absolute folder")
+  const st = statSync(root, { throwIfNoEntry: false })
+  if (!st?.isDirectory()) throw new Error(`Not a folder: ${root}`)
+  return resolve(root)
+}
+
+function json(res: ServerResponse, status: number, body: unknown) {
+  res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" })
+  res.end(JSON.stringify(body))
+}
+
+function readJson(req: IncomingMessage): Promise<any> {
+  return new Promise((resolveBody) => {
+    let size = 0
+    const chunks: Buffer[] = []
+    req.on("data", (c: Buffer) => { size += c.length; if (size < 64 * 1024) chunks.push(c) })
+    req.on("end", () => { try { resolveBody(JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}")) } catch { resolveBody({}) } })
+  })
+}

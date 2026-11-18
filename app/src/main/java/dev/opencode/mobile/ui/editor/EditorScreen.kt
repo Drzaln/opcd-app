@@ -218,6 +218,13 @@ fun EditorOverflowMenu(vm: EditorViewModel, onViewReadOnly: (String) -> Unit) {
                 onClick = { open = false; vm.toggleWrap() },
             )
             DropdownMenuItem(text = { Text("Toggle comment") }, onClick = { open = false; vm.command("toggleComment") })
+            if (ui.lsp == LspStatus.READY && ui.activeTab?.language in LSP_LANGUAGES) {
+                DropdownMenuItem(text = { Text("Go to definition") }, onClick = { open = false; vm.command("definition") })
+                DropdownMenuItem(text = { Text("Rename symbol") }, onClick = { open = false; vm.command("rename") })
+                DropdownMenuItem(text = { Text("Find references") }, onClick = { open = false; vm.command("references") })
+                DropdownMenuItem(text = { Text("Problems") }, onClick = { open = false; vm.command("problems") })
+                DropdownMenuItem(text = { Text("Format document") }, onClick = { open = false; vm.command("format") })
+            }
             DropdownMenuItem(text = { Text("Redo") }, onClick = { open = false; vm.command("redo") })
             ui.active?.let { path ->
                 DropdownMenuItem(text = { Text("View read-only") }, onClick = { open = false; onViewReadOnly(path) })
@@ -299,6 +306,15 @@ fun EditorPane(
                 IconButton(onClick = { vm.clearError() }) { Icon(Icons.Outlined.Close, contentDescription = "Dismiss", tint = c.errorText) }
             }
         }
+        ui.notice?.let { message ->
+            Row(
+                Modifier.fillMaxWidth().background(c.surface).padding(start = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(message, color = c.textBody, fontSize = 13.sp, modifier = Modifier.weight(1f).padding(vertical = 8.dp))
+                IconButton(onClick = { vm.clearNotice() }) { Icon(Icons.Outlined.Close, contentDescription = "Dismiss", tint = c.textSecondary) }
+            }
+        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 !supported -> {
@@ -353,6 +369,24 @@ fun EditorPane(
         )
     }
     if (ui.paletteOpen) GoToFileDialog(vm = vm)
+    ui.renameWord?.let { word ->
+        var name by remember(word) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(word, androidx.compose.ui.text.TextRange(0, word.length))) }
+        val focus = remember { FocusRequester() }
+        LaunchedEffect(word) { runCatching { focus.requestFocus() } }
+        AlertDialog(
+            onDismissRequest = { vm.renameTo(null) },
+            title = { Text("Rename symbol") },
+            text = {
+                Column {
+                    Text("Renames \"$word\" in every file that uses it. Changed files open as tabs; save them to apply.", fontSize = 13.sp, color = c.textSecondary)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, modifier = Modifier.fillMaxWidth().focusRequester(focus))
+                }
+            },
+            confirmButton = { TextButton(enabled = name.text.isNotBlank() && name.text != word, onClick = { vm.renameTo(name.text) }) { Text("Rename") } },
+            dismissButton = { TextButton(onClick = { vm.renameTo(null) }) { Text("Cancel") } },
+        )
+    }
     if (changesOpen) ChangesSheet(vm = vm, onDismiss = { changesOpen = false })
 }
 
@@ -361,65 +395,66 @@ private fun EditorTabs(vm: EditorViewModel, ui: EditorUi, showGit: Boolean, onOp
     val c = OcTheme.colors
     Column {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                for (tab in ui.tabs) {
-                    val active = tab.path == ui.active
-                    Row(
-                        Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (active) c.surface else androidx.compose.ui.graphics.Color.Transparent)
-                            .clickable { vm.select(tab.path) }
-                            .heightIn(min = 40.dp)
-                            .padding(start = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            tab.name,
-                            fontSize = 12.sp,
-                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (active) c.textPrimary else c.textSecondary,
-                            maxLines = 1,
-                        )
-                        if (tab.dirty) {
-                            Spacer(Modifier.width(6.dp))
-                            Box(Modifier.size(7.dp).background(c.warning, CircleShape))
-                        }
-                        IconButton(onClick = { vm.requestClose(tab.path) }, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Outlined.Close, contentDescription = "Close ${tab.name}", tint = c.textSecondary, modifier = Modifier.size(14.dp))
-                        }
+            for (tab in ui.tabs) {
+                val active = tab.path == ui.active
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (active) c.surface else androidx.compose.ui.graphics.Color.Transparent)
+                        .clickable { vm.select(tab.path) }
+                        .heightIn(min = 40.dp)
+                        .padding(start = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        tab.name,
+                        fontSize = 12.sp,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (active) c.textPrimary else c.textSecondary,
+                        maxLines = 1,
+                    )
+                    if (tab.dirty) {
+                        Spacer(Modifier.width(6.dp))
+                        Box(Modifier.size(7.dp).background(c.warning, CircleShape))
+                    }
+                    IconButton(onClick = { vm.requestClose(tab.path) }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Outlined.Close, contentDescription = "Close ${tab.name}", tint = c.textSecondary, modifier = Modifier.size(14.dp))
                     }
                 }
             }
-            ui.activeTab?.let { tab ->
-                Text(
-                    statusText(tab, ui.cursor),
-                    fontSize = 11.sp,
-                    color = if (tab.status == SaveStatus.FAILED) c.errorText else c.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(start = 8.dp, end = 4.dp).widthIn(max = 260.dp),
-                )
-            }
         }
-        if (showGit && ui.branch != null) {
+        // Second row: git (left, opens Changes) and the "TypeScript · LSP ready · Saved" status (right).
+        val showBranch = showGit && ui.branch != null
+        if (showBranch || ui.activeTab != null) {
             Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onOpenChanges)
-                    .heightIn(min = 36.dp)
-                    .padding(horizontal = 16.dp),
+                Modifier.fillMaxWidth().heightIn(min = 36.dp).padding(start = 8.dp, end = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Outlined.AccountTree, contentDescription = null, tint = c.textSecondary, modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(gitLabel(ui), fontSize = 12.sp, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (showBranch) {
+                    Row(
+                        Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onOpenChanges).heightIn(min = 36.dp).padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.AccountTree, contentDescription = null, tint = c.textSecondary, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(gitLabel(ui), fontSize = 12.sp, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                ui.activeTab?.let { tab ->
+                    Text(
+                        statusText(tab, ui.cursor, ui.lsp),
+                        fontSize = 11.sp,
+                        color = if (tab.status == SaveStatus.FAILED) c.errorText else c.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.border))
@@ -434,7 +469,7 @@ fun gitLabel(ui: EditorUi): String {
     }
 }
 
-private fun statusText(tab: EditorTab, cursor: Pair<Int, Int>?): String {
+private fun statusText(tab: EditorTab, cursor: Pair<Int, Int>?, lsp: LspStatus = LspStatus.OFF): String {
     val status = when (tab.status) {
         SaveStatus.SAVING -> "Saving…"
         SaveStatus.SAVED -> if (tab.dirty) "Edited" else "Saved"
@@ -442,7 +477,13 @@ private fun statusText(tab: EditorTab, cursor: Pair<Int, Int>?): String {
         SaveStatus.IDLE -> tab.message ?: if (tab.dirty) "Edited" else "Saved"
     }
     val position = cursor?.let { " · Ln ${it.first}, Col ${it.second}" }.orEmpty()
-    return "${tab.language.label} · $status$position"
+    val server = if (tab.language in LSP_LANGUAGES) when (lsp) {
+        LspStatus.READY -> " · LSP ready"
+        LspStatus.STARTING -> " · LSP starting…"
+        LspStatus.FAILED -> " · LSP off"
+        LspStatus.OFF -> ""
+    } else ""
+    return "${tab.language.label}$server · $status$position"
 }
 
 /** Coding keys above the soft keyboard; horizontally scrollable when it doesn't fit. */

@@ -40,6 +40,9 @@ class ServerStore(private val context: Context) {
     private val goApiKey = stringPreferencesKey("opencode_go_api_key")
     private val terminalRendererKey = stringPreferencesKey("terminal_renderer")
     private val recentFilesKey = stringPreferencesKey("recent_files")
+    private val helperPairingsKey = stringPreferencesKey("helper_pairings")
+    private val helperPortsKey = stringPreferencesKey("helper_ports")
+    private val formatOnSaveKey = androidx.datastore.preferences.core.booleanPreferencesKey("editor_format_on_save")
     private val editorWrapKey = androidx.datastore.preferences.core.booleanPreferencesKey("editor_soft_wrap")
 
     val servers: Flow<List<ServerConfig>> = context.dataStore.data.map { prefs ->
@@ -176,6 +179,31 @@ class ServerStore(private val context: Context) {
 
     suspend fun setEditorSoftWrap(value: Boolean) {
         context.dataStore.edit { it[editorWrapKey] = value }
+    }
+
+    /** Mac-helper pairing for a server (host, port, bearer token), or null when not paired. */
+    suspend fun helperPairing(serverId: String): HelperPairing? {
+        val raw = context.dataStore.data.first()[helperPairingsKey] ?: return null
+        return runCatching { json.decodeFromString<Map<String, HelperPairing>>(raw)[serverId] }.getOrNull()
+    }
+
+    suspend fun setHelperPairing(serverId: String, pairing: HelperPairing?) {
+        context.dataStore.edit { prefs ->
+            val map = runCatching { json.decodeFromString<Map<String, HelperPairing>>(prefs[helperPairingsKey] ?: "{}") }
+                .getOrDefault(emptyMap()).toMutableMap()
+            if (pairing == null) map.remove(serverId) else map[serverId] = pairing
+            prefs[helperPairingsKey] = json.encodeToString(map)
+        }
+    }
+
+    /** Optional per-server helper port override (default [HelperManager.DEFAULT_PORT]). */
+    suspend fun helperPort(serverId: String): Int? =
+        decodeStringMap(context.dataStore.data.first()[helperPortsKey])[serverId]?.toIntOrNull()
+
+    val formatOnSave: Flow<Boolean> = context.dataStore.data.map { it[formatOnSaveKey] ?: true }
+
+    suspend fun setFormatOnSave(value: Boolean) {
+        context.dataStore.edit { it[formatOnSaveKey] = value }
     }
 
     suspend fun add(config: ServerConfig) {

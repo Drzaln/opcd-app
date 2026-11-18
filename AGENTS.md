@@ -134,6 +134,10 @@ Single `:app` module. No DI framework.
   `assets/editor/`, never part of Gradle), `EditorViewModel` (activity-scoped tabs, saves, conflicts,
   git), `EditorScreen` (phone route), `CodeScreen` (Code tab; IDE layout ≥ 720 dp). See PROGRESS.md
   "Code editor (Phase 1)" and "Phase 2 design".
+- `helper/` (Node/TS, optional Mac daemon): pairing + bearer tokens, a `typescript-language-server`
+  relay and Prettier/ESLint format-on-save over one WebSocket. App side: `data/net/HelperClient.kt`
+  (`HelperManager`, owned by `OpenCodeApp`), Settings → Mac helper, LSP wiring in `EditorViewModel`.
+  Tests: `cd helper && npm test`. See `helper/README.md`.
 - Terminal has **two renderers**, picked with the top-bar ⋮ and stored in `ServerStore.terminalRenderer`
   (`"xterm"` default / `"native"`):
   - `ui/terminal/TerminalScreen.kt` → `TerminalView` = the native Compose `Canvas` over

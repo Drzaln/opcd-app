@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.put
 
 enum class EditorLanguage(val id: String, val label: String) {
     TYPESCRIPT("typescript", "TypeScript"),
@@ -56,6 +57,9 @@ enum class EditorLanguage(val id: String, val label: String) {
 }
 
 enum class SaveStatus { IDLE, SAVING, SAVED, FAILED }
+
+/** TypeScript language server through the Mac helper. */
+enum class LspStatus { OFF, STARTING, READY, FAILED }
 
 data class EditorTab(
     val path: String,
@@ -93,6 +97,12 @@ data class EditorUi(
     val pendingClose: String? = null,
     /** CodeMirror has focus — the soft keyboard (if up) is typing into the editor. */
     val editorFocused: Boolean = false,
+    val lsp: LspStatus = LspStatus.OFF,
+    val lspMessage: String? = null,
+    /** Rename dialog open for this word. */
+    val renameWord: String? = null,
+    /** Neutral, dismissible message (rename results, format notes). */
+    val notice: String? = null,
 ) {
     val activeTab: EditorTab? get() = tabs.firstOrNull { it.path == active }
     val dirtyTabs: List<EditorTab> get() = tabs.filter { it.dirty }
@@ -108,6 +118,12 @@ sealed interface EditorCommand {
     data class Insert(val text: String) : EditorCommand
     data class Run(val name: String) : EditorCommand
     data class Wrap(val on: Boolean) : EditorCommand
+    data class LspStart(val rootUri: String) : EditorCommand
+    data class LspRecv(val message: String) : EditorCommand
+    data object LspStop : EditorCommand
+    data class RenameTo(val name: String) : EditorCommand
+    /** Format-on-save changed the text about to be saved (request [id]). */
+    data class Replace(val id: Int, val path: String, val text: String) : EditorCommand
 }
 
 /**
@@ -118,6 +134,14 @@ sealed interface EditorCommand {
  * keeps what's needed to rebuild it: the on-disk text and hash of every tab, plus the latest unsaved
  * snapshot the page reported.
  */
+internal val LSP_LANGUAGES = setOf(EditorLanguage.TYPESCRIPT, EditorLanguage.TSX, EditorLanguage.JAVASCRIPT, EditorLanguage.JSX)
+private val FORMATTABLE = setOf("ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "json", "css", "scss", "less", "md", "mdx", "yml", "yaml", "html", "vue", "graphql")
+
+/** `file://` URI with each segment percent-encoded the way the editor's LSP client builds them. */
+internal fun fileUri(path: String): String = "file://" + path.split('/').joinToString("/") { seg ->
+    java.net.URLEncoder.encode(seg, "UTF-8").replace("+", "%20").replace("%7E", "~")
+}
+
 class EditorViewModel(
     private val app: OpenCodeApp,
     private val server: ServerConfig,
@@ -142,12 +166,94 @@ class EditorViewModel(
 
     val recentFiles: Flow<List<String>> get() = app.serverStore.recentFiles(server.id, projectDir())
 
+    private val helper = app.helper
+    private var webReady = false
+    @Volatile private var lspSession: String? = null
+    private var lspStarting = false
+
     init {
         viewModelScope.launch {
             val wrap = app.serverStore.editorSoftWrap.first()
             _ui.update { it.copy(softWrap = wrap) }
         }
         refreshGit()
+        viewModelScope.launch {
+            helper.state.collect { state ->
+                if (state is dev.opencode.mobile.data.net.HelperState.Ready) maybeStartLsp()
+                else if (lspSession != null || _ui.value.lsp != LspStatus.OFF) stopLsp(notifyHelper = false)
+            }
+        }
+        viewModelScope.launch {
+            helper.notifications.collect { msg ->
+                val params = msg["params"] as? kotlinx.serialization.json.JsonObject ?: return@collect
+                val session = (params["session"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                if (session == null || session != lspSession) return@collect
+                when ((msg["method"] as? kotlinx.serialization.json.JsonPrimitive)?.content) {
+                    "lsp.message" -> (params["message"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { send(EditorCommand.LspRecv(it)) }
+                    "lsp.exit" -> {
+                        lspSession = null
+                        send(EditorCommand.LspStop)
+                        _ui.update { it.copy(lsp = LspStatus.FAILED, lspMessage = "TypeScript server stopped") }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun hasLspTab() = _ui.value.tabs.any { it.language in LSP_LANGUAGES }
+
+    /** Starts a fresh language-server session once the helper, the page and a TS/JS tab are all there. */
+    private fun maybeStartLsp() {
+        if (!webReady || lspSession != null || lspStarting || !hasLspTab()) return
+        if (helper.state.value !is dev.opencode.mobile.data.net.HelperState.Ready) return
+        lspStarting = true
+        _ui.update { it.copy(lsp = LspStatus.STARTING, lspMessage = null) }
+        viewModelScope.launch {
+            try {
+                val root = writer.projectRoot(projectDir()) ?: throw IllegalStateException("No project folder")
+                val result = helper.request("lsp.start", kotlinx.serialization.json.buildJsonObject {
+                    put("root", kotlinx.serialization.json.JsonPrimitive(root))
+                })
+                val session = (result as kotlinx.serialization.json.JsonObject)["session"]
+                    ?.let { (it as kotlinx.serialization.json.JsonPrimitive).content } ?: throw IllegalStateException("No session")
+                lspSession = session
+                send(EditorCommand.LspStart(fileUri(root)))
+                _ui.update { it.copy(lsp = LspStatus.READY) }
+            } catch (e: Exception) {
+                _ui.update { it.copy(lsp = LspStatus.FAILED, lspMessage = e.message) }
+            } finally {
+                lspStarting = false
+            }
+        }
+    }
+
+    private fun stopLsp(notifyHelper: Boolean) {
+        val session = lspSession
+        lspSession = null
+        if (notifyHelper && session != null) {
+            helper.send("lsp.stop", kotlinx.serialization.json.buildJsonObject { put("session", kotlinx.serialization.json.JsonPrimitive(session)) })
+        }
+        send(EditorCommand.LspStop)
+        _ui.update { it.copy(lsp = LspStatus.OFF, lspMessage = null) }
+    }
+
+    /** The page went away (screen left composition): its language client is gone too. */
+    fun onEditorGone() {
+        webReady = false
+        stopLsp(notifyHelper = true)
+    }
+
+    /** JS → server, in order. */
+    fun lspSend(message: String) {
+        val session = lspSession ?: return
+        helper.send("lsp.send", kotlinx.serialization.json.buildJsonObject {
+            put("session", kotlinx.serialization.json.JsonPrimitive(session))
+            put("message", kotlinx.serialization.json.JsonPrimitive(message))
+        })
+    }
+
+    override fun onCleared() {
+        stopLsp(notifyHelper = true)
     }
 
     private fun send(command: EditorCommand) {
@@ -157,6 +263,11 @@ class EditorViewModel(
     /** The page (re)started: drop stale queued commands and rebuild every tab from our copies. */
     fun onEditorReady() {
         while (commandChannel.tryReceive().isSuccess) Unit
+        // A fresh page has a fresh language client: the server session must be fresh too.
+        val oldSession = lspSession
+        lspSession = null
+        if (oldSession != null) helper.send("lsp.stop", kotlinx.serialization.json.buildJsonObject { put("session", kotlinx.serialization.json.JsonPrimitive(oldSession)) })
+        webReady = true
         val state = _ui.value
         send(EditorCommand.Wrap(state.softWrap))
         for (tab in state.tabs) {
@@ -170,6 +281,8 @@ class EditorViewModel(
             pendingSaves.clear()
             _ui.update { ui -> ui.copy(tabs = ui.tabs.map { if (it.status == SaveStatus.SAVING) it.copy(status = SaveStatus.IDLE) else it }) }
         }
+        _ui.update { it.copy(lsp = LspStatus.OFF) }
+        maybeStartLsp()
     }
 
     fun open(path: String, line: Int? = null) {
@@ -194,11 +307,27 @@ class EditorViewModel(
                     }
                     send(EditorCommand.Load(file.path, file.text, language, target, null))
                     app.serverStore.addRecentFile(server.id, projectDir(), file.path)
+                    maybeStartLsp()
                 }
                 is ReadResult.Failed -> _ui.update { it.copy(loading = null, error = "${path.substringAfterLast('/')}: ${result.reason}") }
             }
         }
     }
+
+    fun onRenameRequest(word: String) = _ui.update { it.copy(renameWord = word) }
+
+    fun renameTo(name: String?) {
+        _ui.update { it.copy(renameWord = null) }
+        val trimmed = name?.trim().orEmpty()
+        if (trimmed.isNotEmpty()) send(EditorCommand.RenameTo(trimmed))
+    }
+
+    fun onInfo(message: String) = _ui.update { it.copy(notice = message) }
+
+    fun clearNotice() = _ui.update { it.copy(notice = null) }
+
+    /** Go-to-definition into a file that isn't open yet. */
+    fun onOpenFile(path: String) = open(path)
 
     fun select(path: String, line: Int = 0) {
         _ui.update { it.copy(active = path) }
@@ -275,9 +404,10 @@ class EditorViewModel(
         send(EditorCommand.GetText(id, target))
     }
 
-    private fun performSave(id: Int, path: String, text: String, force: Boolean) {
+    private fun performSave(id: Int, path: String, original: String, force: Boolean) {
         setStatus(path, SaveStatus.SAVING, null)
         viewModelScope.launch {
+            val text = formatBeforeSave(id, path, original)
             when (val result = writer.save(path, text, baseHash[path], projectDir(), force)) {
                 is SaveResult.Saved -> {
                     baseHash[path] = result.hash
@@ -298,6 +428,29 @@ class EditorViewModel(
     }
 
     private var pendingConflictId = 0
+
+    /**
+     * Prettier (+ ESLint --fix) through the helper when it's connected and "Format on save" is on.
+     * Any failure just saves the text as typed.
+     */
+    private suspend fun formatBeforeSave(id: Int, path: String, text: String): String {
+        if (helper.state.value !is dev.opencode.mobile.data.net.HelperState.Ready) return text
+        if (!app.serverStore.formatOnSave.first()) return text
+        if (path.substringAfterLast('.', "").lowercase() !in FORMATTABLE) return text
+        return try {
+            val root = writer.projectRoot(projectDir()) ?: return text
+            val result = helper.request("format", kotlinx.serialization.json.buildJsonObject {
+                put("root", kotlinx.serialization.json.JsonPrimitive(root))
+                put("path", kotlinx.serialization.json.JsonPrimitive(path))
+                put("text", kotlinx.serialization.json.JsonPrimitive(text))
+            }, timeoutMs = 15_000) as kotlinx.serialization.json.JsonObject
+            val formatted = (result["text"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return text
+            if (formatted != text) send(EditorCommand.Replace(id, path, formatted))
+            formatted
+        } catch (e: Exception) {
+            text
+        }
+    }
 
     fun conflictShowDiff() = _ui.update { ui -> ui.copy(conflict = ui.conflict?.copy(showDiff = true)) }
 

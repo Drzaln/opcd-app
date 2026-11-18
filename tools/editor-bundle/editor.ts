@@ -27,6 +27,11 @@ import { yaml } from "@codemirror/lang-yaml"
 import { xml } from "@codemirror/lang-xml"
 import { kotlin } from "@codemirror/legacy-modes/mode/clike"
 import { tags as t } from "@lezer/highlight"
+import {
+  LSPClient, LSPPlugin, Workspace, languageServerExtensions, jumpToDefinition,
+  findReferences, formatDocument, type WorkspaceFile,
+} from "@codemirror/lsp-client"
+import { lintGutter, openLintPanel } from "@codemirror/lint"
 
 interface Bridge {
   onReady(): void
@@ -38,6 +43,10 @@ interface Bridge {
   onSnapshot(path: string, text: string): void
   onError(message: string): void
   onFocus(focused: boolean): void
+  onLsp(message: string): void
+  onOpenFile(path: string): void
+  onRenameRequest(word: string): void
+  onInfo(message: string): void
 }
 
 declare global {
@@ -49,7 +58,7 @@ declare global {
 
 const bridge: Bridge = window.AndroidEditor ?? {
   onReady() {}, onChange() {}, onSaveRequested() {}, onCursor() {}, onCommand() {},
-  onText() {}, onSnapshot() {}, onError(m: string) { console.error(m) }, onFocus() {},
+  onText() {}, onSnapshot() {}, onError(m: string) { console.error(m) }, onFocus() {}, onLsp() {}, onOpenFile() {}, onRenameRequest() {}, onInfo() {},
 }
 
 function languageFor(name: string): Extension {
@@ -119,6 +128,16 @@ const theme = EditorView.theme({
   ".cm-panel label": { fontSize: "13px", color: v("muted"), margin: "3px 6px", display: "inline-flex", alignItems: "center" },
   ".cm-panel.cm-search [name=close]": { fontSize: "22px", padding: "4px 10px", color: v("muted") },
   ".cm-tooltip": { backgroundColor: v("popup"), border: `1px solid ${v("popupBorder")}`, color: v("text"), boxShadow: "0 6px 18px rgba(0,0,0,.35)" },
+  ".cm-tooltip-autocomplete ul li": { padding: "6px 10px !important", fontFamily: "OcMono, monospace" },
+  ".cm-tooltip-autocomplete ul li[aria-selected]": { backgroundColor: v("accentSoft"), color: v("text") },
+  ".cm-completionDetail": { color: v("muted"), fontStyle: "normal", marginLeft: "12px" },
+  ".cm-completionMatchedText": { textDecoration: "none", color: v("link") },
+  ".cm-tooltip-hover, .cm-tooltip-lint, .cm-lsp-signature-tooltip": { maxWidth: "min(90vw, 520px)", fontSize: "13px" },
+  ".cm-diagnostic-error": { borderLeftColor: v("error") },
+  ".cm-diagnostic-warning": { borderLeftColor: v("warning") },
+  ".cm-gutter-lint": { width: "10px" },
+  ".cm-lint-marker": { width: "8px", height: "8px" },
+  ".cm-panel.cm-panel-lint ul [aria-selected]": { backgroundColor: v("accentSoft") },
   ".cm-foldPlaceholder": { backgroundColor: v("accentSoft"), border: "none", color: v("link") },
 }, { dark: true })
 
@@ -130,6 +149,7 @@ let wrapOn = false
 
 interface Tab {
   path: string
+  lang: string
   state: EditorState
   saved: Text
   pending: Map<number, Text>
@@ -155,7 +175,97 @@ function detectIndent(text: string): string {
   return two >= four / 2 && two > 0 ? "  " : four > 0 ? "    " : "  "
 }
 
-function extensions(lang: string, text: string): Extension[] {
+// ---- language server (TypeScript via the optional Mac helper) ----
+
+/** Rename asks Kotlin for the new name (a native dialog); __ocRenameTo then applies it everywhere. */
+function requestRename(v: EditorView): boolean {
+  const word = v.state.wordAt(v.state.selection.main.head)
+  if (!word || !LSPPlugin.get(v)) return false
+  bridge.onRenameRequest(v.state.sliceDoc(word.from, word.to))
+  return true
+}
+
+const LSP_LANGUAGE: Record<string, string> = {
+  typescript: "typescript", tsx: "typescriptreact", javascript: "javascript", jsx: "javascriptreact",
+}
+const lspSlot = new Compartment()
+let lspClient: LSPClient | null = null
+let lspRoot = ""
+const lspHandlers = new Set<(value: string) => void>()
+const pendingDisplay = new Map<string, (view: EditorView | null) => void>()
+
+const uriFor = (path: string) => lspRoot + "/" + path.split("/").map(encodeURIComponent).join("/")
+function pathFor(uri: string): string | null {
+  if (!uri.startsWith(lspRoot + "/")) return null
+  return uri.slice(lspRoot.length + 1).split("/").map(decodeURIComponent).join("/")
+}
+
+function lspFor(path: string, lang: string): Extension {
+  const id = LSP_LANGUAGE[lang]
+  if (!lspClient || !id) return []
+  return [lspClient.plugin(uriFor(path), id), lintGutter()]
+}
+
+/**
+ * All tabs share one EditorView (one EditorState per tab), so the server sees the visible tab as the
+ * open document. Jumping to another file asks Kotlin to open it as a tab and waits for the load.
+ */
+class TabWorkspace extends Workspace {
+  files: (WorkspaceFile & { view: EditorView })[] = []
+  private versions: Record<string, number> = {}
+
+  private nextVersion(uri: string) { return this.versions[uri] = (this.versions[uri] ?? -1) + 1 }
+
+  syncFiles() {
+    const result = []
+    for (const file of this.files) {
+      const plugin = LSPPlugin.get(file.view)
+      if (!plugin) continue
+      const changes = plugin.unsyncedChanges
+      if (!changes.empty) {
+        result.push({ changes, file, prevDoc: file.doc })
+        file.doc = file.view.state.doc
+        file.version = this.nextVersion(file.uri)
+        plugin.clear()
+      }
+    }
+    return result
+  }
+
+  openFile(uri: string, languageId: string, editor: EditorView) {
+    this.closeFile(uri)
+    const file = { uri, languageId, version: this.nextVersion(uri), doc: editor.state.doc, view: editor, getView: () => editor }
+    this.files.push(file)
+    this.client.didOpen(file)
+  }
+
+  closeFile(uri: string) {
+    if (!this.getFile(uri)) return
+    this.files = this.files.filter((f) => f.uri !== uri)
+    this.client.didClose(uri)
+  }
+
+  displayFile(uri: string): Promise<EditorView | null> {
+    const path = pathFor(uri)
+    if (!path) return Promise.resolve(null)
+    if (current === path) return Promise.resolve(view)
+    // Always switch through Kotlin (it owns the active tab); resolves when __ocShow/__ocLoad lands.
+    return new Promise((resolve) => {
+      pendingDisplay.set(path, resolve)
+      setTimeout(() => { if (pendingDisplay.delete(path)) resolve(null) }, 15000)
+      bridge.onOpenFile(path)
+    })
+  }
+}
+
+function reconfigureLsp() {
+  if (current) view.dispatch({ effects: lspSlot.reconfigure(lspFor(current, tabs.get(current)?.lang ?? "plain")) })
+  for (const tab of tabs.values()) {
+    if (tab.path !== current) tab.state = tab.state.update({ effects: lspSlot.reconfigure(lspFor(tab.path, tab.lang)) }).state
+  }
+}
+
+function extensions(lang: string, text: string, path = ""): Extension[] {
   const unit = detectIndent(text)
   return [
     lineNumbers(),
@@ -179,12 +289,14 @@ function extensions(lang: string, text: string): Extension[] {
     tabSize.of(EditorState.tabSize.of(unit === "\t" ? 4 : unit.length)),
     language.of(languageFor(lang)),
     wrap.of(wrapOn ? EditorView.lineWrapping : []),
+    lspSlot.of(lspFor(path, lang)),
     theme,
     Prec.highest(keymap.of([
       { key: "Mod-s", preventDefault: true, run: () => { if (current) bridge.onSaveRequested(current); return true } },
       { key: "Mod-p", preventDefault: true, run: () => { bridge.onCommand("palette"); return true } },
       { key: "Mod-g", preventDefault: true, run: gotoLine },
       { key: "Mod-w", preventDefault: true, run: () => { bridge.onCommand("closeTab"); return true } },
+      { key: "F2", preventDefault: true, run: requestRename },
     ])),
     keymap.of([
       ...closeBracketsKeymap,
@@ -272,12 +384,14 @@ const api: Record<string, (...args: any[]) => unknown> = {
     saveCurrent()
     const text = decode(b64)
     const saved = savedB64 != null ? decode(savedB64) : text
-    const state = EditorState.create({ doc: text, extensions: extensions(lang, saved) })
-    tabs.set(path, { path, state, saved: state.toText(saved), pending: new Map() })
+    const state = EditorState.create({ doc: text, extensions: extensions(lang, saved, path) })
+    tabs.set(path, { path, lang, state, saved: state.toText(saved), pending: new Map() })
     current = path
     view.setState(state)
     gotoLineNumber(line)
     if (savedB64 != null) scheduleChange()
+    const waiting = pendingDisplay.get(path)
+    if (waiting) { pendingDisplay.delete(path); waiting(view) }
   },
   __ocShow(path: string, line: number) {
     const tab = tabs.get(path)
@@ -288,6 +402,8 @@ const api: Record<string, (...args: any[]) => unknown> = {
       view.setState(tab.state)
     }
     gotoLineNumber(line)
+    const waiting = pendingDisplay.get(path)
+    if (waiting) { pendingDisplay.delete(path); waiting(view) }
     return true
   },
   __ocHas(path: string) {
@@ -298,6 +414,8 @@ const api: Record<string, (...args: any[]) => unknown> = {
     if (current === path) {
       current = null
       view.setState(EditorState.create({ doc: "", extensions: extensions("plain", "") }))
+      pendingDisplay.get(path)?.(null)
+      pendingDisplay.delete(path)
     }
   },
   __ocGetText(id: number, path: string) {
@@ -353,10 +471,113 @@ const api: Record<string, (...args: any[]) => unknown> = {
       undo, redo, indentMore, indentLess, toggleComment, insertTab, selectAll,
       left: cursorCharLeft, right: cursorCharRight,
       find: openSearchPanel, goToLine: gotoLine,
+      definition: jumpToDefinition, references: findReferences,
+      rename: requestRename,
+      format: formatDocument, problems: openLintPanel,
     }
     const run = commands[name]
     if (run) run(view)
     view.focus()
+  },
+  // Format-on-save rewrote the text about to be saved: apply it as one minimal edit (keeps the cursor
+  // and undo), and make it the doc that `__ocSaved(id)` will mark as saved.
+  __ocReplace(id: number, path: string, b64: string) {
+    const tab = tabs.get(path)
+    if (!tab) return
+    const next = decode(b64)
+    const state = path === current ? view.state : tab.state
+    const old = state.sliceDoc()
+    let start = 0
+    while (start < old.length && start < next.length && old[start] === next[start]) start++
+    let endOld = old.length, endNew = next.length
+    while (endOld > start && endNew > start && old[endOld - 1] === next[endNew - 1]) { endOld--; endNew-- }
+    // One edit spanning the first..last difference would swallow the cursor; formatters rarely move
+    // lines far, so keep the cursor on the same line number and column (clamped).
+    const head = state.selection.main.head
+    const line = state.doc.lineAt(head)
+    const changes = { from: start, to: endOld, insert: next.slice(start, endNew) }
+    const after = state.update({ changes }).state.doc
+    const target = after.line(Math.min(line.number, after.lines))
+    const spec = { changes, selection: { anchor: Math.min(target.from + (head - line.from), target.to) }, userEvent: "format" }
+    if (path === current) view.dispatch(spec)
+    else tab.state = tab.state.update(spec).state
+    tab.pending.set(id, (path === current ? view.state : tab.state).doc)
+  },
+  /**
+   * Project-wide rename. lsp-client's own rename only edits files that are on screen, which with one
+   * shared view would leave other files half-renamed; here every file in the WorkspaceEdit is opened
+   * as a tab (if it isn't already) and edited. Nothing is saved — the tabs show as dirty.
+   */
+  async __ocRenameTo(newName: string) {
+    const plugin = LSPPlugin.get(view)
+    const origin = current
+    if (!plugin || !origin || !newName) return
+    const head = view.state.selection.main.head
+    const word = view.state.wordAt(head)
+    try {
+      plugin.client.sync()
+      const edit: any = await plugin.client.request("textDocument/rename", {
+        textDocument: { uri: plugin.uri },
+        position: plugin.toPosition(word ? word.from : head),
+        newName,
+      })
+      const byUri = new Map<string, { range: any; newText: string }[]>()
+      for (const [uri, edits] of Object.entries(edit?.changes ?? {})) byUri.set(uri, edits as any)
+      for (const dc of edit?.documentChanges ?? []) if (dc?.textDocument?.uri) byUri.set(dc.textDocument.uri, dc.edits)
+      if (byUri.size === 0) { bridge.onInfo("Nothing to rename here"); return }
+      const skipped: string[] = []
+      let files = 0
+      for (const [uri, edits] of byUri) {
+        const path = pathFor(uri)
+        if (!path) { skipped.push(uri); continue }
+        if (!tabs.has(path)) await lspClient!.workspace.displayFile(uri)
+        const tab = tabs.get(path)
+        if (!tab) { skipped.push(path); continue }
+        const state = path === current ? view.state : tab.state
+        const at = (p: { line: number; character: number }) => {
+          const line = state.doc.line(Math.min(p.line + 1, state.doc.lines))
+          return Math.min(line.from + p.character, line.to)
+        }
+        const spec = { changes: edits.map((e) => ({ from: at(e.range.start), to: at(e.range.end), insert: e.newText })), userEvent: "rename" }
+        if (path === current) view.dispatch(spec)
+        else tab.state = tab.state.update(spec).state
+        files++
+        if (path === current) scheduleChange()
+        else bridge.onChange(path, !tab.state.doc.eq(tab.saved), "")
+      }
+      if (current !== origin) bridge.onOpenFile(origin)
+      bridge.onInfo(`Renamed in ${files} file${files === 1 ? "" : "s"} — save each to apply` + (skipped.length ? ` (skipped ${skipped.length} outside the project)` : ""))
+    } catch (e: any) {
+      bridge.onInfo(`Rename failed: ${e?.message ?? e}`)
+    }
+  },
+  __ocLspStart(rootUri: string) {
+    api.__ocLspStop()
+    lspRoot = rootUri.replace(/\/+$/, "")
+    lspClient = new LSPClient({
+      rootUri: lspRoot,
+      timeout: 10000,
+      workspace: (client) => new TabWorkspace(client),
+      extensions: languageServerExtensions(),
+    })
+    lspClient.connect({
+      send: (message: string) => bridge.onLsp(message),
+      subscribe: (handler: (value: string) => void) => { lspHandlers.add(handler) },
+      unsubscribe: (handler: (value: string) => void) => { lspHandlers.delete(handler) },
+    })
+    reconfigureLsp()
+  },
+  __ocLspRecv(b64: string) {
+    const message = decode(b64)
+    for (const handler of lspHandlers) handler(message)
+  },
+  __ocLspStop() {
+    if (!lspClient) return
+    const client = lspClient
+    lspClient = null
+    reconfigureLsp()
+    client.disconnect()
+    lspHandlers.clear()
   },
   __ocFocus() {
     view.focus()
