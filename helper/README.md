@@ -9,7 +9,7 @@ the helper adds what opencode doesn't:
 | ✅ | **TypeScript language server** in the editor — completions, errors, hover, go to definition, project-wide rename, find references |
 | ✅ | **Format on save** — Prettier (the project's own version and config), then `eslint --fix` when the project has ESLint |
 | ✅ | **Metro** — start / stop / reload for React Native and Expo projects, live logs with errors highlighted |
-| ⏳ | adb build & install, wireless pairing, logcat |
+| ✅ | **Android** — the Mac's adb devices, wireless pair/connect, build & run on a device, logcat |
 | ⏳ | Live emulator screen with touch |
 
 The app only shows these features when the helper answers; everything else works without it.
@@ -68,6 +68,12 @@ lsp.start {root} → {session}         spawns typescript-language-server --stdio
 lsp.send  {session, message}         raw JSON-RPC to the server
 lsp.stop  {session}
 format    {root, path, text} → {text, changed, steps[], warnings[]}
+adb.devices                → {adb, devices: [{serial, state, model, transport}]}
+adb.pair    {host, port, code} / adb.connect {host, port} / adb.disconnect {serial} / adb.reverse {serial, port?}
+run.status  {root, tail?}  → {state, command, serial, errors, detected, detectError, lines[]}
+run.start   {root, serial} → status   (expo run:android | react-native run-android | ./gradlew installDebug)
+run.stop    {root}         → status
+logcat.start {serial, mode: app|errors|all} → {id}     logcat.stop {id}
 metro.status {root, tail?} → {state, kind, command, port, errors, detected, detectError, lines[]}
 metro.start  {root, port?} → status   (port 8081 by default; detects Expo vs React Native)
 metro.stop   {root}        → status
@@ -75,8 +81,18 @@ metro.reload {root}        → {via: "http" | "stdin"}
 ping
 notifications: lsp.message {session, message}, lsp.exit {session, code},
                metro.log {root, line: {seq, level, text, frame?}, replace},
-               metro.status {root, state, …}
+               metro.status {root, state, …},
+               run.log {root, line}, run.status {root, state, …},
+               logcat.lines {id, lines: [{level, text}], skipped}, logcat.exit {id, code}
 ```
+
+**Android** needs adb (Android platform-tools; found via `ANDROID_HOME`, `~/Library/Android/sdk`,
+Homebrew or PATH) — without it the helper doesn't advertise `adb` and the app hides the panel. Build &
+run belongs to the helper (a 4G drop doesn't cancel a Gradle build) and runs `adb reverse tcp:8081`
+first so the app reaches Metro. Logcat streams belong to the phone connection, start with the filtered
+backlog (`logcat -d`), then stream live in 250 ms batches (max 300 lines; the rest are reported as
+skipped). Wireless debugging is Android 11+ and Wi-Fi only on the phone: pair once with the 6-digit
+code, then connect to the IP:port the phone shows.
 
 **Metro** runs per project root and belongs to the helper, not to a phone connection: a 4G drop
 doesn't stop the bundler, and a phone that reconnects calls `metro.status` to get the state and the
@@ -87,7 +103,8 @@ works, logs don't), `exited` (crashed). Detection reads `package.json`: an `expo
 `react-native start`, else it refuses. Output is split on CR/LF with ANSI stripped; the bundling
 progress line is collapsed into one entry (`replace: true`); lines are classified `info` / `warn` /
 `error`, and code-frame lines under an error carry `frame: true` (same level, not counted again).
-Reload posts to Metro's `/reload` (falls back to `r` on stdin). Stop kills the whole process group;
+Reload broadcasts `reload` on the dev server's `/message` socket like Metro's `r` key (Expo has no
+`POST /reload`); falls back to `/reload`, then `r` on stdin. Stop kills the whole process group;
 the helper stops every Metro when it exits. `CI` isn't set (Expo disables reloads in CI mode).
 
 The project's own TypeScript is used when it has one; otherwise the bundled TypeScript 5.9
@@ -97,5 +114,6 @@ The project's own TypeScript is used when it has one; otherwise the bundled Type
 
 ```bash
 npm test   # pairing, auth refusal, LSP completions/diagnostics/definition through the relay, format,
-           # Metro detect/start/logs/reload/stop against a stand-in `react-native start`
+           # Metro detect/start/logs/reload/stop against a stand-in `react-native start`,
+           # adb devices/connect/pair, build & run and logcat against a fake adb + gradlew
 ```

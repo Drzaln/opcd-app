@@ -319,7 +319,7 @@ V2 differences that matter (verified against 2.0.26):
   `git diff HEAD` (untracked: `--no-index /dev/null`) rendered with `DiffLines.parsePatch`; Commit… runs
   `git add -A && git commit -q -m '<quoted>'`. No push.
 
-## Phase 2 — optional Mac helper (slices 1–2 built: pairing + TypeScript + format on save, Metro)
+## Phase 2 — optional Mac helper (slices 1–3 built: pairing + TypeScript + format on save, Metro, adb)
 
 **Built (branch `feat/mac-helper`):** `helper/` (Node/TS, esbuild → `dist/helper.mjs`, `npm start`,
 `npm test`; see `helper/README.md` for setup, security and the wire protocol).
@@ -355,7 +355,7 @@ macOS Allow dialog → Connected; LSP ready on `Signup.tsx`; completions (`trim�
 (Prettier output on disk). A save with formatting took ~10 s over 4G (format + write + verify are
 separate round trips).
 
-**Slice 2 — Metro (`tuc.3`, branch `feat/mac-helper`, uncommitted):**
+**Slice 2 — Metro (`tuc.3`, commit `070c734`):**
 - **Helper** (`helper/src/metro.ts`): `MetroManager`, one Metro per project root, owned by the helper
   (not the socket) so a 4G drop doesn't kill the bundler. `metro.status|start|stop|reload`;
   `metro.log` / `metro.status` notifications go to every connected phone. Detection from
@@ -394,7 +394,58 @@ separate round trips).
   the screen — `MetroSheet` now skips the partial state. Not tried: a real RN app on a device
   fetching the bundle (needs adb — next slice).
 
-**Next slices:** adb/logcat (`tuc.4`), emulator screen (`tuc.5`). Design notes below still apply.
+**Slice 3 — adb: devices, build & run, logcat (`tuc.4`, branch `feat/mac-helper`, uncommitted):**
+- **Helper** (`helper/src/adb.ts`): adb found via `OC_HELPER_ADB` (tests), `ANDROID_HOME` /
+  `ANDROID_SDK_ROOT`, `~/Library/Android/sdk`, Homebrew, PATH; `/helper/info` adds the `adb` feature
+  only when it exists. `adb.devices` (parsed `devices -l`: serial, state, model, usb/wifi/emulator),
+  `adb.pair` (6-digit code, Android 11+ wireless debugging), `adb.connect`, `adb.disconnect`,
+  `adb.reverse`; hosts/ports/serials validated (no shell, `execFile`). **Build & run** (`run.*`,
+  helper-owned per project root like Metro, `run.log` / `run.status` to every phone): Expo →
+  `expo run:android --device <serial> --no-bundler`, React Native → `react-native run-android
+  --deviceId <serial> --no-packager`, else `./gradlew installDebug` (root or `android/`); always
+  `ANDROID_SERIAL`, `ANDROID_HOME` filled in when a launchd helper lacks it, `adb reverse tcp:8081`
+  first so the app reaches the helper's Metro. Gradle's stderr isn't treated as red; only real
+  failures are. **Logcat** (`logcat.start|stop`, owned by the connection — a view, not a job): modes
+  App JS (`ReactNativeJS ReactNative AndroidRuntime:E Expo`), Errors (`*:E`), All (`*:I`); a filtered
+  backlog from `logcat -d` first (`-T N` counts lines *before* the tag filter, so a quiet app's JS lines
+  fell out of it), then `-T 1` live; batched every 250 ms, max 300 lines per batch, the rest counted as
+  skipped.
+- **Metro reload fixed** (slice 2 bug found here): Expo's dev server has no `POST /reload` — it answered
+  with a manifest (200), so Reload "succeeded" and did nothing. Reload now broadcasts
+  `{version: 2, method: "reload"}` on the dev server's `/message` socket (what Metro's `r` key does;
+  Expo and the RN CLI both have it), then falls back to `/reload` (non-JSON reply only) and `r` on stdin.
+- **App** (`ui/editor/Android.kt`): `AndroidController` (on `EditorViewModel.android`) — devices,
+  selection (first ready device by default; kept while it's still listed), Run/Stop mirrored like
+  Metro (a new run clears the log), logcat stream opened only while the Logcat tab is on screen
+  (restarted on device/mode change; lines that arrive before `logcat.start` replies with the id are
+  held and merged — the backlog races the reply), lines shown as `HH:mm:ss L Tag: msg`, text filter,
+  Clear, skipped-lines note. **Connect…** dialog: host prefilled with this phone's Tailscale IPv4
+  (100.64/10 from `NetworkInterface`), port 5555, optional pairing port + code → `adb pair` then
+  `adb connect`. Wide layout: **Android** tab in the bottom panel (dot while building, red count of
+  unseen errors); phones: an **Android** app-bar button (Code tab + editor) opening `AndroidSheet`.
+  Shared `LogLineRow` / `FilterChipText` with Metro.
+- **Verified:** `npm test` (5 tests; the new one runs a fake adb + fake gradlew: device parsing,
+  connect ok/refused/bad host, pair code check, Gradle build with `ANDROID_SERIAL` and no false red
+  lines, logcat backlog first then live info/warn/error). App unit test `AndroidLogcatTest`. Emulator
+  (Medium_Phone, loopback helper, real adb; the user's phone was also attached over USB, so the
+  emulator was picked explicitly — nothing was installed on the phone): in the scratch Expo project,
+  Metro Start, Android → Emulator → **Run** = real `expo run:android` (prebuild + Gradle, BUILD
+  SUCCESSFUL in 40 s, warnings orange, no red) → installed and launched on the emulator, bundle served
+  by the helper's Metro through `adb reverse`; Metro **Reload** re-ran the app (logs + LogBox toasts);
+  **Logcat** App JS showed the app's `console.log/warn/error` as info/warn/error; Errors mode streams
+  live. Known: a reload only reaches an app that's in the foreground (Android pauses a background RN
+  app), so with app and editor on the same phone, switch to the app, then it reloads on its next
+  Fast Refresh / Reload. **Physical phone** (vivo I2219, release
+  build, real helper over Tailscale, phone also on USB to the Mac): the Android sheet listed
+  "I2219 · USB"; **Run** in the scratch Expo project built and installed the app on the phone itself
+  (Google Play Protect asked to scan the unknown app — the user answered it on the phone; expect that
+  prompt on first install of a debug build), launched it with its bundle from the helper's Metro over
+  `adb reverse`; a reload brought its `console.log/warn/error` into **Logcat → App JS** in OpenCode on
+  the same phone (the filtered backlog took ~2 s on the vivo). Test app uninstalled and the reverse
+  removed afterwards. Not tried: wireless pairing (Android's wireless debugging needs the phone on
+  Wi-Fi), the vivo's floating assistant bubble can cover the sheet's Run button (tap just above it).
+
+**Next slice:** emulator screen (`tuc.5`). Design notes below still apply.
 
 ### Phase 2 design notes
 

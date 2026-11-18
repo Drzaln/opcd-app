@@ -17,13 +17,21 @@ import { confirmPairing, notify, type Approval } from "./confirm.ts"
 import { LspSession } from "./lsp.ts"
 import { formatText, insideRoot } from "./format.ts"
 import { MetroManager } from "./metro.ts"
+import { RunManager, LogcatStream, listDevices, pair, connect, disconnect, reverse, checkSerial, findAdb, type LogcatMode } from "./adb.ts"
 
 export const VERSION = "0.1.0"
 export const PROTOCOL = 1
 export const FEATURES = ["pair", "lsp", "format", "metro"]
 
+/** Features this Mac can offer right now ("adb" only when platform-tools are installed). */
+export function features(): string[] {
+  return findAdb() ? [...FEATURES, "adb"] : FEATURES
+}
+
 /** One Metro registry for the whole helper (shared by every interface it listens on). */
 export const metro = new MetroManager()
+/** Build & run per project root, also helper-owned. */
+export const runs = new RunManager()
 
 interface PendingPair {
   code: string
@@ -51,7 +59,7 @@ export function createHelperServer(options: ServerOptions): Server {
   async function route(req: IncomingMessage, res: ServerResponse) {
     const url = new URL(req.url ?? "/", "http://helper")
     if (req.method === "GET" && url.pathname === "/helper/info") {
-      return json(res, 200, { name: "opencode-mobile-helper", version: VERSION, hostname: hostname(), protocol: PROTOCOL, features: FEATURES })
+      return json(res, 200, { name: "opencode-mobile-helper", version: VERSION, hostname: hostname(), protocol: PROTOCOL, features: features() })
     }
     if (req.method === "POST" && url.pathname === "/helper/pair/start") {
       const body = await readJson(req)
@@ -106,8 +114,12 @@ function onConnection(ws: WebSocket, deviceName: string) {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ method, params }))
   }
   // Metro keeps running across reconnects; every connected phone sees its logs and state.
-  const unsubscribe = metro.subscribe((event, root, payload) =>
+  const unsubscribeMetro = metro.subscribe((event, root, payload) =>
     notifyClient(event === "log" ? "metro.log" : "metro.status", { root, ...(payload as object) }))
+  const unsubscribeRuns = runs.subscribe((event, root, payload) =>
+    notifyClient(event === "log" ? "run.log" : "run.status", { root, ...(payload as object) }))
+  // Logcat streams are views: they end with this connection.
+  const logcats = new Map<string, LogcatStream>()
 
   ws.on("message", async (raw) => {
     let msg: any
@@ -151,6 +163,40 @@ function onConnection(ws: WebSocket, deviceName: string) {
           return reply(await metro.stop(checkRoot(msg.params?.root)))
         case "metro.reload":
           return reply(await metro.reload(checkRoot(msg.params?.root)))
+        case "adb.devices":
+          return reply(await listDevices())
+        case "adb.pair":
+          return reply(await pair(msg.params?.host, msg.params?.port, msg.params?.code))
+        case "adb.connect":
+          return reply(await connect(msg.params?.host, msg.params?.port))
+        case "adb.disconnect":
+          return reply(await disconnect(msg.params?.serial))
+        case "adb.reverse":
+          return reply(await reverse(msg.params?.serial, checkPort(msg.params?.port)))
+        case "run.status":
+          return reply(runs.status(checkRoot(msg.params?.root), Number(msg.params?.tail ?? 500)))
+        case "run.start":
+          return reply(await runs.start(checkRoot(msg.params?.root), checkSerial(msg.params?.serial)))
+        case "run.stop":
+          return reply(await runs.stop(checkRoot(msg.params?.root)))
+        case "logcat.start": {
+          const mode = String(msg.params?.mode ?? "app") as LogcatMode
+          if (!["app", "errors", "all"].includes(mode)) return fail("Unknown logcat mode")
+          const id = randomBytes(6).toString("hex")
+          const stream = new LogcatStream(
+            id,
+            checkSerial(msg.params?.serial),
+            mode,
+            (lines, skipped) => notifyClient("logcat.lines", { id, lines, skipped }),
+            (code) => { logcats.delete(id); notifyClient("logcat.exit", { id, code }) },
+          )
+          logcats.set(id, stream)
+          return reply({ id })
+        }
+        case "logcat.stop":
+          logcats.get(String(msg.params?.id))?.stop()
+          logcats.delete(String(msg.params?.id))
+          return reply({ ok: true })
         default:
           return fail(`Unknown method ${msg.method}`)
       }
@@ -160,7 +206,10 @@ function onConnection(ws: WebSocket, deviceName: string) {
   })
 
   ws.on("close", () => {
-    unsubscribe()
+    unsubscribeMetro()
+    unsubscribeRuns()
+    for (const l of logcats.values()) l.stop()
+    logcats.clear()
     for (const s of sessions.values()) s.dispose()
     sessions.clear()
     console.log(`  ${deviceName} disconnected`)

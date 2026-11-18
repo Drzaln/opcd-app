@@ -102,7 +102,7 @@ fun CodeScreen(
                 onViewReadOnly = onViewReadOnly,
                 title = projectName,
                 bottomBar = { AppBottomBar(AppTab.CODE, onTab) },
-                actions = { MetroAction(appVm = appVm, vm = vm) },
+                actions = { MetroAction(appVm = appVm, vm = vm); AndroidAction(appVm = appVm, vm = vm) },
             )
         } else {
             WideCode(
@@ -123,7 +123,7 @@ fun CodeScreen(
     }
 }
 
-private enum class BottomPanel(val label: String) { TERMINAL("Terminal"), GIT("Git"), METRO("Metro") }
+private enum class BottomPanel(val label: String) { TERMINAL("Terminal"), GIT("Git"), METRO("Metro"), ANDROID("Android") }
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -153,10 +153,16 @@ private fun WideCode(
     val helperState by appVm.helper.collectAsState()
     val metroAvailable = MetroController.available(helperState)
     val metroUi by vm.metro.ui.collectAsState()
+    val androidAvailable = AndroidController.available(helperState)
+    val androidUi by vm.android.ui.collectAsState()
     // The helper went away (or never advertised Metro): don't leave an empty Metro panel open.
     LaunchedEffect(metroAvailable) {
         if (!metroAvailable && panel == BottomPanel.METRO) panel = BottomPanel.TERMINAL
         if (!metroAvailable && lastPanel == BottomPanel.METRO) lastPanel = BottomPanel.TERMINAL
+    }
+    LaunchedEffect(androidAvailable) {
+        if (!androidAvailable && panel == BottomPanel.ANDROID) panel = BottomPanel.TERMINAL
+        if (!androidAvailable && lastPanel == BottomPanel.ANDROID) lastPanel = BottomPanel.TERMINAL
     }
 
     Row(Modifier.fillMaxSize()) {
@@ -235,7 +241,7 @@ private fun WideCode(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    for (tab in BottomPanel.values().filter { it != BottomPanel.METRO || metroAvailable }) {
+                    for (tab in BottomPanel.values().filter { (it != BottomPanel.METRO || metroAvailable) && (it != BottomPanel.ANDROID || androidAvailable) }) {
                         val selected = panel == tab
                         Box(
                             Modifier
@@ -254,6 +260,7 @@ private fun WideCode(
                                     color = if (selected) c.textPrimary else c.textSecondary,
                                 )
                                 if (tab == BottomPanel.METRO) MetroTabBadge(metroUi)
+                                if (tab == BottomPanel.ANDROID) AndroidTabBadge(androidUi)
                             }
                         }
                     }
@@ -272,6 +279,7 @@ private fun WideCode(
                     }
                     BottomPanel.GIT -> ChangesPanel(vm = vm, modifier = Modifier.fillMaxWidth().height(190.dp))
                     BottomPanel.METRO -> MetroPanel(metro = vm.metro, modifier = Modifier.fillMaxWidth().height(if (tall) 240.dp else 190.dp))
+                    BottomPanel.ANDROID -> AndroidPanel(android = vm.android, modifier = Modifier.fillMaxWidth().height(if (tall) 260.dp else 190.dp))
                     null -> Unit
                 }
                 }

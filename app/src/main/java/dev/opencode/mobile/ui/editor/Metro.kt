@@ -302,7 +302,7 @@ fun MetroPanel(metro: MetroController, modifier: Modifier = Modifier) {
                 )
             } else {
                 LazyColumn(state = list, modifier = Modifier.fillMaxSize()) {
-                    items(shown, key = { it.seq }) { line -> MetroLogRow(line) }
+                    items(shown, key = { it.seq }) { line -> LogLineRow(line) }
                 }
             }
         }
@@ -310,8 +310,9 @@ fun MetroPanel(metro: MetroController, modifier: Modifier = Modifier) {
     }
 }
 
+/** One log line (Metro, build output, logcat): errors on errorBg, warnings in the warning colour. */
 @Composable
-private fun MetroLogRow(line: MetroLine) {
+fun LogLineRow(line: MetroLine) {
     val c = OcTheme.colors
     val (fg, bg) = when (line.level) {
         MetroLevel.ERROR -> c.errorText to c.errorBg
@@ -329,7 +330,7 @@ private fun MetroLogRow(line: MetroLine) {
 }
 
 @Composable
-private fun FilterChipText(label: String, selected: Boolean, onClick: () -> Unit) {
+internal fun FilterChipText(label: String, selected: Boolean, onClick: () -> Unit) {
     val c = OcTheme.colors
     Text(
         label,

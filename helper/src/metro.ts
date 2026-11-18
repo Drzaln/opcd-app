@@ -4,6 +4,7 @@
 import { spawn, type ChildProcess } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import WebSocket from "ws"
 
 export type MetroKind = "expo" | "react-native"
 export type LogLevel = "info" | "warn" | "error"
@@ -144,11 +145,29 @@ class MetroProcess {
     })
   }
 
-  /** Reload the connected apps: Metro's /reload broadcast, or `r` on stdin as a fallback. */
-  async reload(): Promise<"http" | "stdin"> {
+  /**
+   * Reload the connected apps the way Metro's `r` key does: a `reload` broadcast on the dev server's
+   * `/message` socket (Expo and the React Native CLI both have it). `POST /reload` is only the old RN
+   * CLI's — Expo answers it with a manifest, which looked like success but reloaded nothing.
+   */
+  async reload(): Promise<"message" | "http" | "stdin"> {
+    const port = this.status.port
+    const viaSocket = await new Promise<boolean>((resolve) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/message`)
+      const timer = setTimeout(() => { ws.terminate(); resolve(false) }, 3000)
+      ws.on("open", () => {
+        ws.send(JSON.stringify({ version: 2, method: "reload" }), () => {
+          clearTimeout(timer)
+          setTimeout(() => ws.close(), 200)
+          resolve(true)
+        })
+      })
+      ws.on("error", () => { clearTimeout(timer); resolve(false) })
+    })
+    if (viaSocket) { this.push("Reload sent to connected apps", "info"); return "message" }
     try {
-      const res = await fetch(`http://127.0.0.1:${this.status.port}/reload`, { method: "POST", signal: AbortSignal.timeout(2000) })
-      if (res.ok) { this.push("Reload sent to connected apps", "info"); return "http" }
+      const res = await fetch(`http://127.0.0.1:${port}/reload`, { method: "POST", signal: AbortSignal.timeout(2000) })
+      if (res.ok && !(res.headers.get("content-type") ?? "").includes("json")) { this.push("Reload sent to connected apps", "info"); return "http" }
     } catch { /* fall through */ }
     if (this.proc?.stdin?.writable) { this.proc.stdin.write("r"); this.push("Reload sent (r)", "info"); return "stdin" }
     throw new Error("Metro isn't reachable")

@@ -4,7 +4,7 @@
 //   node dist/helper.mjs devices                          list paired devices
 //   node dist/helper.mjs revoke <id|name>                 unpair a device
 import { execFileSync } from "node:child_process"
-import { createHelperServer, metro, VERSION } from "./server.ts"
+import { createHelperServer, metro, runs, VERSION } from "./server.ts"
 import { loadDevices, revoke } from "./auth.ts"
 
 const args = process.argv.slice(2)
@@ -61,7 +61,7 @@ console.log("  Pair from the app: Settings → Mac helper → Pair.")
 // Take Metro (and its watchers) down with the helper instead of leaving orphans on the port.
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
   process.once(signal, () => {
-    metro.stopAll().finally(() => process.exit(0))
+    Promise.all([metro.stopAll(), runs.stopAll()]).finally(() => process.exit(0))
     setTimeout(() => process.exit(0), 5000).unref()
   })
 }

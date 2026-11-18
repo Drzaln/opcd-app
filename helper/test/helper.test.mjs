@@ -12,14 +12,44 @@ const base = `http://127.0.0.1:${port}`
 const home = mkdtempSync(join(tmpdir(), "oc-helper-home-"))
 const project = mkdtempSync(join(tmpdir(), "oc-helper-proj-"))
 let helper
+const fakeAdb = join(home, "fake-adb")
+
+// Stand-in adb: canned `devices -l`, connect/pair/reverse answers, and a short logcat.
+const FAKE_ADB = `#!/usr/bin/env node
+const a = process.argv.slice(2)
+const s = a[0] === "-s" ? a.splice(0, 2)[1] : null
+const cmd = a[0]
+if (cmd === "devices") {
+  console.log("List of devices attached")
+  console.log("emulator-5554          device product:sdk_gphone64 model:sdk_gphone64_arm64 device:emu64a transport_id:1")
+  console.log("10DE5B08CN0006A        device usb:34603008X product:I2219T model:I2219 device:I2219 transport_id:2")
+  console.log("100.64.1.2:5555        offline transport_id:3")
+} else if (cmd === "connect") console.log(a[1] === "100.64.1.9:5555" ? "failed to connect to '100.64.1.9:5555': Connection refused" : "connected to " + a[1])
+else if (cmd === "pair") console.log("Successfully paired to " + a[1] + " [guid=adb-XYZ]")
+else if (cmd === "reverse") console.log("8081")
+else if (cmd === "logcat" && a.includes("-d")) {
+  console.log("--------- beginning of main")
+  console.log("11-18 16:00:00.000  1234  1250 I ReactNativeJS: Running \\"main\\" (from the backlog)")
+} else if (cmd === "logcat") {
+  const lines = [
+    "11-18 17:01:02.100  1234  1250 I ReactNativeJS: Running \\"main\\"",
+    "11-18 17:01:02.200  1234  1250 W ReactNativeJS: Possible unhandled promise",
+    "11-18 17:01:02.300  1234  1251 E AndroidRuntime: FATAL EXCEPTION: main",
+  ]
+  for (const l of lines) console.log(l)
+  setTimeout(() => {}, 60000)
+} else { console.error("unknown " + a.join(" ")); process.exit(1) }
+`
 
 before(async () => {
+  writeFileSync(fakeAdb, FAKE_ADB)
+  chmodSync(fakeAdb, 0o755)
   mkdirSync(join(project, "src"), { recursive: true })
   writeFileSync(join(project, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, jsx: "react-jsx", target: "es2022", module: "esnext", moduleResolution: "bundler" } }))
   writeFileSync(join(project, "src", "a.ts"), "export const greeting = 'hi'\nexport function shout(s: string) { return s.toUpperCase() }\n")
   writeFileSync(join(project, "src", "b.ts"), "import { shout } from './a'\nconst n: number = 'oops'\nshout('x').toLower\n")
   helper = spawn(process.execPath, ["dist/helper.mjs", "--port", String(port), "--host", "127.0.0.1"], {
-    env: { ...process.env, HOME: home, OC_HELPER_AUTO_APPROVE: "1" },
+    env: { ...process.env, HOME: home, OC_HELPER_AUTO_APPROVE: "1", OC_HELPER_ADB: fakeAdb },
     stdio: ["ignore", "pipe", "pipe"],
   })
   await new Promise((resolve, reject) => {
@@ -38,6 +68,7 @@ test("info + pairing", async () => {
   assert.equal(info.name, "opencode-mobile-helper")
   assert.ok(info.features.includes("lsp"))
   assert.ok(info.features.includes("metro"))
+  assert.ok(info.features.includes("adb"), "adb advertised when platform-tools are found")
   const start = await (await post("/helper/pair/start", { device: "Test phone" })).json()
   assert.match(start.code, /^\d{4}$/)
   const res = await post("/helper/pair/wait", { requestId: start.requestId })
@@ -121,12 +152,16 @@ test("lsp: completions + diagnostics through the relay, and format", async () =>
 // line with \r, and reports a resolve error on stderr.
 const FAKE_METRO = `#!/usr/bin/env node
 const http = require("http")
+const { WebSocketServer } = require(${JSON.stringify(join(process.cwd(), "node_modules", "ws"))})
 const port = Number(process.argv[process.argv.indexOf("--port") + 1])
-http.createServer((req, res) => {
+const server = http.createServer((req, res) => {
   if (req.url === "/status") return res.end("packager-status:running")
-  if (req.url === "/reload") { console.log("reload received"); return res.end("OK") }
   res.statusCode = 404; res.end()
-}).listen(port, "127.0.0.1", () => {
+})
+// Metro's message socket: the reload broadcast arrives here.
+const wss = new WebSocketServer({ server, path: "/message" })
+wss.on("connection", (ws) => ws.on("message", (m) => { if (JSON.parse(String(m)).method === "reload") console.log("reload received") }))
+server.listen(port, "127.0.0.1", () => {
   console.log("\\u001b[1mWelcome to Metro\\u001b[22m on " + port + " in " + process.cwd())
   process.stdout.write("BUNDLE  ./index.js 10.0%\\rBUNDLE  ./index.js 55.0%\\rBUNDLE  ./index.js 100.0%\\n")
   console.error("error: Unable to resolve module ./Missing from App.tsx")
@@ -184,12 +219,63 @@ test("metro: detect, start, logs, reload, stop", async () => {
   assert.equal(status.errors, 1)
   assert.ok(status.lines.some((l) => /Unable to resolve/.test(l.text)))
 
-  assert.equal((await rpc("metro.reload", { root: rn })).result.via, "http")
+  assert.equal((await rpc("metro.reload", { root: rn })).result.via, "message")
   await until(() => logs.some((l) => l.text === "reload received"), "app reload reached Metro")
 
   const stopped = (await rpc("metro.stop", { root: rn })).result
   assert.equal(stopped.state, "stopped")
   await until(() => logs.some((l) => l.text === "bye"), "Metro got SIGTERM")
   assert.match((await rpc("metro.reload", { root: rn })).error.message, /isn't running/)
+  ws.close()
+})
+
+test("adb: devices, connect, pair, build & run, logcat", async () => {
+  const ws = await connect(token)
+  let nextId = 1
+  const waiting = new Map()
+  const runLogs = []
+  const runStates = []
+  const logcat = []
+  const app = mkdtempSync(join(tmpdir(), "oc-helper-gradle-"))
+  writeFileSync(join(app, "gradlew"), "#!/bin/sh\necho \"> Task :app:installDebug\"\necho \"Installing APK on $ANDROID_SERIAL\" \necho \"w: some kotlin warning\" 1>&2\necho BUILD SUCCESSFUL\n")
+  chmodSync(join(app, "gradlew"), 0o755)
+  ws.on("message", (raw) => {
+    const m = JSON.parse(String(raw))
+    if (m.id != null && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id) }
+    else if (m.method === "run.log" && m.params.root === app) runLogs.push(m.params.line)
+    else if (m.method === "run.status" && m.params.root === app) runStates.push(m.params.state)
+    else if (m.method === "logcat.lines") logcat.push(...m.params.lines)
+  })
+  const rpc = (method, params) => new Promise((resolve) => { const id = nextId++; waiting.set(id, resolve); ws.send(JSON.stringify({ id, method, params })) })
+  const until = async (pred, what) => { for (let i = 0; i < 60 && !pred(); i++) await new Promise((r) => setTimeout(r, 100)); assert.ok(pred(), what) }
+
+  const { devices } = (await rpc("adb.devices", {})).result
+  assert.deepEqual(devices.map((d) => [d.serial, d.transport, d.state]), [
+    ["emulator-5554", "emulator", "device"], ["10DE5B08CN0006A", "usb", "device"], ["100.64.1.2:5555", "wifi", "offline"],
+  ])
+  assert.equal(devices[1].model, "I2219")
+  assert.match((await rpc("adb.connect", { host: "100.64.1.2", port: 5555 })).result.output, /connected to/)
+  assert.match((await rpc("adb.connect", { host: "100.64.1.9", port: 5555 })).error.message, /refused/)
+  assert.match((await rpc("adb.connect", { host: "a;rm -rf /", port: 5555 })).error.message, /host/)
+  assert.match((await rpc("adb.pair", { host: "100.64.1.2", port: 37001, code: "123" })).error.message, /6 digits/)
+  assert.match((await rpc("adb.pair", { host: "100.64.1.2", port: 37001, code: "123456" })).result.output, /Successfully paired/)
+
+  assert.equal((await rpc("run.status", { root: app })).result.detected, "./gradlew installDebug")
+  assert.match((await rpc("run.status", { root: project })).result.detectError, /Nothing to build/)
+  const started = (await rpc("run.start", { root: app, serial: "emulator-5554" })).result
+  assert.equal(started.state, "running")
+  await until(() => runStates.includes("succeeded"), `build finishes: ${runStates}`)
+  const texts = runLogs.map((l) => l.text)
+  assert.ok(texts.includes("Installing APK on emulator-5554"), `ANDROID_SERIAL passed: ${texts}`)
+  assert.equal(runLogs.find((l) => l.text.startsWith("w:")).level, "warn")
+  assert.equal(runLogs.filter((l) => l.level === "error").length, 0, "a successful build has no red lines")
+  assert.match((await rpc("run.start", { root: app, serial: "bad serial!" })).error.message, /device/)
+
+  const { id } = (await rpc("logcat.start", { serial: "emulator-5554", mode: "app" })).result
+  await until(() => logcat.length >= 4, "backlog + live lines arrive")
+  assert.ok(logcat[0].text.includes("from the backlog"), "filtered backlog comes first")
+  assert.deepEqual(logcat.slice(1).map((l) => l.level), ["info", "warn", "error"])
+  assert.match((await rpc("logcat.start", { serial: "emulator-5554", mode: "nope" })).error.message, /mode/)
+  assert.ok((await rpc("logcat.stop", { id })).result.ok)
   ws.close()
 })
