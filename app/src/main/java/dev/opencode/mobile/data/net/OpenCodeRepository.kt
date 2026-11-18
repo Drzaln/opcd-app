@@ -58,8 +58,20 @@ class OpenCodeRepository {
         }
     }
 
-    private fun build(server: ServerConfig): OpenCodeApi {
-        val client = httpClient(server)
+    /**
+     * A throwaway client for "Test connection": built from exactly what's in the dialog, never cached.
+     * (Keyed by id, an unsaved server — id "" — used to reuse whichever URL and password were probed
+     * first, and an edited one its old ones.)
+     */
+    fun probeApi(server: ServerConfig): OpenCodeApi = build(server, apiHttpClient(server))
+
+    /** Drops cached clients for a server whose URL or credentials changed (or that was removed). */
+    fun forget(serverId: String) = synchronized(lock) {
+        apiCache.remove(serverId)
+        clientCache.remove(serverId)
+    }
+
+    private fun build(server: ServerConfig, client: OkHttpClient = httpClient(server)): OpenCodeApi {
         val retrofit = Retrofit.Builder()
             .baseUrl(baseUrl(server))
             .client(client)

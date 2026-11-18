@@ -95,7 +95,7 @@ private fun JsonObject.field(name: String): JsonElement? = this[name]
  * The protocol is detected once per server instance (see [protocol]) by probing `/api/info`.
  */
 class OpenCodeApi(
-    private val server: ServerConfig,
+    internal val server: ServerConfig,
     private val v1: OpenCodeV1Api,
     private val v2: OpenCodeV2Api,
     private val rawClient: OkHttpClient,

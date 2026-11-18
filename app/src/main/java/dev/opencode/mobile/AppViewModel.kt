@@ -356,7 +356,7 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
     }
 
     suspend fun probe(server: ServerConfig): ServerProbeResult = try {
-        val api = repository.apiFor(server.copy(id = "probe-${server.id}"), cache = true)
+        val api = repository.probeApi(server)
         val health = api.health()
         ServerProbeResult(ok = health.healthy, version = health.version)
     } catch (e: Exception) {
@@ -368,10 +368,12 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
     }
 
     fun addServer(config: ServerConfig) {
+        repository.forget(config.id)
         viewModelScope.launch { store.add(config) }
     }
 
     suspend fun addServerSync(config: ServerConfig) {
+        repository.forget(config.id)
         store.add(config)
     }
 
@@ -380,6 +382,7 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
     }
 
     fun removeServer(id: String) {
+        repository.forget(id)
         viewModelScope.launch { store.remove(id) }
     }
 
