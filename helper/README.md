@@ -28,6 +28,16 @@ npm start
 
 Then in the app: **Settings → Mac helper → Pair**. The phone shows a code; a dialog on the Mac shows
 the same code — press **Allow**. (No GUI session, e.g. over ssh? The terminal asks `y/N` instead.)
+After that the phone reconnects on its own whenever the helper is running.
+
+Optional tools (each feature appears in the app only when its tool is found):
+
+| Tool | Enables |
+|---|---|
+| `adb` (Android platform-tools / Android Studio) | Android devices, Run, Logcat |
+| `brew install scrcpy` | Live device screen |
+| Android emulator (Android Studio) | Start/stop emulators |
+| `avdslim` on PATH (e.g. Homebrew) | Low-memory emulator starts + slimming |
 
 Options: `--port 4097` (default), `--host <ip>` (repeatable; default = Tailscale IP + 127.0.0.1).
 
@@ -36,11 +46,40 @@ node dist/helper.mjs devices          # list paired phones
 node dist/helper.mjs revoke <id|name> # unpair one
 ```
 
-### Keep it running (optional)
+### Start it at login (optional)
 
-Create `~/Library/LaunchAgents/dev.opencode.mobile.helper.plist` pointing `ProgramArguments` at
-`/usr/local/bin/node` (or `which node`) and the absolute path of `dist/helper.mjs`, with
-`RunAtLoad` and `KeepAlive` set to true, then `launchctl load` it. Run `npm run build` once first.
+Build once (`npm run build`), then save this as
+`~/Library/LaunchAgents/dev.opencode.mobile.helper.plist` — replace the two paths with `which node`
+and the absolute path of this folder's `dist/helper.mjs`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>dev.opencode.mobile.helper</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/Users/you/opencode-android-app/helper/dist/helper.mjs</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/opencode-mobile-helper.log</string>
+  <key>StandardErrorPath</key><string>/tmp/opencode-mobile-helper.log</string>
+</dict>
+</plist>
+```
+
+```bash
+launchctl load ~/Library/LaunchAgents/dev.opencode.mobile.helper.plist     # start now + at login
+launchctl unload ~/Library/LaunchAgents/dev.opencode.mobile.helper.plist   # stop
+```
+
+The `PATH` entry lets the helper find `tailscale`, `scrcpy` and `avdslim` from Homebrew; `adb` and the
+emulator are found in `~/Library/Android/sdk` either way. Pairing dialogs still appear on screen.
 
 ## Security
 
