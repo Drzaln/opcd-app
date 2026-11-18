@@ -59,12 +59,17 @@ object Routes {
     const val FILES = "files/{serverId}?dir={dir}"
     const val FILE = "file/{serverId}?path={path}&line={line}"
     const val DIFF = "diff/{serverId}/{sessionId}?messageID={messageID}"
+    const val CODE = "code/{serverId}"
+    const val EDITOR = "editor/{serverId}?path={path}&line={line}"
 
     fun sessions(serverId: String) = "sessions/$serverId"
     fun terminal(serverId: String) = "terminal/$serverId"
     fun chat(serverId: String, sessionId: String) = "chat/$serverId/$sessionId"
     fun files(serverId: String, dir: String) = "files/$serverId?dir=${java.net.URLEncoder.encode(dir, "UTF-8")}"
     fun file(serverId: String, path: String, line: Int? = null) = "file/$serverId?path=${java.net.URLEncoder.encode(path, "UTF-8")}&line=${line ?: -1}"
+    fun code(serverId: String) = "code/$serverId"
+    fun editor(serverId: String, path: String? = null, line: Int? = null) =
+        "editor/$serverId?path=${java.net.URLEncoder.encode(path.orEmpty(), "UTF-8")}&line=${line ?: -1}"
     fun diff(serverId: String, sessionId: String, messageId: String? = null) =
         "diff/$serverId/$sessionId?messageID=${messageId ?: ""}"
 }
@@ -195,7 +200,7 @@ class MainActivity : ComponentActivity() {
                                     if (wide) selectedSession = sessionId
                                     else navController.navigate(Routes.chat(serverId, sessionId))
                                 },
-                                onFiles = { navController.navigate(Routes.files(serverId, "")) },
+                                onFiles = { navController.navigate(Routes.code(serverId)) { launchSingleTop = true } },
                                 onSettings = { navController.navigate(Routes.SETTINGS) },
                                 onTerminal = { navController.navigate(Routes.terminal(serverId)) },
                                 onDiff = { sessionId -> navController.navigate(Routes.diff(serverId, sessionId)) },
@@ -217,7 +222,7 @@ class MainActivity : ComponentActivity() {
                                             onBack = { selectedSession = null },
                                             onDiff = { navController.navigate(Routes.diff(serverId, sessionId)) },
                                             onMessageDiff = { messageId -> navController.navigate(Routes.diff(serverId, sessionId, messageId)) },
-                                            onOpenFile = { path -> navController.navigate(Routes.file(serverId, path)) },
+                                            onOpenFile = { path -> navController.navigate(Routes.editor(serverId, path)) },
                                             onOpenSession = { selectedSession = it },
                                         )
                                     }
@@ -244,7 +249,7 @@ class MainActivity : ComponentActivity() {
                             onDiff = { navController.navigate(Routes.diff(serverId, sessionId)) },
                             onMessageDiff = { messageId -> navController.navigate(Routes.diff(serverId, sessionId, messageId)) },
                             onOpenFile = { path ->
-                                navController.navigate(Routes.file(serverId, path))
+                                navController.navigate(Routes.editor(serverId, path))
                             },
                             onOpenSession = { newSessionId ->
                                 navController.navigate(Routes.chat(serverId, newSessionId)) {
@@ -328,6 +333,58 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     composable(
+                        route = Routes.CODE,
+                        arguments = listOf(androidx.navigation.navArgument("serverId") { type = androidx.navigation.NavType.StringType }),
+                    ) { entry ->
+                        val serverId = entry.arguments?.getString("serverId") ?: return@composable
+                        dev.opencode.mobile.ui.editor.CodeScreen(
+                            appVm = appVm,
+                            serverId = serverId,
+                            onOpenFile = { path, line -> navController.navigate(Routes.editor(serverId, path, line)) },
+                            onViewReadOnly = { path -> navController.navigate(Routes.file(serverId, path)) },
+                            onTab = { tab -> navigateTab(navController, serverId, tab) },
+                        )
+                    }
+                    composable(
+                        route = Routes.EDITOR,
+                        arguments = listOf(
+                            androidx.navigation.navArgument("serverId") { type = androidx.navigation.NavType.StringType },
+                            androidx.navigation.navArgument("path") {
+                                type = androidx.navigation.NavType.StringType
+                                defaultValue = ""
+                            },
+                            androidx.navigation.navArgument("line") {
+                                type = androidx.navigation.NavType.IntType
+                                defaultValue = -1
+                            },
+                        ),
+                    ) { entry ->
+                        val serverId = entry.arguments?.getString("serverId") ?: return@composable
+                        val path = entry.arguments?.getString("path")?.ifBlank { null }
+                        val line = entry.arguments?.getInt("line")?.takeIf { it > 0 }
+                        if (wide) {
+                            // Tablets / landscape: file links land in the IDE layout, opened in place.
+                            dev.opencode.mobile.ui.editor.CodeScreen(
+                                appVm = appVm,
+                                serverId = serverId,
+                                onOpenFile = { _, _ -> },
+                                onViewReadOnly = { p -> navController.navigate(Routes.file(serverId, p)) },
+                                onTab = { tab -> navigateTab(navController, serverId, tab) },
+                                openPath = path,
+                                openLine = line,
+                            )
+                        } else {
+                            dev.opencode.mobile.ui.editor.EditorScreen(
+                                appVm = appVm,
+                                serverId = serverId,
+                                path = path,
+                                line = line,
+                                onBack = { navController.popBackStack() },
+                                onViewReadOnly = { p -> navController.navigate(Routes.file(serverId, p)) },
+                            )
+                        }
+                    }
+                    composable(
                         route = Routes.DIFF,
                         arguments = listOf(
                             androidx.navigation.navArgument("serverId") { type = androidx.navigation.NavType.StringType },
@@ -347,11 +404,26 @@ class MainActivity : ComponentActivity() {
                             sessionId = sessionId,
                             messageId = messageID,
                             onBack = { navController.popBackStack() },
+                            onOpenFile = { path, line -> navController.navigate(Routes.editor(serverId, path, line)) },
                         )
                     }
                 }
             }
         }
+    }
+}
+
+private fun navigateTab(
+    navController: androidx.navigation.NavHostController,
+    serverId: String,
+    tab: dev.opencode.mobile.ui.common.AppTab,
+) {
+    when (tab) {
+        dev.opencode.mobile.ui.common.AppTab.SESSIONS ->
+            if (!navController.popBackStack(Routes.SESSIONS, inclusive = false)) navController.navigate(Routes.sessions(serverId))
+        dev.opencode.mobile.ui.common.AppTab.CODE -> navController.navigate(Routes.code(serverId)) { launchSingleTop = true }
+        dev.opencode.mobile.ui.common.AppTab.TERMINAL -> navController.navigate(Routes.terminal(serverId))
+        dev.opencode.mobile.ui.common.AppTab.SETTINGS -> navController.navigate(Routes.SETTINGS)
     }
 }
 

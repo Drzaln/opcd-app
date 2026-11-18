@@ -321,6 +321,7 @@ fun SessionsScreen(
     appVm: AppViewModel,
     serverId: String,
     onChat: (String) -> Unit,
+    /** Opens the Code tab. */
     onFiles: () -> Unit,
     onSettings: () -> Unit,
     onTerminal: () -> Unit,
@@ -417,33 +418,13 @@ fun SessionsScreen(
             )
         },
         bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            ) {
-                NavigationBarItem(
-                    selected = true,
-                    onClick = {},
-                    icon = { Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null) },
-                    label = { Text("Sessions") },
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onFiles,
-                    icon = { Icon(Icons.Filled.Folder, contentDescription = null) },
-                    label = { Text("Files") },
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onTerminal,
-                    icon = { Icon(Icons.Filled.Terminal, contentDescription = null) },
-                    label = { Text("Terminal") },
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onSettings,
-                    icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-                    label = { Text("Settings") },
-                )
+            dev.opencode.mobile.ui.common.AppBottomBar(dev.opencode.mobile.ui.common.AppTab.SESSIONS) { tab ->
+                when (tab) {
+                    dev.opencode.mobile.ui.common.AppTab.CODE -> onFiles()
+                    dev.opencode.mobile.ui.common.AppTab.TERMINAL -> onTerminal()
+                    dev.opencode.mobile.ui.common.AppTab.SETTINGS -> onSettings()
+                    dev.opencode.mobile.ui.common.AppTab.SESSIONS -> Unit
+                }
             }
         },
     ) { padding ->

@@ -142,6 +142,14 @@ interface OpenCodeV2Api {
     @GET
     suspend fun fsRead(@Url url: String): ResponseBody
 
+    /** 2.2+ only (`experimental.fs.write`): writes the raw body in place; NOT confined to the location. */
+    @POST("api/experimental/fs/write")
+    suspend fun fsWrite(
+        @Query("location[directory]") directory: String?,
+        @Query("path") path: String,
+        @Body body: okhttp3.RequestBody,
+    ): JsonElement
+
     @GET("api/permission/request")
     suspend fun permissionRequests(@Query("location[directory]") directory: String? = null): JsonElement
 

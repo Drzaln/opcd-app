@@ -3,6 +3,8 @@ package dev.opencode.mobile.ui.diff
 import dev.opencode.mobile.ui.theme.OcTheme
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -93,6 +95,7 @@ fun DiffScreen(
     sessionId: String,
     messageId: String?,
     onBack: () -> Unit,
+    onOpenFile: ((path: String, line: Int?) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as OpenCodeApp
@@ -153,10 +156,13 @@ fun DiffScreen(
             ) {
                 for ((diff, lines) in computed) {
                     stickyHeader(key = "header_${diff.file}") {
-                        DiffHeader(diff)
+                        val firstChange = lines.firstOrNull { it.kind != DiffKind.CONTEXT }?.let { it.newNo ?: it.oldNo }
+                        DiffHeader(diff, onOpen = onOpenFile?.let { open -> { open(diff.file, firstChange) } })
                     }
                     items(lines, key = { "${diff.file}_${it.hashCode()}" }) { line ->
-                        DiffRow(line.kind, line.oldNo, line.newNo, line.text)
+                        Box(
+                            if (onOpenFile != null && line.kind != DiffKind.DEL) Modifier.clickable { onOpenFile(diff.file, line.newNo) } else Modifier,
+                        ) { DiffRow(line.kind, line.oldNo, line.newNo, line.text) }
                     }
                 }
             }
@@ -165,11 +171,12 @@ fun DiffScreen(
 }
 
 @Composable
-private fun DiffHeader(diff: FileDiff) {
+private fun DiffHeader(diff: FileDiff, onOpen: (() -> Unit)? = null) {
     Row(
         Modifier
             .fillMaxWidth()
             .background(OcTheme.colors.surfaceVariant)
+            .then(if (onOpen != null) Modifier.clickable(onClickLabel = "Open in editor", onClick = onOpen) else Modifier)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -179,6 +186,7 @@ private fun DiffHeader(diff: FileDiff) {
             fontFamily = FontFamily.Monospace,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            color = if (onOpen != null) OcTheme.colors.link else androidx.compose.ui.graphics.Color.Unspecified,
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(8.dp))

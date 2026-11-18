@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, interactive-widget=resizes-content">
+<style>
+  @font-face { font-family: OcMono; src: url("https://editor.local/font") format("truetype"); font-display: swap; }
+  :root {
+    --oc-bg: #0E1116; --oc-surface: #161B22; --oc-border: #262C36; --oc-text: #E6EDF3; --oc-muted: #9AA4B2;
+    --oc-lineno: #6E7681; --oc-line: #141C28; --oc-selection: #1B2B44; --oc-link: #58A6FF; --oc-accentSoft: #10243F;
+    --oc-popup: #1C2129; --oc-popupBorder: #30363D; --oc-error: #F85149;
+    --oc-kw: #FF7B72; --oc-str: #A5D6FF; --oc-num: #79C0FF; --oc-prop: #79C0FF; --oc-fn: #D2A8FF; --oc-type: #FFA657;
+    --oc-tag: #7EE787; --oc-comment: #8B949E; --oc-font-size: 13px;
+  }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--oc-bg); overflow: hidden; }
+  /* position: fixed for the same reason as the terminal: sized from the visual viewport. */
+  #editor { position: fixed; inset: 0; font-size: var(--oc-font-size); }
+  .cm-editor { height: 100%; }
+  /* The bundled Nerd Font has ligatures; show the characters actually in the file. */
+  .cm-scroller { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
+  .cm-editor.cm-focused { outline: none; }
+</style>
+</head>
+<body>
+<div id="editor"></div>
+<script src="editor.js"></script>
+</body>
+</html>

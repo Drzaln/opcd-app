@@ -103,4 +103,6 @@ dependencies {
     }
     kapt(libs.prism4j.bundler)
     implementation(libs.java.diff.utils)
+
+    testImplementation(libs.junit)
 }

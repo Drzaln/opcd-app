@@ -3,6 +3,12 @@ package dev.opencode.mobile.ui.files
 import dev.opencode.mobile.ui.theme.OcTheme
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -131,7 +137,7 @@ class FilesViewModel(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun FilesScreen(
     appVm: AppViewModel,
@@ -139,7 +145,14 @@ fun FilesScreen(
     dir: String,
     onOpenDir: (String) -> Unit,
     onOpenFile: (String, Int?) -> Unit,
-    onBack: () -> Unit,
+    onBack: (() -> Unit)?,
+    recentFiles: List<String> = emptyList(),
+    onViewReadOnly: ((String) -> Unit)? = null,
+    selectedPath: String? = null,
+    title: String? = null,
+    bottomBar: @Composable () -> Unit = {},
+    /** Side-pane tree (tablet / landscape): small section header instead of an app bar, no mode chips. */
+    compact: Boolean = false,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as OpenCodeApp
@@ -166,16 +179,61 @@ fun FilesScreen(
         vm.refresh()
     }
 
+    var menuFor by remember { mutableStateOf<String?>(null) }
+    @Composable
+    fun ReadOnlyMenu(path: String) {
+        DropdownMenu(expanded = menuFor == path, onDismissRequest = { menuFor = null }) {
+            DropdownMenuItem(text = { Text("Open in editor") }, onClick = { menuFor = null; onOpenFile(path, null) })
+            onViewReadOnly?.let { view ->
+                DropdownMenuItem(text = { Text("View read-only") }, onClick = { menuFor = null; view(path) })
+            }
+        }
+    }
+    fun Modifier.fileClicks(path: String, line: Int? = null) = combinedClickable(
+        onClick = { onOpenFile(path, line) },
+        onLongClick = if (onViewReadOnly != null) ({ menuFor = path }) else null,
+    )
+
     Scaffold(
+        bottomBar = bottomBar,
+        contentWindowInsets = if (compact) androidx.compose.foundation.layout.WindowInsets(0) else androidx.compose.material3.ScaffoldDefaults.contentWindowInsets,
         topBar = {
-            TopAppBar(
-                title = { Text("/${dir.ifEmpty { "project root" }}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            if (compact) {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (dir.isNotEmpty()) {
+                        IconButton(onClick = { onOpenDir(parent) }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Up one folder", modifier = Modifier.padding(0.dp))
+                        }
+                    }
+                    Text(
+                        if (dir.isEmpty()) (title ?: "Explorer").uppercase() else dir.substringAfterLast('/'),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = OcTheme.colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = { vm.refresh() }) { Icon(Icons.Filled.Refresh, contentDescription = "Refresh", tint = OcTheme.colors.textSecondary) }
+                }
+            } else TopAppBar(
+                title = {
+                    Text(
+                        if (dir.isEmpty() && title != null) title else "/${dir.ifEmpty { "project root" }}",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                 ),
                 navigationIcon = {
-                    IconButton(onClick = { if (dir.isNotEmpty()) onOpenDir(parent) else onBack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    if (dir.isNotEmpty() || onBack != null) {
+                        IconButton(onClick = { if (dir.isNotEmpty()) onOpenDir(parent) else onBack?.invoke() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
                     }
                 },
                 actions = {
@@ -190,6 +248,7 @@ fun FilesScreen(
                 mode = ui.mode,
                 onQueryChange = { vm.onQueryChange(it) },
                 onModeChange = { vm.setMode(it) },
+                showModes = !compact,
             )
             if (ui.error != null) {
                 Text(ui.error!!, color = androidx.compose.ui.graphics.Color(0xFFF85149), modifier = Modifier.padding(16.dp))
@@ -205,9 +264,10 @@ fun FilesScreen(
                     if (ui.mode == SearchMode.FILES) {
                         items(ui.fileResults, key = { it }) { path ->
                             Row(
-                                Modifier.fillMaxWidth().animateItem().clickable { onOpenFile(path, null) }.padding(horizontal = 16.dp, vertical = 12.dp),
+                                Modifier.fillMaxWidth().animateItem().fileClicks(path).padding(horizontal = 16.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
+                                ReadOnlyMenu(path)
                                 Icon(Icons.Filled.Description, contentDescription = null, tint = OcTheme.colors.textSecondary)
                                 Spacer(Modifier.width(12.dp))
                                 Text(path, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -216,7 +276,7 @@ fun FilesScreen(
                     } else {
                         items(ui.contentResults, key = { "${it.path.text}:${it.lineNumber}" }) { match ->
                             Row(
-                                Modifier.fillMaxWidth().animateItem().clickable { onOpenFile(match.path.text, match.lineNumber) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                                Modifier.fillMaxWidth().animateItem().fileClicks(match.path.text, match.lineNumber).padding(horizontal = 16.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.Top,
                             ) {
                                 Icon(Icons.Filled.Description, contentDescription = null, tint = OcTheme.colors.textSecondary)
@@ -243,13 +303,54 @@ fun FilesScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 6.dp),
                 ) {
+                    if (dir.isEmpty() && recentFiles.isNotEmpty()) {
+                        item(key = "recent_header") {
+                            Text(
+                                "RECENT",
+                                style = MaterialTheme.typography.labelMedium,
+                                letterSpacing = androidx.compose.ui.unit.TextUnit(0.96f, androidx.compose.ui.unit.TextUnitType.Sp),
+                                color = OcTheme.colors.textSecondary,
+                                modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp),
+                            )
+                        }
+                        items(recentFiles.take(5), key = { "recent_$it" }) { path ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .fileClicks(path)
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                ReadOnlyMenu(path)
+                                Icon(Icons.Filled.History, contentDescription = null, tint = OcTheme.colors.textSecondary)
+                                Spacer(Modifier.width(12.dp))
+                                Column {
+                                    Text(path.substringAfterLast('/'), style = MaterialTheme.typography.bodyMedium, color = OcTheme.colors.textPrimary, maxLines = 1)
+                                    Text(path, style = MaterialTheme.typography.labelSmall, color = OcTheme.colors.textSecondary, maxLines = 1, overflow = TextOverflow.StartEllipsis)
+                                }
+                            }
+                        }
+                        item(key = "files_header") {
+                            Text(
+                                "FILES",
+                                style = MaterialTheme.typography.labelMedium,
+                                letterSpacing = androidx.compose.ui.unit.TextUnit(0.96f, androidx.compose.ui.unit.TextUnitType.Sp),
+                                color = OcTheme.colors.textSecondary,
+                                modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
+                            )
+                        }
+                    }
                     items(ui.files, key = { it.path }) { node ->
                         val isDir = node.type == "directory"
+                        if (!isDir) ReadOnlyMenu(node.path)
                         androidx.compose.material3.ListItem(
+                            colors = androidx.compose.material3.ListItemDefaults.colors(
+                                containerColor = if (node.path == selectedPath) OcTheme.colors.accentSoft else androidx.compose.ui.graphics.Color.Transparent,
+                            ),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .animateItem()
-                                .clickable { if (isDir) onOpenDir(node.path) else onOpenFile(node.path, null) },
+                                .then(if (isDir) Modifier.clickable { onOpenDir(node.path) } else Modifier.fileClicks(node.path)),
                             leadingContent = {
                                 Icon(
                                     if (isDir) Icons.Filled.Folder else Icons.Filled.Description,
@@ -281,6 +382,7 @@ private fun SearchBar(
     mode: SearchMode,
     onQueryChange: (String) -> Unit,
     onModeChange: (SearchMode) -> Unit,
+    showModes: Boolean = true,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
         androidx.compose.material3.OutlinedTextField(
@@ -291,7 +393,7 @@ private fun SearchBar(
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
             modifier = Modifier.fillMaxWidth(),
         )
-        Row(Modifier.padding(top = 4.dp)) {
+        if (showModes) Row(Modifier.padding(top = 4.dp)) {
             FilterChip(
                 selected = mode == SearchMode.FILES,
                 onClick = { onModeChange(SearchMode.FILES) },

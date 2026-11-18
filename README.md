@@ -1,9 +1,9 @@
 # OpenCode Mobile
 
 Native Android client for [opencode](https://opencode.ai). Connect your phone to the opencode
-server running on your Mac over **Tailscale** and keep working from anywhere: read and resume
-sessions, chat with live streaming, browse the project, view code with syntax highlighting, review
-diffs, search the codebase, and get notified when a turn finishes.
+server running on your Mac over **Tailscale** and keep working from anywhere: **write code yourself in
+a real editor that saves to the Mac**, read and resume sessions, chat with live streaming, browse the
+project, review diffs, commit, search the codebase, and get notified when a turn finishes.
 
 Kotlin · Jetpack Compose · Material 3 · dark theme · minSdk 26.
 
@@ -13,12 +13,15 @@ Kotlin · Jetpack Compose · Material 3 · dark theme · minSdk 26.
 
 | Area | What you get |
 |---|---|
+| Code | **CodeMirror 6 editor that saves to your Mac**: tabs with dirty dots, undo per tab, syntax highlighting (TS/TSX, JS/JSX, JSON, Kotlin + Gradle KTS, Markdown, CSS, YAML, XML), bracket matching + auto-close, auto-indent, soft wrap, find/replace, go to line, coding key row above the keyboard, hardware shortcuts (Ctrl+S/P/F/G, Ctrl+/), "Go to file" palette, recent files. Saves are verified by SHA-256; if the file changed on the Mac you get **Reload / Overwrite / Show diff** instead of a silent overwrite |
+| Code (tablet / landscape) | File tree │ editor │ Terminal/Git bottom panel side by side (≥ 720 dp); right-hand slot reserved for a live emulator (≥ 1000 dp) |
+| Git | Branch + "N changed" in the editor, Changes list with per-file diffs, **Commit…** (`git add -A && git commit`, no push) |
 | Sessions | List/resume, new (opens it immediately), rename (long-press), delete, per-session folder picker, git branch bar (switch/create), status dots, tokens + cost |
 | Chat | Live streaming (SSE, incremental), markdown + code highlighting, reasoning + tool cards, todos panel, copy message (long-press), queued indicator, image/file attachments (inline; tap an image to zoom) |
 | Agents/models | Pick agent + model per message, plus the model's reasoning variant (low/high/max, when offered); selection remembered **per session** (last pick becomes the default for new sessions); per-message model name |
 | Commands | `/` picker for opencode slash commands |
 | Context | Header shows `N tokens · N% used · $N spent` (same formula as the TUI) |
-| Files | Folder browser, code viewer with syntax highlighting, fuzzy file search + content grep |
+| Files | Folder browser, read-only code viewer (long-press → View read-only), fuzzy file search + content grep |
 | Terminal | Full PTY + two renderers: **xterm.js** (scrollback, mouse, reflow, hardware keys) or the native canvas; paste/copy |
 | Diffs | Session diff, per-message diff (tap `± diff` under a user message) |
 | Offline | Room cache — sessions/messages show instantly, then refresh |
@@ -157,8 +160,17 @@ Screens use standard Android navigation animations (slide in/out on push, revers
   Long-press a message to copy. `± diff` under your message shows that turn's changes. `Abort` stops a
   running turn. Todos appear in a collapsible panel.
 - **Header** — `N tokens · N% used · $N spent` for the current session (matches the TUI).
-- **Files** — browse the project; search box switches between **Files** (fuzzy names) and **Content**
-  (grep). Tap a result to open it with syntax highlighting.
+- **Code** (first tab) — the project's file tree with **Recent** files on top. Tap a file to edit it;
+  long-press → **View read-only**. In the editor: type with the soft keyboard; the key row above it has
+  `Tab { } ( ) [ ] < > = ' " ; ← →` and undo (brackets/quotes pair up). **Save** (or Ctrl+S) writes the
+  file on the Mac and verifies it by hash — the header shows *Saving… / Saved / Failed: reason*. If the
+  agent (or you) changed the file on the Mac since you opened it, you're asked to **Reload**,
+  **Overwrite** or **Show diff**. The search icon / Ctrl+P is "Go to file"; ⋮ has find/replace, go to
+  line, soft wrap, toggle comment. Tap the `branch · N changed` line for the Changes list, diffs and
+  **Commit…**. Files over 2 MB and binary files open read-only. File links in chat and diffs open the
+  editor at that line. On a tablet or a landscape phone, Code is a small IDE: tree, editor, and a
+  Terminal/Git panel at the bottom.
+- **Files search** — the search box switches between **Files** (fuzzy names) and **Content** (grep).
 - **Terminal** — open from the Sessions screen. Two renderers, switch with the **⋮** in the top bar:
   **xterm.js** (default — real xterm behaviour: scrollback you can fling, mouse clicks/scroll in
   `vim`/`tmux`/`htop`, box-drawing, bracketed paste, hardware keyboards) and **Native** (the in-app
@@ -201,6 +213,8 @@ Screens use standard Android navigation animations (slide in/out on push, revers
 | Auto-detect only finds the LAN IP | mDNS advertises the LAN address; use the **Tailscale (remote)** field instead. |
 | Notifications silent | Grant notification permission; re-toggle the switch; check Android battery settings. |
 | "App not installed" on update | Signing-key mismatch (debug vs release). `adb uninstall dev.opencode.mobile`, then install. |
+| Editor says "needs WebView Chromium 80+" | Update **Android System WebView** from the Play Store; until then files open read-only. |
+| Save says "File changed on the Mac" | Someone (often the agent) edited it after you opened it. **Show diff** to compare, then **Reload** (take theirs) or **Overwrite** (keep yours). |
 | Mac asleep = no connection | Use `caffeinate -s`, or the "prevent automatic sleeping" setting. |
 
 ---
@@ -215,6 +229,11 @@ make serve      # local opencode test server on :4199 (password: secret)
 make ship       # bump version, build, push main + v* tag (triggers CI release)
 ```
 
+- Unit tests: `./gradlew :app:testDebugUnitTest` (path validation, base64 chunking, git parsing).
+  Against a live `make serve`: `OC_IT=1 ./gradlew :app:testDebugUnitTest` also runs the save/read
+  round trips (native route + PTY writer).
+- Editor bundle (CodeMirror 6): `cd tools/editor-bundle && npm ci && npm run build` → regenerates
+  `app/src/main/assets/editor/editor.js` + `NOTICE.txt` (committed; npm is not part of Gradle).
 - Architecture, server-integration quirks, and the current roadmap: **`PROGRESS.md`**.
 - Agent/contributor guide: **`AGENTS.md`**.
 - Task tracking: `bd` (beads) — `bd ready`, `bd list`.

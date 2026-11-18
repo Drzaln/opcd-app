@@ -39,6 +39,8 @@ class ServerStore(private val context: Context) {
     private val busySessionsKey = androidx.datastore.preferences.core.stringSetPreferencesKey("busy_sessions")
     private val goApiKey = stringPreferencesKey("opencode_go_api_key")
     private val terminalRendererKey = stringPreferencesKey("terminal_renderer")
+    private val recentFilesKey = stringPreferencesKey("recent_files")
+    private val editorWrapKey = androidx.datastore.preferences.core.booleanPreferencesKey("editor_soft_wrap")
 
     val servers: Flow<List<ServerConfig>> = context.dataStore.data.map { prefs ->
         val raw = prefs[serversKey] ?: "[]"
@@ -156,6 +158,26 @@ class ServerStore(private val context: Context) {
         }
     }
 
+    /** Recently opened editor files, newest first, keyed "<serverId>|<project dir>". */
+    fun recentFiles(serverId: String, dir: String?): Flow<List<String>> = context.dataStore.data.map { prefs ->
+        decodeListMap(prefs[recentFilesKey])["$serverId|${dir.orEmpty()}"].orEmpty()
+    }
+
+    suspend fun addRecentFile(serverId: String, dir: String?, path: String) {
+        context.dataStore.edit { prefs ->
+            val map = decodeListMap(prefs[recentFilesKey]).toMutableMap()
+            val key = "$serverId|${dir.orEmpty()}"
+            map[key] = (listOf(path) + map[key].orEmpty().filter { it != path }).take(12)
+            prefs[recentFilesKey] = json.encodeToString(map)
+        }
+    }
+
+    val editorSoftWrap: Flow<Boolean> = context.dataStore.data.map { it[editorWrapKey] ?: false }
+
+    suspend fun setEditorSoftWrap(value: Boolean) {
+        context.dataStore.edit { it[editorWrapKey] = value }
+    }
+
     suspend fun add(config: ServerConfig) {
         context.dataStore.edit { prefs ->
             val current = decodeServers(prefs[serversKey])
@@ -186,6 +208,9 @@ class ServerStore(private val context: Context) {
 
     private fun decodeServers(raw: String?): List<ServerConfig> =
         runCatching { json.decodeFromString<List<ServerConfig>>(raw ?: "[]") }.getOrDefault(emptyList())
+
+    private fun decodeListMap(raw: String?): Map<String, List<String>> =
+        runCatching { json.decodeFromString<Map<String, List<String>>>(raw ?: "{}") }.getOrDefault(emptyMap())
 
     private fun decodeStringMap(raw: String?): Map<String, String> =
         runCatching { json.decodeFromString<Map<String, String>>(raw ?: "{}") }.getOrDefault(emptyMap())

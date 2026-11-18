@@ -2,14 +2,18 @@
 
 # PROGRESS — OpenCode Mobile (Android)
 
-**What:** native Kotlin/Compose Android client for an opencode server (Mac). Sessions, live chat
-(SSE), files + code viewer, diffs, search, offline cache, notifications.
+**What:** native Kotlin/Compose Android client for an opencode server (Mac). **Code editor that saves
+to the Mac (CodeMirror 6)**, sessions, live chat (SSE), files + code viewer, diffs, git commit, search,
+offline cache, notifications.
 
 **Repo:** git@github.com:Drzaln/opcd-app.git · **Package:** `dev.opencode.mobile` · single `:app` module.
 
 **Stack (pinned, don't bump blindly):** Kotlin 2.2.20 · AGP 8.13.0 · Gradle 8.13 · compose-bom
 2025.09.00 · minSdk 26 · compile/target 36 · Retrofit 2.11 · OkHttp 4.12 · kotlinx.serialization
-1.7.3 · Room 2.8.5 · Prism4j 2.0.0 · java-diff-utils 4.12 · DataStore 1.1.1.
+1.7.3 · Room 2.8.5 · Prism4j 2.0.0 · java-diff-utils 4.12 · DataStore 1.1.1 · JUnit 4.13.2 (tests only).
+**Vendored JS (not in Gradle):** xterm.js 5.5.0 (`assets/terminal/`), CodeMirror 6 bundle
+(`assets/editor/editor.js`, built by esbuild 0.28.2 from `tools/editor-bundle/`, exact versions in its
+`package-lock.json` and `assets/editor/NOTICE.txt`; state 6.7.6 · view 6.43.15 · language 6.13.1).
 
 **Build/ship:** `make build` · `make release` · `make ship` (`scripts/ship.sh` bumps version, builds,
 pushes `main`, tags `v*`; CI builds + GitHub Release). Say "ship it" → always run `make ship`
@@ -18,7 +22,9 @@ after updating this file.
 ## Architecture (where things live)
 
 - `OpenCodeApp` — owns `ServerStore` (prefs), `OpenCodeRepository` (HTTP/SSE), `CacheStore` (Room).
-- `MainActivity` — NavHost + `Routes` (servers→sessions→chat/files/file/diff).
+- `MainActivity` — NavHost + `Routes` (servers→sessions→chat/files/file/diff, **code**, **editor**).
+  Bottom nav = `ui/common/AppBottomBar` (**Code · Sessions · Terminal · Settings**; `AppNavRail` on
+  short landscape screens).
 - `AppViewModel` — servers list, active server, `currentDirectory`, notifications toggle, `probe()`.
 - `data/model/Dtos.kt` — all kotlinx DTOs.
 - `data/net/`: `OpenCodeApi` (app-facing compat client — auto-detects 1.x vs 2.0), `OpenCodeV1Api`
@@ -30,6 +36,12 @@ after updating this file.
 - `ui/common/` — `CodeHighlighter` (Prism4j), `Markdown`, `DiffLines`, `CodeBlock`, `shortenPath`,
   `ConnectionIndicator`.
 - `ui/{servers,sessions,chat,files,file,diff,settings}/` — screens + their ViewModels.
+- `ui/editor/` — the code editor (see "Code editor" below): `EditorViewModel` (activity-scoped per
+  server + folder: tabs, save/conflict state, git), `EditorWebView` (CodeMirror WebView + bridge),
+  `EditorScreen` (phone route, tabs, key row, dialogs, palette, Changes/Commit), `CodeScreen` (Code tab:
+  phone tree / wide IDE layout).
+- `data/net/FileWriter.kt` (read + save + `EditorFiles` pure helpers), `PtyOneShot.kt` (one-shot PTY
+  command runner shared with `GitRunner`), `GitRunner` (branch, status, diff, commit).
 
 ## opencode 2.0 (V2 API) support
 
@@ -239,6 +251,107 @@ V2 differences that matter (verified against 2.0.26):
     was '404 Not Found'`). Append `sleep 60` after the exit marker and stop reading as soon as the
     marker matches (don't wait for socket close).
 
+18. **Writing files (the editor's save path).** Checked both generations (Nov 2026):
+    - **opencode 1.x:** no write route — `/file`, `/file/content`, `/file/status` are all GET.
+      `/file/content` also returns *decoded* text, not the bytes on disk, so 1.x **reads** through the
+      PTY too (exact bytes, base64 between markers).
+    - **opencode 2.0.x / 2.1.x:** only `fs/list`, `fs/read`, `fs/find`. `/api/fs/read/<path>` returns
+      exact bytes (used for reads + hashing on all 2.x).
+    - **opencode 2.2+ (verified 2.2.6):** `POST /api/experimental/fs/write?location[directory]=&path=`
+      with the raw body (`application/octet-stream`) → `{location, data:{path}}`. Advertised in
+      `/openapi.json` as operationId `experimental.fs.write`, which is how `OpenCodeApi.supportsFileWrite()`
+      detects it. **Caveats:** it writes **in place** (same inode — not atomic), creates parent dirs, and
+      is **not confined to the location** (`path=../x` happily wrote outside the project), so the
+      client must validate paths itself (`EditorFiles.resolve`). Experimental = may change.
+    - **PTY writer (1.x, 2.0, 2.1):** `sh -c` script (`EditorFiles.writeScript`): `stty -echo`; refuse
+      symlinks/non-files; re-hash the target and compare with the hash the editor opened (conflict →
+      `__OC_CONFLICT__<hash>`, exit 9, nothing written); print `__OC_READY__`; `base64 -d > "$T"` where
+      `$T` is a hidden temp file **in the same directory**; copy the mode (`stat -c %a` then BSD
+      `stat -f %Lp`); `mv -f "$T" "$F"`; print `__OC_HASH__<sha256>`. The phone waits for READY, streams
+      base64 in **76-char lines** (canonical-mode TTY lines max out at MAX_CANON = 1024 on macOS),
+      64 lines per WebSocket frame, then `\x04` (EOF). `trap` removes the temp file on exit/HUP.
+      Measured locally: 2 MB in ~0.4 s, no echo, exec bit preserved, never truncates the target.
+    - **Paths:** passed as single-quoted words prefixed `./` (so a leading `-` can't be an option),
+      never interpolated raw. Rejected before any request: `..` segments, absolute paths outside the
+      project folder, `~`, NUL, CR/LF (`EditorFiles.resolve`, unit-tested).
+    - **Verification:** success is reported only when the on-disk SHA-256 (script output, or a re-read
+      on the native route) equals the phone's hash of the bytes it sent. Limits: 2 MB, UTF-8 text only
+      (NUL byte or invalid UTF-8 = binary → read-only).
+    - **Quirks found on the way:** `POST /api/pty/{id}/connect-token` answers `ForbiddenError "Invalid PTY
+      connect token request"` on 2.2.6 (the app already falls back to Basic auth on the socket); the
+      server appends `-l` to PTY args, which harmlessly becomes `$0` of `sh -c`. Every directory you hit
+      with `?location[directory]=` is remembered as a **project** by the server.
+
+## Code editor (Phase 1)
+
+- **Engine:** CodeMirror 6 in a WebView, same recipe as the xterm terminal: `editor.js` inlined into
+  `editor.html` (`readEditorSeed`), font served from `res/font` via `shouldInterceptRequest`
+  (`https://editor.local/font`), page loaded on the first non-zero layout, `console.*` → logcat tag
+  **`CodeEditor`**, Chromium 80+ gate (`MIN_WEBVIEW_CHROME`) else a banner + the read-only viewer.
+- **Bridge:** Kotlin → JS `__ocLoad(path, b64, lang, line[, savedB64])`, `__ocShow`, `__ocClose`,
+  `__ocGetText(id, path)`, `__ocSaved(id, path)`, `__ocSetTheme(json)`, `__ocSetFontSize(px)`,
+  `__ocSetWrap`, `__ocInsert(b64)`, `__ocCommand(name)` (undo, redo, insertTab, indentMore/Less,
+  toggleComment, find, goToLine, left, right, selectAll). JS → Kotlin (`AndroidEditor`): `onReady`,
+  `onChange(path, dirty, hash)`, `onSaveRequested`, `onCursor(line, col)`, `onCommand("palette"|
+  "closeTab")`, `onText(id, path, text)`, `onSnapshot(path, text)`, `onFocus`, `onError`. Text goes
+  Kotlin → JS base64 (like the terminal); JS → Kotlin as a plain string.
+- **State lives in `EditorViewModel`**, not the WebView: per tab the on-disk text + hash and the latest
+  unsaved snapshot (the page posts one 1.5 s after edits). Whenever the WebView is recreated
+  (navigating away, layout switch) `onEditorReady()` drops queued commands and replays every tab.
+  Undo history is per tab (one `EditorState` per tab in JS) and is lost only when the page is rebuilt.
+- **Save flow:** `save()` → `GetText(id)` → `onText` → `FileWriter.save(path, text, baseHash)` →
+  `Saved(hash)` (page marks that exact doc as saved, so typing during a save stays dirty) |
+  `Conflict(remote)` → dialog **Reload / Overwrite / Show diff** (`DiffLines.compute`) | `Failed(reason)`.
+- **Line endings:** CRLF files keep CRLF (`EditorState.lineSeparator` + `sliceDoc()`); indent unit is
+  detected per file. Ligatures of the Nerd Font are disabled in the editor.
+- **Theme:** colors come from `OcTheme.colors` as CSS variables, so light/dark switches live. New roles
+  added for the mockups: `textBody`, `lineNumber`, `accent`, `accentSoft`, `link`, `warning`,
+  `errorText`/`errorBg`, `editorLine` (selection), `editorActiveLine`, `popup`/`popupBorder`, `syntax.*`.
+  `textSecondary` stays the *muted* role (mockup "text muted" #9AA4B2); mockup "text secondary"
+  #C9D1D9 is `textBody`. Bg/border moved to #0E1116 / #262C36; `errorContainer` = #3A1D20 / #FFB4AE.
+- **Navigation:** Code tab (`Routes.CODE`) = tree (+ Recent) on phones, IDE layout at ≥ 720 dp
+  (tree 240 dp │ editor │ Terminal/Git panel 190 dp; 300 dp right slot at ≥ 1000 dp; nav rail instead
+  of the bottom bar when height < 600 dp). `Routes.EDITOR` (`path`, `line`) is the phone editor; on wide
+  screens it renders the IDE layout and opens the file in place. Chat file links and diff file
+  headers/lines open the editor at that line. The old viewer stays at `Routes.FILE` (long-press →
+  View read-only).
+- **Git:** `/vcs` for the branch + `git status --porcelain` (PTY) for "N changed"; Changes list → per-file
+  `git diff HEAD` (untracked: `--no-index /dev/null`) rendered with `DiffLines.parsePatch`; Commit… runs
+  `git add -A && git commit -q -m '<quoted>'`. No push.
+
+## Phase 2 design — optional Mac helper (planned, not built)
+
+opencode gives the app files, PTYs and sessions, but no code intelligence and no Android/React Native
+dev loop. A small companion daemon on the Mac would add those; the app keeps talking to opencode for
+everything else and only lights up helper features when the helper answers. Tracked in bd as epic
+`opencode-android-app-tuc` (+ `.1`–`.5`).
+
+- **Process:** one long-running daemon (Node or Kotlin — decide when building; Node fits tsserver /
+  Metro / Prettier best), installed as a login item, listening only on the Tailscale interface
+  (`tailscale ip -4` / MagicDNS name). One WebSocket for RPC + streams, JSON-RPC-style messages; binary
+  frames for video.
+- **Discovery + pairing (`tuc.1`):** the app looks for `http://<mac>.ts.net:<port>/helper/info` for the
+  active server's host (same Mac as opencode). First connect shows a 4-digit code on the Mac (macOS
+  notification + terminal); confirming it issues a device token stored in `ServerStore`, sent as
+  `Authorization: Bearer`. Tokens are revocable from the helper.
+- **Language server (`tuc.2`):** the helper runs `typescript-language-server` (tsserver) against the
+  real project and `node_modules`, and bridges LSP over the socket. The editor gets an LSP client
+  extension (`@codemirror/autocomplete` sources + `@codemirror/lint` diagnostics + go-to-definition +
+  rename) in the same bundle; the popup uses the `popup`/`popupBorder` roles. Format/lint on save:
+  Prettier/ESLint run by the helper *before* the save is written, returning the formatted text.
+  Saving stays on `FileWriter` (or moves to the helper when present: atomic, faster).
+- **Metro (`tuc.3`):** start/stop/reload (`r` / `/reload` on the Metro port), logs streamed into a
+  **Metro** tab of the bottom panel; red-box errors surfaced as notifications.
+- **adb (`tuc.4`):** build + install (`./gradlew installDebug` / `npx react-native run-android`),
+  wireless pairing of the phone itself (`adb pair` / `adb connect <phone-tailscale-ip>`), a **Logcat**
+  tab with filters.
+- **Emulator screen (`tuc.5`):** fills the reserved 300 dp right slot (≥ 1000 dp) and the landscape
+  split: the emulator's gRPC/WebRTC stream (`-grpc` + `emulator_controller`), or scrcpy-server as a
+  fallback, decoded in a `SurfaceView`; taps/swipes mapped back as touch events; Back/Home/rotate/
+  shake (dev menu)/screenshot toolbar.
+- **App integration:** `HelperClient` in `data/net`, `HelperState` in `AppViewModel` (absent / pairing
+  / ready); Metro/Logcat tabs and the emulator pane render only when ready.
+
 ## Features done
 
 Incremental SSE part patching · adaptive power-aware polling (3s busy / 15s fg / 60s bg) · todos
@@ -283,9 +396,31 @@ FAB / empty-state button navigates straight into the chat; two-pane selects it i
 `session.idle`/`todo.updated` before patching). Fixes chat glitching when a folder holds several
 sessions — foreign-session events used to bleed into the open chat. ·
 **git branch bar** on the Sessions screen (current branch from `/vcs`; tap to list local branches,
-switch, or create one — git runs server-side through a one-shot PTY, see integration fact 17).
+switch, or create one — git runs server-side through a one-shot PTY, see integration fact 17) ·
+**code editor (Phase 1)**: Code tab (tree + recent files), CodeMirror 6 editor with tabs, dirty dots,
+undo per tab, 9 languages + plain, search/replace, go to line, soft wrap, coding key row, hardware
+shortcuts (Ctrl+S/P/F/G, Ctrl+/, Tab/Shift+Tab), Go-to-file palette, hash-verified saves (native 2.2
+route or atomic PTY writer), conflict prompt (Reload/Overwrite/Show diff), unsaved-changes guards,
+tablet/landscape IDE layout (tree │ editor │ Terminal/Git panel, emulator slot), git branch + N changed,
+Changes sheet with diffs, Commit (see "Code editor (Phase 1)").
 
 ## Gotchas
+
+- **Protocol detection** (`OpenCodeApi.detect`) must not fall back to V1 on a *network* error: the
+  result is cached per process, so opening the app with Tailscale off pinned a 2.x server to 1.x routes
+  and every call parsed the web UI HTML (`Unexpected JSON token … '<'`) until a force-stop. Now the
+  IOException propagates and the next call probes again (seen on a real phone, Nov 2026).
+- **Editor:** `git status --porcelain` lines start with a significant space (` M file`) —
+  `GitRunner.parse` trims blank lines only; a full `trim()` silently dropped the first change.
+- **Editor:** never remove a bottom-panel composable just because the IME is up — typing in the
+  terminal or the Commit dialog also raises it, and dropping the panel killed the dialog mid-typing.
+  The panel/nav only collapse while CodeMirror itself has focus (`onFocus` bridge) on short screens;
+  the key row likewise shows only while the editor is focused.
+- **Editor:** `configChanges` now includes `smallestScreenSize|keyboard` — a fold/unfold or attaching a
+  hardware keyboard otherwise recreated the Activity (nav reset to Sessions, WebView rebuilt).
+- **Editor:** the `EditorViewModel` is scoped to the Activity (`rememberEditorViewModel`) and keyed by
+  server + folder, so the Code tab, the editor route and the tablet layout share tabs; switching
+  folders gives a fresh set of tabs.
 
 - Prism4j 2.0.0 bundles ONLY: markup, clike, css, javascript, java, kotlin, python, go, c, cpp, csharp,
   dart, swift, sql, json, yaml, markdown, git, groovy. Element is `@PrismBundle(include=…)`.
@@ -345,6 +480,21 @@ switch, or create one — git runs server-side through a one-shot PTY, see integ
   per-model Go usage / Zen balance (not exposed by the public usage endpoint).
 
 ## Verification
+
+Code editor (Nov 2026, opencode **2.2.6** via `make serve`, emulator Pixel API 36 / WebView 149):
+opened `src/screens/Signup.tsx` from the Code tab, edited with the soft keyboard + key row (pairing
+quotes, ←/→, undo), saved → bytes on the Mac matched (hash-verified), `git status` showed `M`; edited
+the file on the Mac then saved on the phone → conflict dialog, diff, Overwrite; Ctrl+S / Ctrl+P / Ctrl+F
+from a hardware keyboard; landscape phone (rail + tree + editor + live terminal panel); tablet portrait
+and landscape (tree │ editor │ Git panel │ emulator slot); Commit with a message containing quotes and
+`$(…)` landed verbatim. JVM tests: `EditorFilesTest` (14) + `FileWriterIntegrationTest` (3, opt-in
+`OC_IT=1`: native route, PTY writer with a 1.5 MB CRLF file, PTY exact-bytes read, conflicts, `../`
+refusal). **Not yet verified:** a real 1.x server (PTY read/write paths are exercised against 2.2.6 by
+forcing them), very large files' typing performance. **Physical device (vivo I2219, Android, WebView
+157):** release build installed over 0.1.52 (data kept); over USB (`adb reverse` → `make serve`) opened
+`Signup.tsx`, typed with the soft keyboard + key row (`=`, `{ }` pairing, auto-indent), saved (Mac
+bytes correct, git count updated), conflict prompt + **Reload**, landscape IDE layout; then browsed the
+real `onboard_v3` project read-only over Tailscale on the user's opencode service.
 
 Validated against opencode **1.18.31** live server: sessions, messages, prompt_async, command, diff,
 SSE, file list/content, find/find-file, provider/agent, PATCH title. `make serve` starts a local test

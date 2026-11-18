@@ -2,8 +2,8 @@
 
 Native Android (Kotlin + Jetpack Compose) client for the opencode HTTP server API.
 Lets a phone connect over Tailscale to an opencode server running on a Mac:
-view/resume sessions, chat (live SSE streaming), browse the project, view code with
-syntax highlighting, and review session diffs.
+write code in a CodeMirror 6 editor that saves to the Mac, view/resume sessions, chat (live SSE
+streaming), browse the project, review session diffs and commit.
 
 ## Quick start
 
@@ -113,7 +113,10 @@ Single `:app` module. No DI framework.
   `NsdDiscovery` (mDNS auto-detect of `opencode-<port>` on `_http._tcp` — resolves the LAN IP, NOT the
   Tailscale IP; the servers screen has a separate "Tailscale (remote)" field for that), `ServerConfig`,
   `GoUsageClient` (OpenCode Go plan usage — external Bearer call, see below),
-  `GitRunner` (one-shot PTY git commands for branch switch/create).
+  `GitRunner` (one-shot PTY git commands: branch switch/create, status, diff, commit), `PtyOneShot`
+  (the shared one-shot PTY runner), `FileWriter` + `EditorFiles` (editor read/save: native
+  `POST /api/experimental/fs/write` on opencode 2.2+, otherwise an atomic base64-over-PTY writer;
+  SHA-256 verified, conflict-checked, path-validated — see PROGRESS.md fact 18).
 - `AppViewModel` (MainActivity): global state — servers list, active server, `probe()` health check.
 - Screens (nav routes in `MainActivity.Routes`): servers → sessions → chat / files / file viewer / diff,
   plus `Settings` (Appearance / Notifications / OpenCode Go / About / Security).
@@ -124,7 +127,13 @@ Single `:app` module. No DI framework.
       factory = viewModelFactory { initializer { ChatViewModel(app, server, sessionId) } },
   )
   ```
-- `ui/common`: `CodeHighlighter` (Prism4j), `Markdown` (lightweight block/inline renderer), `DiffLines`, `CodeBlock`.
+- `ui/common`: `CodeHighlighter` (Prism4j), `Markdown` (lightweight block/inline renderer), `DiffLines`, `CodeBlock`,
+  `AppBottomBar`/`AppNavRail` (top-level nav: **Code · Sessions · Terminal · Settings**).
+- `ui/editor`: the code editor — CodeMirror 6 in a WebView (`EditorWebView`, same inline/size/version
+  recipe as the xterm terminal; bundle built from `tools/editor-bundle/` with esbuild and committed to
+  `assets/editor/`, never part of Gradle), `EditorViewModel` (activity-scoped tabs, saves, conflicts,
+  git), `EditorScreen` (phone route), `CodeScreen` (Code tab; IDE layout ≥ 720 dp). See PROGRESS.md
+  "Code editor (Phase 1)" and "Phase 2 design".
 - Terminal has **two renderers**, picked with the top-bar ⋮ and stored in `ServerStore.terminalRenderer`
   (`"xterm"` default / `"native"`):
   - `ui/terminal/TerminalScreen.kt` → `TerminalView` = the native Compose `Canvas` over
@@ -148,7 +157,10 @@ Single `:app` module. No DI framework.
 
 ## Conventions
 
-- Kotlin, Jetpack Compose (Material3), dark theme only. Colors in `ui/theme/Color.kt`.
+- Kotlin, Jetpack Compose (Material3), dark + light themes. Colors in `ui/theme/Color.kt`, always via
+  `OcTheme.colors` roles (editor roles: `textBody`, `lineNumber`, `accent`, `accentSoft`, `link`,
+  `warning`, `errorText`/`errorBg`, `editorLine`, `popup`, `syntax.*`).
+- Unit tests: `./gradlew :app:testDebugUnitTest`; `OC_IT=1` adds live round trips against `make serve`.
 - Navigation uses standard Android push/pop transitions (`NavHost` slide-in-from-right + slide-out on
   pop, `Motion.MEDIUM` + `FastOutSlowInEasing` in `MainActivity`). Don't set per-screen transitions
   unless a screen needs something different.

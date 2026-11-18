@@ -143,6 +143,8 @@ fun TerminalScreen(
     appVm: AppViewModel,
     serverId: String,
     onBack: () -> Unit,
+    /** Inside another screen (the Code tab's bottom panel): no app bar, no IME padding of its own. */
+    embedded: Boolean = false,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as OpenCodeApp
@@ -176,9 +178,10 @@ fun TerminalScreen(
     LaunchedEffect(useXterm) { vm.setRawMode(useXterm) }
 
     Scaffold(
-        modifier = Modifier.imePadding(),
+        modifier = if (embedded) Modifier else Modifier.imePadding(),
+        contentWindowInsets = if (embedded) androidx.compose.foundation.layout.WindowInsets(0) else androidx.compose.material3.ScaffoldDefaults.contentWindowInsets,
         topBar = {
-            TopAppBar(
+            if (!embedded) TopAppBar(
                 title = { Text(ui.active?.title?.ifBlank { "Terminal" } ?: "Terminal", maxLines = 1) },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }

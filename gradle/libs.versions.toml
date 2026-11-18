@@ -15,6 +15,7 @@ kotlinxSerializationJson = "1.7.3"
 coroutines = "1.9.0"
 prism4j = "2.0.0"
 javaDiffUtils = "4.12"
+junit = "4.13.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -43,6 +44,8 @@ kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 prism4j = { group = "io.noties", name = "prism4j", version.ref = "prism4j" }
 prism4j-bundler = { group = "io.noties", name = "prism4j-bundler", version.ref = "prism4j" }
 java-diff-utils = { group = "io.github.java-diff-utils", name = "java-diff-utils", version.ref = "javaDiffUtils" }
+
+junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

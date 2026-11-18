@@ -68,6 +68,8 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import okhttp3.Credentials
 import okhttp3.Headers
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import retrofit2.Response
@@ -111,15 +113,16 @@ class OpenCodeApi(
 
     private suspend fun detect(): Protocol = withContext(Dispatchers.IO) {
         val base = baseUrl()
-        val v2probe = runCatching {
-            rawClient.newCall(Request.Builder().url(base + "api/info").build()).execute().use { r ->
-                when {
-                    r.code in 200..299 -> r.body?.string().orEmpty().contains("\"version\"")
-                    r.code == 401 || r.code == 403 || r.code == 400 -> true
-                    else -> false
-                }
+        // A network failure must propagate, not fall back to V1: the result is cached for the life of
+        // the process, so probing while the tailnet was down pinned 2.x servers to the 1.x routes and
+        // every call then parsed the web UI's HTML ("Unexpected JSON token … '<'").
+        val v2probe = rawClient.newCall(Request.Builder().url(base + "api/info").build()).execute().use { r ->
+            when {
+                r.code in 200..299 -> r.body?.string().orEmpty().contains("\"version\"")
+                r.code == 401 || r.code == 403 || r.code == 400 -> true
+                else -> false
             }
-        }.getOrDefault(false)
+        }
         if (v2probe) Protocol.V2 else Protocol.V1
     }
 
@@ -382,6 +385,47 @@ class OpenCodeApi(
             val binary = bytes.any { it == 0.toByte() }
             FileContent(type = if (binary) "binary" else "text", content = if (binary) "" else String(bytes, Charsets.UTF_8))
         }
+    }
+
+    /** Exact file bytes (V2 `/api/fs/read`). V1's `/file/content` decodes/normalizes text, so it has no equivalent. */
+    suspend fun fileBytes(path: String, directory: String?): ByteArray {
+        check(protocol() == Protocol.V2) { "raw file read needs opencode 2.x" }
+        val encoded = URLEncoder.encode(path, "UTF-8").replace("+", "%20").replace("%2F", "/")
+        val url = buildString {
+            append(baseUrl())
+            append("api/fs/read/")
+            append(encoded)
+            if (directory != null) append("?location[directory]=").append(URLEncoder.encode(directory, "UTF-8"))
+        }
+        return v2.fsRead(url).use { it.bytes() }
+    }
+
+    @Volatile private var fsWriteSupported: Boolean? = null
+
+    /**
+     * Whether the server has a native file-write route. Only opencode 2.2+ does
+     * (`POST /api/experimental/fs/write`, advertised in `/openapi.json`); everything else saves
+     * through the PTY writer.
+     */
+    suspend fun supportsFileWrite(): Boolean {
+        if (protocol() != Protocol.V2) return false
+        fsWriteSupported?.let { return it }
+        val supported = withContext(Dispatchers.IO) {
+            runCatching {
+                rawClient.newCall(Request.Builder().url(baseUrl() + "openapi.json").build()).execute().use { r ->
+                    r.isSuccessful && r.body?.string().orEmpty().contains("\"experimental.fs.write\"")
+                }
+            }.getOrDefault(false)
+        }
+        fsWriteSupported = supported
+        return supported
+    }
+
+    /** Native write (see [supportsFileWrite]). Returns the absolute path the server wrote. */
+    suspend fun writeFile(path: String, bytes: ByteArray, directory: String?): String {
+        check(supportsFileWrite()) { "server has no file-write route" }
+        val body = bytes.toRequestBody("application/octet-stream".toMediaType())
+        return v2.fsWrite(directory, path, body).dataOf()?.field("path").str().orEmpty()
     }
 
     suspend fun findText(pattern: String, directory: String?): List<FindMatch> = when (protocol()) {
