@@ -1,5 +1,6 @@
 package dev.opencode.mobile.ui.editor
 
+import android.net.ConnectivityManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.opencode.mobile.OpenCodeApp
@@ -172,7 +173,9 @@ class EditorViewModel(
     /** adb devices, build & run, logcat through the helper (Android tab / sheet). */
     val android = AndroidController(viewModelScope, helper) { writer.projectRoot(projectDir()) }
     /** Live device screen (scrcpy through the helper). */
-    val screen = ScreenController(viewModelScope, helper)
+    val screen = ScreenController(viewModelScope, helper) {
+        app.getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered == true
+    }
     private var webReady = false
     @Volatile private var lspSession: String? = null
     private var lspStarting = false

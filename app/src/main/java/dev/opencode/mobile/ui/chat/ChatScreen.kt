@@ -664,11 +664,13 @@ private fun MessageList(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var refreshing by remember { mutableStateOf(false) }
-    val atBottom by remember {
-        derivedStateOf {
-            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last >= listState.layoutInfo.totalItemsCount - 1
-        }
+    // "At the bottom" means the end of the list is on screen, not just the top of the last item
+    // (a long reply is taller than the screen).
+    val atBottom by remember { derivedStateOf { !listState.canScrollForward } }
+    // Scrolls to the very end: the last item's bottom, including the "working" row under it.
+    suspend fun scrollToEnd() {
+        val n = listState.layoutInfo.totalItemsCount
+        if (n > 0) listState.scrollToItem(n - 1, scrollOffset = 1_000_000)
     }
     // Follow the tail only while the user is parked at the bottom. Scrolling up must not be
     // yanked back down by incoming/streaming messages.
@@ -676,23 +678,20 @@ private fun MessageList(
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }
             .filter { !it }
-            .collect {
-                val info = listState.layoutInfo
-                val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-                autoFollow = last >= info.totalItemsCount - 1
-            }
+            .collect { autoFollow = !listState.canScrollForward }
     }
-    // Only follow new messages appended at the end; loading older ones must not yank the viewport.
-    LaunchedEffect(messages.lastOrNull()?.info?.id, messages.lastOrNull()?.parts?.size) {
-        if (autoFollow && messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.lastIndex)
-        }
+    // Follow the tail as it grows: new messages, new parts, and streamed text (every ~120 chars).
+    // Loading older messages changes none of these, so it never yanks the viewport.
+    val tail = messages.lastOrNull()
+    val tailLength = tail?.parts?.sumOf { it.text.length + (it.state?.output?.length ?: 0) } ?: 0
+    LaunchedEffect(tail?.info?.id, tail?.parts?.size, tailLength / 120) {
+        if (autoFollow && messages.isNotEmpty()) scrollToEnd()
     }
     // Sending a message always snaps back to the latest turn.
     LaunchedEffect(scrollToBottomSignal) {
         if (scrollToBottomSignal > 0 && messages.isNotEmpty()) {
             autoFollow = true
-            listState.animateScrollToItem(messages.lastIndex)
+            scrollToEnd()
         }
     }
     LaunchedEffect(listState, hasMore, loadingOlder) {
@@ -760,7 +759,7 @@ private fun MessageList(
             FloatingActionButton(
                 onClick = {
                     autoFollow = true
-                    scope.launch { listState.animateScrollToItem(messages.lastIndex) }
+                    scope.launch { scrollToEnd() }
                 },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                 containerColor = MaterialTheme.colorScheme.primaryContainer,

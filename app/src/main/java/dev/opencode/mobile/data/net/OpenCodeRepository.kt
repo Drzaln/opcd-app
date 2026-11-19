@@ -183,6 +183,9 @@ class OpenCodeRepository {
 
         private var backoff = 1000L
 
+        /** opencode 2.x streaming events → live message patches (stateful: tool names, step info). */
+        private val liveEvents = V2LiveEvents()
+
         private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
         override fun onOpen(eventSource: EventSource, response: Response) {
@@ -195,7 +198,9 @@ class OpenCodeRepository {
                 if (json is JsonObject) {
                     val v2Type = json["type"]?.jsonPrimitive?.contentOrNull ?: type ?: "event"
                     val props = json["data"] as? JsonObject
-                    mapV2Event(v2Type, props)?.let(onEvent)
+                    val created = (json["created"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+                    val live = runCatching { liveEvents.map(v2Type, created, props) }.getOrNull()
+                    if (live != null) live.forEach(onEvent) else mapV2Event(v2Type, props)?.let(onEvent)
                 }
                 return
             }

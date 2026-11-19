@@ -25,6 +25,8 @@ import dev.opencode.mobile.data.net.OcEvent
 import dev.opencode.mobile.data.net.ServerConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -106,6 +108,8 @@ class ChatViewModel(
     private var nextCursor: String? = null
     @Volatile private var lastEventAt = 0L
     @Volatile private var lastRefreshAt = 0L
+    /** A full page has been fetched once (sets the "load older" cursor); later refreshes fetch only the tail. */
+    @Volatile private var loadedFull = false
 
     init {
         loadCached()
@@ -440,9 +444,11 @@ class ChatViewModel(
                             "session.status" -> applyStatus(event)
                             "session.idle" -> if (isOwnSession(event)) {
                                 _ui.update { it.copy(status = SessionStatus(type = "idle"), queued = 0) }
+                                // One reconciling fetch per turn: swaps live parts for the stored message.
+                                scheduleFullRefresh()
                             }
                             "todo.updated" -> applyTodos(event)
-                            "server.connected" -> scheduleFullRefresh()
+                            "server.connected" -> scheduleFullRefresh(full = true)
                             "session.updated", "session.diff", "session.compacted" ->
                                 if (isOwnSession(event)) scheduleFullRefresh()
                         }
@@ -473,8 +479,8 @@ class ChatViewModel(
             val message = state.messages[idx]
             val existingIdx = message.parts.indexOfFirst { it.id == part.id }
             val newParts = if (delta != null) {
-                val base = if (existingIdx == -1) Part(type = "text", text = "") else message.parts[existingIdx]
-                val updated = if (base.type == "text") base.copy(text = base.text + delta) else part
+                val base = if (existingIdx == -1) part.copy(text = "") else message.parts[existingIdx]
+                val updated = if (base.type == "text" || base.type == "reasoning") base.copy(text = base.text + delta) else part
                 if (existingIdx == -1) message.parts + updated else message.parts.toMutableList().also { it[existingIdx] = updated }
             } else {
                 if (existingIdx == -1) message.parts + part else message.parts.toMutableList().also { it[existingIdx] = part }
@@ -540,11 +546,11 @@ class ChatViewModel(
         _ui.update { it.copy(todos = todos) }
     }
 
-    private fun scheduleFullRefresh() {
+    private fun scheduleFullRefresh(full: Boolean = false) {
         refreshJob?.cancel()
         refreshJob = viewModelScope.launch {
             delay(400)
-            refreshAll()
+            refreshAll(full)
         }
     }
 
@@ -575,31 +581,59 @@ class ChatViewModel(
         return true
     }
 
-    private fun refreshAll() {
+    /**
+     * Reconciles with the server. After the first full page, only the newest messages are fetched
+     * (enough to cover anything streamed live) and merged in; if that tail doesn't overlap what we
+     * have — the stream was down for a while — it falls back to a full page. The side requests run
+     * in parallel, so a refresh costs one round trip instead of four.
+     */
+    private fun refreshAll(full: Boolean = false) {
         viewModelScope.launch {
             lastRefreshAt = System.currentTimeMillis()
             try {
-                val status = runCatching { api.sessionStatus(projectDir())[sessionId] }.getOrNull()
-                val session = runCatching { api.session(sessionId, projectDir()) }.getOrNull()
-                val page = api.messagesPage(sessionId, PAGE_SIZE, null, projectDir())
-                val body = page.body() ?: throw IOException("HTTP ${page.code()}")
-                val messages = body.mapNotNull { element ->
-                    runCatching { json.decodeFromJsonElement<MessageData>(element) }.getOrNull()
+                val existing = _ui.value.messages
+                val tail = !full && loadedFull && existing.isNotEmpty()
+                val live = existing.count { m -> m.parts.any { ":live:" in it.id } }
+                val limit = if (tail) (live + 4).coerceIn(TAIL_SIZE, PAGE_SIZE) else PAGE_SIZE
+                val dir = projectDir()
+                coroutineScope {
+                    val statusD = async { runCatching { api.sessionStatus(dir)[sessionId] }.getOrNull() }
+                    val sessionD = async { runCatching { api.session(sessionId, dir) }.getOrNull() }
+                    val todosD = async { runCatching { api.todos(sessionId, dir) }.getOrNull() }
+                    val page = api.messagesPage(sessionId, limit, null, dir)
+                    val body = page.body() ?: throw IOException("HTTP ${page.code()}")
+                    val messages = body.mapNotNull { element ->
+                        runCatching { json.decodeFromJsonElement<MessageData>(element) }.getOrNull()
+                    }
+                    // A full tail with nothing we already have means a gap: fetch a whole page instead.
+                    val gap = tail && messages.size >= limit && existing.none { it.info.id == messages.first().info.id }
+                    if (gap) {
+                        statusD.cancel(); sessionD.cancel(); todosD.cancel()
+                        refreshAll(full = true)
+                        return@coroutineScope
+                    }
+                    if (!tail) {
+                        nextCursor = page.headers()["X-Next-Cursor"]
+                        loadedFull = true
+                    }
+                    val status = statusD.await()
+                    val session = sessionD.await()
+                    val todos = todosD.await()
+                    val merged = mergePage(_ui.value.messages, messages)
+                    runCatching { app.cacheStore.put(messagesKey, json.encodeToString(merged.takeLast(PAGE_SIZE))) }
+                    // Preserve existing error so the banner stays visible until dismissed or a send succeeds.
+                    _ui.value = _ui.value.copy(
+                        messages = merged,
+                        session = session ?: _ui.value.session,
+                        status = status,
+                        todos = todos ?: _ui.value.todos,
+                        hasMore = nextCursor != null,
+                        loading = false,
+                    )
+                    updateWidget(session, status, merged)
                 }
-                val cursor = page.headers()["X-Next-Cursor"]
-                if (nextCursor == null) nextCursor = cursor
-                val todos = runCatching { api.todos(sessionId, projectDir()) }.getOrNull()
-                runCatching { app.cacheStore.put(messagesKey, json.encodeToString(messages)) }
-                // Preserve existing error so the banner stays visible until dismissed or a send succeeds.
-                _ui.value = _ui.value.copy(
-                    messages = mergePage(_ui.value.messages, messages),
-                    session = session,
-                    status = status,
-                    todos = todos ?: _ui.value.todos,
-                    hasMore = nextCursor != null,
-                    loading = false,
-                )
-                updateWidget(session, status, _ui.value.messages)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(loading = false, error = "Load messages: ${e.message ?: "unknown error"}")
             }
@@ -634,6 +668,8 @@ class ChatViewModel(
 
     companion object {
         private const val PAGE_SIZE = 50
+        /** Messages fetched by a routine refresh once the first page is loaded. */
+        private const val TAIL_SIZE = 6
         private const val MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024
         private const val SSE_TIMEOUT_MS = 45_000L
     }

@@ -68,6 +68,8 @@ data class ScreenUi(
     val width: Int = 0,
     val height: Int = 0,
     val message: String? = null,
+    /** Streaming with the metered-network (mobile data) preset. */
+    val dataSaver: Boolean = false,
 )
 
 /**
@@ -156,7 +158,19 @@ private class H264Decoder(private val surface: Surface, private val onSize: (Int
     }
 }
 
-class ScreenController(private val scope: CoroutineScope, private val helper: HelperManager) {
+/** Stream presets: long edge in px, bit rate, frame rate. Full ≈ 11 MB/min at full motion, data saver ≈ 4 MB/min. */
+internal class ScreenQuality(val maxSize: Int, val bitRate: Int, val maxFps: Int)
+
+internal val SCREEN_FULL = ScreenQuality(800, 1_500_000, 30)
+internal val SCREEN_DATA_SAVER = ScreenQuality(600, 500_000, 20)
+
+class ScreenController(
+    private val scope: CoroutineScope,
+    private val helper: HelperManager,
+    /** True on mobile data / a metered hotspot: the stream drops to the data-saver preset. */
+    private val isMetered: () -> Boolean = { false },
+) {
+
     private val _ui = MutableStateFlow(ScreenUi())
     val ui: StateFlow<ScreenUi> = _ui
     private var decoder: H264Decoder? = null
@@ -182,11 +196,13 @@ class ScreenController(private val scope: CoroutineScope, private val helper: He
         }
         decoder = d
         helper.binaryListener = { d.offer(it) }
-        _ui.update { ScreenUi(state = "starting", serial = serial) }
+        val metered = runCatching(isMetered).getOrDefault(false)
+        val q = if (metered) SCREEN_DATA_SAVER else SCREEN_FULL
+        _ui.update { ScreenUi(state = "starting", serial = serial, dataSaver = metered) }
         scope.launch {
             try {
                 val res = helper.request("screen.start", buildJsonObject {
-                    put("serial", serial); put("maxSize", 800); put("bitRate", 1_500_000); put("maxFps", 30)
+                    put("serial", serial); put("maxSize", q.maxSize); put("bitRate", q.bitRate); put("maxFps", q.maxFps)
                 }, timeoutMs = 45_000).jsonObject
                 if (decoder !== d) return@launch
                 _ui.update { it.copy(
@@ -312,6 +328,16 @@ fun DeviceScreen(screen: ScreenController, serial: String?, deviceLabel: String?
                     ui.state == "starting" -> "Connecting to ${deviceLabel ?: serial}…"
                     ui.state == "error" -> ui.message ?: "Screen stream ended"
                     else -> null
+                }
+                if (overlay == null && ui.state == "live" && ui.dataSaver) {
+                    Text(
+                        "Data saver",
+                        color = androidx.compose.ui.graphics.Color.White,
+                        fontSize = 10.sp,
+                        modifier = Modifier.align(Alignment.TopStart).padding(6.dp)
+                            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
                 }
                 if (overlay != null) {
                     Column(Modifier.align(Alignment.Center).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {

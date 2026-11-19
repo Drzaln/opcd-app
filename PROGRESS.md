@@ -86,9 +86,10 @@ V2 differences that matter (verified against 2.0.26):
   `value`, fields their `key`).
 - **Events:** `data: {"id","type","data"}` with types like `session.text.delta`, `session.step.*`,
   `session.tool.*`, `session.execution.*`, `session.usage.updated`, `permission.asked`, `form.created`.
-  `OpenCodeRepository` maps these onto the V1 event names the UI already understands (deltas →
-  debounced full refresh; `execution.started/succeeded` → status busy/idle; forms/permissions →
-  prompt shapes).
+  `OpenCodeRepository` maps these onto the V1 event names the UI already understands: text/reasoning
+  deltas, tool calls, steps and the user's message → live `message.updated` / `message.part.updated`
+  patches (`V2LiveEvents`); `execution.started/succeeded` → status busy/idle; forms/permissions →
+  prompt shapes.
 - **Removed in 2.0 (degraded):** todos (panel empty), content grep, session share/unshare links.
 - **Robustness:** the API client buffers GET bodies and retries once on `IOException` (e.g. a
   mid-stream cut surfaced as `unexpected end of stream`) — SSE and `/fs/read/` are excluded so
@@ -678,6 +679,65 @@ Asked: "make the UI UX good, functional and pretty" (whole app). Audit on the ph
     real question.
 - **Still open:** tablet layouts beyond the existing `WideTwoPane` for Files/viewer (not checked on a
   tablet).
+
+### Latency and data (`opencode-android-app-859`)
+
+Measured first: on opencode 2.x the chat re-fetched the newest 50 messages after every pause in a
+reply. That was 32–38 KB gzipped for normal sessions and 527 KB for a large one (1.1 MB raw), so a turn
+with about 20 tool calls could use about 10 MB. Text only showed up at the pauses.
+
+- **Live 2.x streaming:** `data/net/V2LiveEvents.kt` turns the 2.x events into the patches the chat
+  already applies.
+  - `inbox.enqueued` becomes the user message, using the stored id.
+  - `step.started` / `step.ended` become the assistant message (model, then tokens, cost and finish).
+  - `text.*` / `reasoning.*` become a live part that grows with each delta.
+  - `tool.input.started` / `called` / `success` / `failed` become the tool part, with the call id as
+    its id.
+  - Counters and markers are ignored. Anything else still maps as before.
+  - Captured from a real 2.3.2 run; `V2LiveEventsTest` replays that sequence.
+- **One reconciling fetch per turn** (on `session.idle`), not one per burst.
+  - Patching: a delta for a part the app doesn't have yet keeps that part's id. Before this fix it got
+    an empty id. Reasoning deltas now append too.
+- **Tail refresh:**
+  - After the first full page, a refresh fetches only the newest messages: at least 6, more if live
+    parts need covering. It merges them in.
+  - If that tail doesn't overlap what's already loaded (the stream was down for a while), it falls
+    back to a full page.
+  - Reconnecting (`server.connected`) always fetches a full page.
+  - The status, session and todo requests run in parallel with it: one round trip instead of four in
+    a row.
+- **Screen data saver:** on a metered network (mobile data, a metered hotspot) the live screen
+  streams at 600 px, 500 kbps and 20 fps (about 4 MB/min) instead of 800 px, 1.5 Mbps and 30 fps
+  (about 11 MB/min). A "Data saver" tag shows on the picture. Works for Android devices and iOS
+  simulators.
+- **Tailscale relay:**
+  - `tailscale ping` to the phone went via DERP (Singapore, 34–87 ms) with no direct connection.
+  - `tailscale netcheck` on the Mac: `MappingVariesByDestIP: true` (a "hard" NAT) and no port
+    mapping (no UPnP / NAT-PMP / PCP on the router).
+  - With the phone on mobile data (carrier NAT), a direct path can't be set up, so traffic goes
+    through the relay.
+  - Fixes on the user's side: turn on UPnP or NAT-PMP on the router, or have the phone on the same
+    Wi-Fi.
+- **Chat follow fix (found on the phone):** the chat scrolled to the *top* of the last message and only
+  re-scrolled when a new part appeared, so a long streaming reply sat on its first lines behind the
+  "scroll to bottom" button. Now "at the bottom" means the list can't scroll further, following scrolls
+  to the very end (including the "working" row), and it re-follows as streamed text grows (about every
+  120 characters). The jump button and sending use the same scroll-to-end.
+- **Checked:**
+  - unit tests (27 run, 3 integration tests skipped as usual);
+  - release build;
+  - event shapes from a real prompt in a throwaway folder.
+  - **On the phone** (opencode 2.3.2, throwaway folder, a byte-counting proxy between the app and
+    opencode):
+    - The user message, a tool card (read → ✓) and step usage appeared live.
+    - With DeepSeek V4.1 Flash, text streamed in during the reply (about 70 events over 11 s), and the
+      chat followed it after the fix.
+    - Gemini 4 Neon sends its answer in one burst after about 40 s of silent thinking, so there's
+      nothing to stream there.
+    - Traffic: no message downloads during a reply; one fetch when it ends, 2–28 KB. The old code
+      downloaded a 50-message page after every pause.
+  - The screen data saver was **not** tried on a device: that needs an emulator or simulator, or a
+    phone on mobile data.
 
 ### Phase 2 design notes
 
