@@ -52,7 +52,7 @@ import dev.opencode.mobile.update.UpdateState
 
 object Routes {
     const val SERVERS = "servers"
-    const val SETTINGS = "settings"
+    const val SETTINGS = "settings?serverId={serverId}&tab={tab}"
     const val TERMINAL = "terminal/{serverId}"
     const val SESSIONS = "sessions/{serverId}"
     const val CHAT = "chat/{serverId}/{sessionId}"
@@ -62,7 +62,13 @@ object Routes {
     const val CODE = "code/{serverId}"
     const val EDITOR = "editor/{serverId}?path={path}&line={line}"
 
+    /** Settings as a tab inside a server (bottom bar), or from the server list (back arrow). */
+    // `tab` is explicit: a server's id can be the empty string (servers saved by older versions).
+    fun settings(serverId: String? = null) = "settings?serverId=${java.net.URLEncoder.encode(serverId.orEmpty(), "UTF-8")}&tab=${serverId != null}"
     fun sessions(serverId: String) = "sessions/$serverId"
+    /** The four bottom-bar destinations switch with a crossfade; everything else slides. */
+    fun isTab(route: String?) = route != null && (route.startsWith("sessions/") || route.startsWith("code/") ||
+        route.startsWith("terminal/") || route.startsWith("settings"))
     fun terminal(serverId: String) = "terminal/$serverId"
     fun chat(serverId: String, sessionId: String) = "chat/$serverId/$sessionId"
     fun files(serverId: String, dir: String) = "files/$serverId?dir=${java.net.URLEncoder.encode(dir, "UTF-8")}"
@@ -139,25 +145,33 @@ class MainActivity : ComponentActivity() {
                     navController = navController,
                     startDestination = Routes.SERVERS,
                     enterTransition = {
-                        slideIntoContainer(
+                        if (Routes.isTab(initialState.destination.route) && Routes.isTab(targetState.destination.route))
+                            androidx.compose.animation.fadeIn(tween(Motion.FAST))
+                        else slideIntoContainer(
                             AnimatedContentTransitionScope.SlideDirection.Left,
                             animationSpec = tween(Motion.MEDIUM, easing = FastOutSlowInEasing),
                         )
                     },
                     exitTransition = {
-                        slideOutOfContainer(
+                        if (Routes.isTab(initialState.destination.route) && Routes.isTab(targetState.destination.route))
+                            androidx.compose.animation.fadeOut(tween(Motion.FAST))
+                        else slideOutOfContainer(
                             AnimatedContentTransitionScope.SlideDirection.Left,
                             animationSpec = tween(Motion.MEDIUM, easing = FastOutSlowInEasing),
                         )
                     },
                     popEnterTransition = {
-                        slideIntoContainer(
+                        if (Routes.isTab(initialState.destination.route) && Routes.isTab(targetState.destination.route))
+                            androidx.compose.animation.fadeIn(tween(Motion.FAST))
+                        else slideIntoContainer(
                             AnimatedContentTransitionScope.SlideDirection.Right,
                             animationSpec = tween(Motion.MEDIUM, easing = FastOutSlowInEasing),
                         )
                     },
                     popExitTransition = {
-                        slideOutOfContainer(
+                        if (Routes.isTab(initialState.destination.route) && Routes.isTab(targetState.destination.route))
+                            androidx.compose.animation.fadeOut(tween(Motion.FAST))
+                        else slideOutOfContainer(
                             AnimatedContentTransitionScope.SlideDirection.Right,
                             animationSpec = tween(Motion.MEDIUM, easing = FastOutSlowInEasing),
                         )
@@ -167,13 +181,22 @@ class MainActivity : ComponentActivity() {
                         ServersScreen(
                             appVm = appVm,
                             onOpen = { id -> navController.navigate(Routes.sessions(id)) },
-                            onSettings = { navController.navigate(Routes.SETTINGS) },
+                            onSettings = { navController.navigate(Routes.settings()) },
                         )
                     }
-                    composable(Routes.SETTINGS) {
+                    composable(
+                        route = Routes.SETTINGS,
+                        arguments = listOf(
+                            androidx.navigation.navArgument("serverId") { type = androidx.navigation.NavType.StringType; defaultValue = "" },
+                            androidx.navigation.navArgument("tab") { type = androidx.navigation.NavType.BoolType; defaultValue = false },
+                        ),
+                    ) { entry ->
+                        val serverId = entry.arguments?.getString("serverId").orEmpty()
+                        val asTab = entry.arguments?.getBoolean("tab") == true
                         dev.opencode.mobile.ui.settings.SettingsScreen(
                             appVm = appVm,
                             onBack = { navController.popBackStack() },
+                            onTab = if (!asTab) null else { tab -> navigateTab(navController, serverId, tab) },
                         )
                     }
                     composable(
@@ -185,6 +208,7 @@ class MainActivity : ComponentActivity() {
                             appVm = appVm,
                             serverId = serverId,
                             onBack = { navController.popBackStack() },
+                            onTab = { tab -> navigateTab(navController, serverId, tab) },
                         )
                     }
                     composable(
@@ -200,9 +224,9 @@ class MainActivity : ComponentActivity() {
                                     if (wide) selectedSession = sessionId
                                     else navController.navigate(Routes.chat(serverId, sessionId))
                                 },
-                                onFiles = { navController.navigate(Routes.code(serverId)) { launchSingleTop = true } },
-                                onSettings = { navController.navigate(Routes.SETTINGS) },
-                                onTerminal = { navController.navigate(Routes.terminal(serverId)) },
+                                onFiles = { navigateTab(navController, serverId, dev.opencode.mobile.ui.common.AppTab.CODE) },
+                                onSettings = { navigateTab(navController, serverId, dev.opencode.mobile.ui.common.AppTab.SETTINGS) },
+                                onTerminal = { navigateTab(navController, serverId, dev.opencode.mobile.ui.common.AppTab.TERMINAL) },
                                 onDiff = { sessionId -> navController.navigate(Routes.diff(serverId, sessionId)) },
                                 onBack = { appVm.clearActive(); navController.navigate(Routes.SERVERS) { popUpTo(0) { inclusive = true } } },
                             )
@@ -418,12 +442,21 @@ private fun navigateTab(
     serverId: String,
     tab: dev.opencode.mobile.ui.common.AppTab,
 ) {
-    when (tab) {
-        dev.opencode.mobile.ui.common.AppTab.SESSIONS ->
-            if (!navController.popBackStack(Routes.SESSIONS, inclusive = false)) navController.navigate(Routes.sessions(serverId))
-        dev.opencode.mobile.ui.common.AppTab.CODE -> navController.navigate(Routes.code(serverId)) { launchSingleTop = true }
-        dev.opencode.mobile.ui.common.AppTab.TERMINAL -> navController.navigate(Routes.terminal(serverId))
-        dev.opencode.mobile.ui.common.AppTab.SETTINGS -> navController.navigate(Routes.SETTINGS)
+    // Tabs, not a stack: Sessions is the root; switching to another tab replaces whatever tab was on
+    // top of it (back from any tab returns to Sessions, then leaves), keeping each tab's state.
+    if (tab == dev.opencode.mobile.ui.common.AppTab.SESSIONS) {
+        if (!navController.popBackStack(Routes.SESSIONS, inclusive = false)) navController.navigate(Routes.sessions(serverId))
+        return
+    }
+    val route = when (tab) {
+        dev.opencode.mobile.ui.common.AppTab.CODE -> Routes.code(serverId)
+        dev.opencode.mobile.ui.common.AppTab.TERMINAL -> Routes.terminal(serverId)
+        else -> Routes.settings(serverId)
+    }
+    navController.navigate(route) {
+        popUpTo(Routes.SESSIONS) { saveState = true }
+        launchSingleTop = true
+        restoreState = true
     }
 }
 

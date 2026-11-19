@@ -3,6 +3,7 @@ package dev.opencode.mobile.ui.terminal
 import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.text.BasicTextField
@@ -145,6 +146,11 @@ fun TerminalScreen(
     onBack: () -> Unit,
     /** Inside another screen (the Code tab's bottom panel): no app bar, no IME padding of its own. */
     embedded: Boolean = false,
+    /**
+     * As a top-level tab: the bottom bar shows on the session list; a live terminal gets the whole
+     * screen and its back arrow returns to the list instead of leaving the tab.
+     */
+    onTab: ((dev.opencode.mobile.ui.common.AppTab) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as OpenCodeApp
@@ -184,7 +190,12 @@ fun TerminalScreen(
             if (!embedded) TopAppBar(
                 title = { Text(ui.active?.title?.ifBlank { "Terminal" } ?: "Terminal", maxLines = 1) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    when {
+                        onTab != null && ui.active != null ->
+                            IconButton(onClick = { vm.detach() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "All terminals") }
+                        onTab == null ->
+                            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    }
                 },
                 actions = {
                     if (ui.active != null) {
@@ -236,7 +247,12 @@ fun TerminalScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
             )
         },
+        bottomBar = {
+            if (onTab != null && ui.active == null) dev.opencode.mobile.ui.common.AppBottomBar(dev.opencode.mobile.ui.common.AppTab.TERMINAL, onTab)
+        },
     ) { padding ->
+        // A live terminal in the tab: the system back gesture returns to the list, like the arrow.
+        if (onTab != null && ui.active != null) androidx.activity.compose.BackHandler { vm.detach() }
         Box(Modifier.fillMaxSize().padding(padding)) {
             val active = ui.active
             if (active == null) {
@@ -285,35 +301,62 @@ private fun SessionList(
     onKill: (PtyInfo) -> Unit,
     onCreate: () -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedButton(onClick = onCreate) {
-                Icon(Icons.Filled.Terminal, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("New terminal")
-            }
-            Spacer(Modifier.width(12.dp))
-            Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val c = dev.opencode.mobile.ui.theme.OcTheme.colors
+    if (sessions.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            if (loading) CircularProgressIndicator()
+            else dev.opencode.mobile.ui.common.EmptyState(
+                icon = Icons.Filled.Terminal,
+                title = "No terminals running",
+                body = "Start a shell on the Mac. It keeps running when you leave, so you can come back to it.",
+                action = "New terminal",
+                onAction = onCreate,
+            )
         }
-        if (loading && sessions.isEmpty()) {
-            CircularProgressIndicator(Modifier.padding(24.dp))
-        }
-        LazyColumn(Modifier.fillMaxSize()) {
-            items(sessions.size, key = { sessions[it].id }) { index ->
-                val pty = sessions[index]
-                ListItem(
-                    modifier = Modifier.clickable { onOpen(pty) },
-                    headlineContent = { Text(pty.title.ifBlank { pty.command }) },
-                    supportingContent = { Text("${pty.status} · pid ${pty.pid} · ${pty.cwd}") },
-                    leadingContent = { Icon(Icons.Filled.Terminal, contentDescription = null) },
-                    trailingContent = {
-                        IconButton(onClick = { onKill(pty) }) { Icon(Icons.Filled.Delete, contentDescription = "Kill") }
-                    },
-                )
+        return
+    }
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            dev.opencode.mobile.ui.common.SectionHeader("Running on the Mac · ${sessions.size}") {
+                androidx.compose.material3.TextButton(onClick = onCreate) {
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("New")
+                }
             }
+        }
+        items(sessions.size, key = { sessions[it].id }) { index ->
+            val pty = sessions[index]
+            val running = pty.status.equals("running", ignoreCase = true)
+            dev.opencode.mobile.ui.common.OcCard {
+                Row(
+                    Modifier.fillMaxWidth().clickable { onOpen(pty) }.padding(start = 14.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier.size(36.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)).background(c.accentSoft),
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.Filled.Terminal, contentDescription = null, tint = c.link, modifier = Modifier.size(20.dp)) }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(pty.title.ifBlank { pty.command }, style = MaterialTheme.typography.titleSmall, color = c.textPrimary, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            dev.opencode.mobile.ui.common.StatusPill(pty.status.replaceFirstChar { it.uppercase() }, if (running) c.green else c.textSecondary)
+                            Spacer(Modifier.width(8.dp))
+                            Text(pty.cwd.replace(Regex("^/Users/[^/]+"), "~"), fontSize = 12.sp, color = c.textSecondary, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        }
+                    }
+                    IconButton(onClick = { onKill(pty) }) { Icon(Icons.Filled.Delete, contentDescription = "Kill", tint = c.textSecondary) }
+                }
+            }
+        }
+        if (status.isNotBlank() && status != "idle") item {
+            Text(status, style = MaterialTheme.typography.labelSmall, color = c.textSecondary, modifier = Modifier.padding(start = 4.dp))
         }
     }
 }

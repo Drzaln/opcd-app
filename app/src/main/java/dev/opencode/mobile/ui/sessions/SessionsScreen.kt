@@ -3,6 +3,9 @@ package dev.opencode.mobile.ui.sessions
 import dev.opencode.mobile.ui.theme.OcTheme
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -457,26 +460,28 @@ fun SessionsScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
             )
             if (ui.error != null) {
-                Text(ui.error!!, Modifier.padding(16.dp), color = OcTheme.colors.red)
+                dev.opencode.mobile.ui.common.Banner(ui.error!!, error = true, onDismiss = { vm.refresh() })
             }
             if (ui.loading && ui.sessions.isEmpty()) {
-                androidx.compose.material3.CircularProgressIndicator(Modifier.padding(24.dp))
+                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    androidx.compose.material3.CircularProgressIndicator()
+                }
             }
             val visible = ui.visibleSessions
             if (!ui.loading && visible.isEmpty()) {
-                Column(
-                    Modifier.fillMaxWidth().padding(32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(
-                        if (ui.query.isBlank()) "No sessions in this folder yet" else "No sessions match \"${ui.query}\"",
-                        color = OcTheme.colors.textSecondary,
-                        style = MaterialTheme.typography.bodyMedium,
+                Box(Modifier.fillMaxWidth().padding(top = 32.dp), contentAlignment = Alignment.Center) {
+                    if (ui.query.isBlank()) dev.opencode.mobile.ui.common.EmptyState(
+                        icon = Icons.AutoMirrored.Filled.Chat,
+                        title = "No sessions here yet",
+                        body = "Start one to ask opencode about ${folderName(projectDir)}.",
+                        action = "New session",
+                        onAction = { vm.createSession { onChat(it) } },
+                    ) else dev.opencode.mobile.ui.common.EmptyState(
+                        icon = Icons.Filled.Search,
+                        title = "No matches",
+                        body = "No session title contains \"${ui.query}\".",
+                        tint = OcTheme.colors.textSecondary,
                     )
-                    if (ui.query.isBlank()) {
-                        Spacer(Modifier.height(8.dp))
-                        Button(onClick = { vm.createSession { onChat(it) } }) { Text("New session") }
-                    }
                 }
             }
             LazyColumn(
@@ -488,6 +493,7 @@ fun SessionsScreen(
                     SessionCard(
                         modifier = Modifier.animateItem(),
                         session = session,
+                        showPath = session.directory != projectDir,
                         status = ui.statuses[session.id],
                         onClick = { onChat(session.id) },
                         onDiff = { onDiff(session.id) },
@@ -927,6 +933,8 @@ private fun BranchSheet(
 private fun SessionCard(
     modifier: Modifier = Modifier,
     session: Session,
+    /** Only when the session lives in another folder than the one shown (the list is per folder). */
+    showPath: Boolean = false,
     status: SessionStatus?,
     onClick: () -> Unit,
     onDiff: () -> Unit,
@@ -937,65 +945,61 @@ private fun SessionCard(
     onUnshare: () -> Unit,
     onFork: () -> Unit,
 ) {
+    val c = OcTheme.colors
     var menu by remember { mutableStateOf(false) }
-    Box {
-        Card(
-            modifier = modifier
+    Box(modifier) {
+        Column(
+            Modifier
                 .fillMaxWidth()
-                .combinedClickable(onClick = onClick, onLongClick = { menu = true }),
+                .clip(dev.opencode.mobile.ui.common.Ui.cardShape)
+                .background(c.surface)
+                .border(1.dp, c.border, dev.opencode.mobile.ui.common.Ui.cardShape)
+                .combinedClickable(onClick = onClick, onLongClick = { menu = true })
+                .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 10.dp),
         ) {
-        Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.Top) {
                 Text(
                     session.title.ifEmpty { "Untitled session" },
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall.copy(fontSize = 15.sp, lineHeight = 20.sp),
+                    color = c.textPrimary,
                     maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                if (!session.share?.url.isNullOrBlank()) {
-                    MutedLabel("shared", modifier = Modifier.padding(end = 8.dp))
-                }
-                status?.let {
-                    val color = when (it.type) {
-                        "busy" -> OcTheme.colors.orange
-                        "retry" -> OcTheme.colors.red
-                        else -> OcTheme.colors.green
-                    }
-                    Box(
-                        Modifier
-                            .width(8.dp)
-                            .height(8.dp)
-                            .background(color, shape = CircleShape),
-                    )
-                }
-            }
-            MutedLabel(shortenPath(session.directory))
-            Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                MutedLabel(relativeTime(session.time?.updated ?: session.time?.created))
                 Spacer(Modifier.width(12.dp))
-                val summary = session.summary
-                if (summary != null && (summary.additions > 0 || summary.deletions > 0)) {
-                    Text("+${summary.additions} -${summary.deletions}", color = OcTheme.colors.green, style = MaterialTheme.typography.labelSmall)
+                Text(relativeTime(session.time?.updated ?: session.time?.created), fontSize = 12.sp, color = c.textSecondary, modifier = Modifier.padding(top = 2.dp))
+            }
+            if (showPath) MutedLabel(shortenPath(session.directory))
+            Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                when (status?.type) {
+                    "busy" -> { dev.opencode.mobile.ui.common.StatusPill("Working", c.orange); Spacer(Modifier.width(8.dp)) }
+                    "retry" -> { dev.opencode.mobile.ui.common.StatusPill("Retrying", c.red); Spacer(Modifier.width(8.dp)) }
+                }
+                if (!session.share?.url.isNullOrBlank()) {
+                    dev.opencode.mobile.ui.common.StatusPill("Shared", c.purple, dot = false)
                     Spacer(Modifier.width(8.dp))
-                    Text("${summary.files} files", color = OcTheme.colors.textSecondary, style = MaterialTheme.typography.labelSmall)
                 }
-                Spacer(Modifier.weight(1f))
-                Text("Diff", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable(onClick = onDiff))
-            }
-            val tokens = session.tokens
-            val cost = session.cost
-            if ((tokens != null && (tokens.input + tokens.output) > 0) || (cost != null && cost > 0)) {
-                Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (tokens != null) {
-                        MutedLabel("${"%,d".format(tokens.input + tokens.output)} tok")
-                        Spacer(Modifier.width(12.dp))
-                    }
-                    if (cost != null && cost > 0) {
-                        MutedLabel("$" + if (cost >= 0.01) "%.2f".format(cost) else "%.4f".format(cost))
-                    }
+                val summary = session.summary
+                val meta = buildList {
+                    session.tokens?.let { t -> if (t.input + t.output > 0) add(compactCount(t.input + t.output) + " tok") }
+                    session.cost?.let { cost -> if (cost > 0) add("$" + if (cost >= 0.01) "%.2f".format(cost) else "%.4f".format(cost)) }
                 }
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    if (summary != null && (summary.additions > 0 || summary.deletions > 0)) {
+                        Text("+${summary.additions}", color = c.green, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text(" −${summary.deletions}", color = c.red, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        if (meta.isNotEmpty()) Text("  ·  ", color = c.textSecondary, fontSize = 12.sp)
+                    }
+                    Text(meta.joinToString("  ·  "), color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Text(
+                    "Diff",
+                    color = c.link,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onDiff).padding(horizontal = 8.dp, vertical = 6.dp),
+                )
             }
-        }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename() })
@@ -1012,6 +1016,14 @@ private fun SessionCard(
             )
         }
     }
+}
+
+/** 11,563 → "11.6k", 2,400,000 → "2.4M" (a session card has no room for exact counts). */
+private fun compactCount(n: Long): String = when {
+    n >= 1_000_000 -> "%.1fM".format(n / 1_000_000.0)
+    n >= 10_000 -> "%.0fk".format(n / 1_000.0)
+    n >= 1_000 -> "%.1fk".format(n / 1_000.0)
+    else -> n.toString()
 }
 
 private fun relativeTime(epochMillis: Long?): String {

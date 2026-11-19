@@ -28,6 +28,10 @@ private val DarkColors = darkColorScheme(
     onPrimaryContainer = DarkOcColors.textPrimary,
     secondary = DarkOcColors.textSecondary,
     onSecondary = DarkOcColors.bg,
+    secondaryContainer = DarkOcColors.accentSoft,
+    onSecondaryContainer = DarkOcColors.link,
+    tertiaryContainer = DarkOcColors.accentSoft,
+    onTertiaryContainer = DarkOcColors.link,
     tertiary = DarkOcColors.purple,
     onTertiary = DarkOcColors.bg,
     background = DarkOcColors.bg,
@@ -62,6 +66,10 @@ private val LightColors = lightColorScheme(
     onPrimaryContainer = LightOcColors.textPrimary,
     secondary = LightOcColors.textSecondary,
     onSecondary = LightOcColors.bg,
+    secondaryContainer = LightOcColors.accentSoft,
+    onSecondaryContainer = LightOcColors.primary,
+    tertiaryContainer = LightOcColors.accentSoft,
+    onTertiaryContainer = LightOcColors.primary,
     tertiary = LightOcColors.purple,
     onTertiary = LightOcColors.bg,
     background = LightOcColors.bg,
@@ -111,6 +119,16 @@ fun OpenCodeTheme(
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
     val ocColors = if (dark) DarkOcColors else LightOcColors
+    // Status / navigation bar icons follow the app's theme (not the system's): dark icons on the
+    // light theme, light icons on the dark one — otherwise the clock disappears in light mode.
+    val view = androidx.compose.ui.platform.LocalView.current
+    if (!view.isInEditMode) androidx.compose.runtime.SideEffect {
+        val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
+        androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+            isAppearanceLightStatusBars = !dark
+            isAppearanceLightNavigationBars = !dark
+        }
+    }
     CompositionLocalProvider(LocalOcColors provides ocColors) {
         MaterialTheme(
             colorScheme = if (dark) DarkColors else LightColors,

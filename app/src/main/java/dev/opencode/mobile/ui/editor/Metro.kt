@@ -244,9 +244,13 @@ fun MetroPanel(metro: MetroController, modifier: Modifier = Modifier) {
     androidx.compose.foundation.layout.BoxWithConstraints(modifier) {
     val oneRow = maxWidth >= 640.dp
     val filters: @Composable () -> Unit = {
-        FilterChipText("All", !errorsOnly) { errorsOnly = false }
         val problems = ui.lines.count { it.level != MetroLevel.INFO && !it.frame }
-        FilterChipText(if (problems > 0) "Problems ($problems)" else "Problems", errorsOnly) { errorsOnly = true }
+        dev.opencode.mobile.ui.common.Segmented(
+            labels = listOf("All", "Problems"),
+            selected = if (errorsOnly) 1 else 0,
+            onSelect = { errorsOnly = it == 1 },
+            badges = listOf(null, if (problems > 0) (if (problems > 99) "99+" else problems.toString()) else null),
+        )
         Text("Clear", fontSize = 12.sp, color = c.textSecondary, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { metro.clear() }.padding(horizontal = 8.dp, vertical = 10.dp))
     }
     Column(Modifier.fillMaxSize()) {
@@ -270,22 +274,22 @@ fun MetroPanel(metro: MetroController, modifier: Modifier = Modifier) {
             }
             if (oneRow) filters()
             if (ui.running) {
-                TextButton(onClick = { metro.reload() }, enabled = !ui.busy) { Text("Reload") }
-                TextButton(onClick = { metro.stop() }, enabled = !ui.busy && ui.state != "external") { Text("Stop") }
+                androidx.compose.material3.FilledTonalButton(onClick = { metro.reload() }, enabled = !ui.busy, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp)) { Text("Reload") }
+                TextButton(onClick = { metro.stop() }, enabled = !ui.busy && ui.state != "external") { Text("Stop", color = c.errorText) }
             } else {
-                TextButton(onClick = { metro.start() }, enabled = !ui.busy && ui.detected != null) { Text("Start") }
+                androidx.compose.material3.Button(
+                    onClick = { metro.start() },
+                    enabled = !ui.busy && ui.detected != null,
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = c.accent, contentColor = androidx.compose.ui.graphics.Color.White),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                ) { Text("Start") }
             }
         }
-        if (!oneRow) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (!oneRow) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             filters()
         }
         ui.message?.let { message ->
-            Text(
-                message,
-                color = c.errorText,
-                fontSize = 12.sp,
-                modifier = Modifier.fillMaxWidth().background(c.errorBg).clickable { metro.dismissMessage() }.padding(horizontal = 12.dp, vertical = 6.dp),
-            )
+            dev.opencode.mobile.ui.common.Banner(message, error = true, onDismiss = { metro.dismissMessage() })
         }
         Box(Modifier.weight(1f).fillMaxWidth().background(c.bg)) {
             if (shown.isEmpty()) {

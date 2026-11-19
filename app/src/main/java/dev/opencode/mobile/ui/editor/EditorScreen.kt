@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Undo
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Description
@@ -263,19 +264,32 @@ private fun PathBar(vm: EditorViewModel) {
 @Composable
 fun SaveButton(vm: EditorViewModel, tab: EditorTab) {
     val c = OcTheme.colors
-    Button(
-        onClick = { vm.save(tab.path) },
-        enabled = tab.status != SaveStatus.SAVING,
-        shape = RoundedCornerShape(10.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = c.accent, contentColor = androidx.compose.ui.graphics.Color.White),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-        modifier = Modifier.heightIn(min = 40.dp),
-    ) {
-        if (tab.status == SaveStatus.SAVING) {
-            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = androidx.compose.ui.graphics.Color.White)
-            Spacer(Modifier.width(8.dp))
+    val saving = tab.status == SaveStatus.SAVING
+    // Filled only when there's something to save; otherwise a quiet confirmation (still tappable).
+    if (tab.dirty || saving || tab.status == SaveStatus.FAILED) {
+        Button(
+            onClick = { vm.save(tab.path) },
+            enabled = !saving,
+            shape = RoundedCornerShape(10.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = c.accent, contentColor = androidx.compose.ui.graphics.Color.White),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+            modifier = Modifier.heightIn(min = 36.dp),
+        ) {
+            if (saving) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = androidx.compose.ui.graphics.Color.White)
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(if (saving) "Saving" else "Save", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         }
-        Text("Save", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    } else {
+        Row(
+            Modifier.clip(RoundedCornerShape(10.dp)).clickable { vm.save(tab.path) }.heightIn(min = 36.dp).padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Outlined.Check, contentDescription = null, tint = c.green, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Saved", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = c.textSecondary)
+        }
     }
 }
 

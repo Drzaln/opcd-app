@@ -1,5 +1,10 @@
 package dev.opencode.mobile.ui.chat
 
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.border
 import dev.opencode.mobile.ui.theme.OcTheme
 
 import android.graphics.BitmapFactory
@@ -359,56 +364,77 @@ private fun InputBar(
     onPickPhoto: () -> Unit,
     onPickFile: () -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp, modifier = Modifier.navigationBarsPadding()) {
-        Column {
-            if (attachments.isNotEmpty()) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    for (attachment in attachments) {
-                        Surface(color = OcTheme.colors.surfaceVariant, shape = RoundedCornerShape(8.dp)) {
+    val c = OcTheme.colors
+    Surface(color = c.bg, modifier = Modifier.navigationBarsPadding()) {
+        Column(Modifier.padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 8.dp)) {
+            if (queued > 0) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    dev.opencode.mobile.ui.common.StatusPill("$queued queued", c.orange)
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onCancelQueued) { Text("Cancel queued", color = c.red) }
+                }
+            }
+            // One composer card: attachments, the text, then the controls.
+            Column(
+                Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(c.surface)
+                    .border(1.dp, c.border, RoundedCornerShape(18.dp)),
+            ) {
+                if (attachments.isNotEmpty()) {
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 10.dp, end = 10.dp, top = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        for (attachment in attachments) {
                             Row(
-                                Modifier.padding(start = 8.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
+                                Modifier.clip(RoundedCornerShape(8.dp)).background(c.surfaceVariant).padding(start = 8.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(
-                                    attachment.name,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.width(120.dp),
-                                )
-                                IconButton(onClick = { onRemoveAttachment(attachment.uri) }, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Filled.AttachFile, contentDescription = null, tint = c.textSecondary, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(attachment.name, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 140.dp))
+                                IconButton(onClick = { onRemoveAttachment(attachment.uri) }, modifier = Modifier.size(28.dp)) {
                                     Icon(Icons.Filled.Close, contentDescription = "Remove attachment", modifier = Modifier.size(14.dp))
                                 }
                             }
                         }
                     }
                 }
-            }
-            if (agents.isNotEmpty() || models.isNotEmpty()) {
+                androidx.compose.material3.TextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    placeholder = { Text(if (busy) "opencode is working… you can queue a message" else "Message opencode", color = c.textSecondary) },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 6,
+                    colors = androidx.compose.material3.TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        disabledContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                    ),
+                )
                 Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 10.dp, vertical = 2.dp),
+                    Modifier.fillMaxWidth().padding(start = 4.dp, end = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (agents.isNotEmpty()) {
-                        SelectionChip(
+                    if (commands.isNotEmpty()) CommandMenu(commands = commands, onPick = { cmd -> onValueChange("/${cmd} ") })
+                    AttachMenu(enabled = enabled, onPickPhoto = onPickPhoto, onPickFile = onPickFile)
+                    Row(
+                        Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (agents.isNotEmpty()) SelectionChip(
                             label = "Agent",
                             options = agents,
                             optionLabel = { it.name },
                             selected = agents.firstOrNull { it.name == selectedAgent },
                             onSelect = { agent -> onSelectAgent(agent?.name) },
                         )
-                    }
-                    if (models.isNotEmpty()) {
-                        SelectionChip(
+                        if (models.isNotEmpty()) SelectionChip(
                             label = "Model",
                             options = models,
                             optionLabel = { it.label },
@@ -416,10 +442,8 @@ private fun InputBar(
                             selectedLabel = { it.shortLabel },
                             onSelect = onSelectModel,
                         )
-                    }
-                    val variants = selectedModel?.variants.orEmpty()
-                    if (variants.isNotEmpty()) {
-                        SelectionChip(
+                        val variants = selectedModel?.variants.orEmpty()
+                        if (variants.isNotEmpty()) SelectionChip(
                             label = "Variant",
                             options = variants,
                             optionLabel = { it },
@@ -427,46 +451,18 @@ private fun InputBar(
                             onSelect = onSelectVariant,
                         )
                     }
-                }
-            }
-            if (queued > 0) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    MutedLabel("$queued message(s) queued")
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = onCancelQueued) { Text("Cancel queued", color = OcTheme.colors.red) }
-                }
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                OutlinedTextField(
-                    value = value,
-                    onValueChange = onValueChange,
-                    placeholder = { Text(if (busy) "opencode is working…" + (if (queued > 0) " ($queued queued)" else "") else "Message opencode") },
-                    modifier = Modifier.weight(1f),
-                    maxLines = 6,
-                )
-                Spacer(Modifier.width(6.dp))
-                if (commands.isNotEmpty()) {
-                    CommandMenu(commands = commands, onPick = { cmd ->
-                        onValueChange("/${cmd} ")
-                    })
-                }
-                AttachMenu(
-                    enabled = enabled,
-                    onPickPhoto = onPickPhoto,
-                    onPickFile = onPickFile,
-                )
-                IconButton(
-                    onClick = onSend,
-                    enabled = enabled && (value.isNotBlank() || attachments.isNotEmpty()),
-                    modifier = Modifier.padding(bottom = 4.dp),
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                    val canSend = enabled && (value.isNotBlank() || attachments.isNotEmpty())
+                    androidx.compose.material3.FilledIconButton(
+                        onClick = onSend,
+                        enabled = canSend,
+                        modifier = Modifier.size(40.dp),
+                        colors = androidx.compose.material3.IconButtonDefaults.filledIconButtonColors(
+                            containerColor = c.accent,
+                            contentColor = Color.White,
+                            disabledContainerColor = c.surfaceVariant,
+                            disabledContentColor = c.textSecondary,
+                        ),
+                    ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", modifier = Modifier.size(18.dp)) }
                 }
             }
         }
@@ -481,8 +477,8 @@ private fun AttachMenu(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { expanded = true }, enabled = enabled, modifier = Modifier.padding(bottom = 4.dp)) {
-            Icon(Icons.Filled.AttachFile, contentDescription = "Attach")
+        IconButton(onClick = { expanded = true }, enabled = enabled, modifier = Modifier.size(40.dp)) {
+            Icon(Icons.Filled.AttachFile, contentDescription = "Attach", tint = OcTheme.colors.textSecondary, modifier = Modifier.size(20.dp))
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(text = { Text("Photo") }, onClick = { expanded = false; onPickPhoto() })
@@ -495,8 +491,8 @@ private fun AttachMenu(
 private fun CommandMenu(commands: List<Command>, onPick: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { expanded = true }) {
-            Text("/", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        IconButton(onClick = { expanded = true }, modifier = Modifier.size(40.dp)) {
+            Text("/", style = MaterialTheme.typography.titleMedium, color = OcTheme.colors.textSecondary)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             for (cmd in commands) {
@@ -532,15 +528,23 @@ private fun <T> SelectionChip(
     selectedLabel: (T) -> String = optionLabel,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val c = OcTheme.colors
     Box {
-        TextButton(onClick = { expanded = true }) {
+        Row(
+            Modifier.clip(RoundedCornerShape(8.dp)).background(c.surfaceVariant).clickable { expanded = true }
+                .padding(start = 10.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 selected?.let(selectedLabel) ?: label,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.labelMedium,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (selected != null) c.textPrimary else c.textSecondary,
+                modifier = Modifier.widthIn(max = 160.dp),
             )
-            Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = c.textSecondary, modifier = Modifier.size(18.dp))
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
@@ -795,17 +799,18 @@ private fun MessageRow(
             horizontalAlignment = Alignment.End,
         ) {
             Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 6.dp),
                 color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.fillMaxWidth(0.85f),
+                modifier = Modifier.widthIn(max = 520.dp).fillMaxWidth(0.85f),
             ) {
-                MarkdownText(markdown = text.ifEmpty { "…" }, modifier = Modifier.padding(12.dp), bodySize = 15.sp)
+                MarkdownText(markdown = text.ifEmpty { "…" }, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp), bodySize = 15.sp)
             }
             Text(
-                "± diff",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(top = 2.dp).clickable { onMessageDiff(message.info.id) },
+                "Diff",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                color = OcTheme.colors.textSecondary,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onMessageDiff(message.info.id) }.padding(horizontal = 6.dp, vertical = 4.dp),
             )
         }
     } else {
@@ -829,12 +834,14 @@ private fun MessageRow(
             val parts = message.parts
             val agentName = parts.firstOrNull { it.agent.isNotBlank() }?.agent ?: "opencode"
             val modelLabel = resolveModelLabel(message.info, models)
-            if (parts.isNotEmpty() || modelLabel != null) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
-                    Text(agentName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            if (parts.isNotEmpty()) {
+                // A quiet byline: agent · model (the provider prefix is noise here).
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(OcTheme.colors.link))
+                    Spacer(Modifier.width(6.dp))
+                    Text(agentName, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = OcTheme.colors.textPrimary)
                     if (modelLabel != null) {
-                        Spacer(Modifier.width(8.dp))
-                        MutedLabel(modelLabel)
+                        Text("  ·  " + modelLabel.substringAfterLast(" · "), fontSize = 12.sp, color = OcTheme.colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }

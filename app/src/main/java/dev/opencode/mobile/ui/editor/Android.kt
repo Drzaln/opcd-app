@@ -23,6 +23,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -475,14 +476,9 @@ fun AndroidPanel(
                 Spacer(Modifier.weight(1f))
                 if (wide) Tabs(tab, screen != null, ui.iosSelected) { tab = it }
             }
-            if (!wide) Row(Modifier.padding(horizontal = 8.dp)) { Tabs(tab, screen != null, ui.iosSelected) { tab = it } }
+            if (!wide) Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) { Tabs(tab, screen != null, ui.iosSelected) { tab = it } }
             (ui.message ?: ui.info)?.let { text ->
-                Text(
-                    text,
-                    color = if (ui.message != null) c.errorText else c.textBody,
-                    fontSize = 12.sp,
-                    modifier = Modifier.fillMaxWidth().background(if (ui.message != null) c.errorBg else c.surface).clickable { android.dismiss() }.padding(horizontal = 12.dp, vertical = 6.dp),
-                )
+                dev.opencode.mobile.ui.common.Banner(text, error = ui.message != null, onDismiss = { android.dismiss() })
             }
             when {
                 ui.adbMissing && !ui.ios -> Empty("adb isn't installed on the Mac. Install Android platform-tools (Android Studio → SDK Manager), then refresh.")
@@ -512,11 +508,12 @@ fun AndroidPanel(
 
 @Composable
 private fun Tabs(tab: AndroidTab, withScreen: Boolean, ios: Boolean, onTab: (AndroidTab) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        FilterChipText("Run", tab == AndroidTab.RUN) { onTab(AndroidTab.RUN) }
-        FilterChipText(if (ios) "Logs" else "Logcat", tab == AndroidTab.LOGCAT) { onTab(AndroidTab.LOGCAT) }
-        if (withScreen) FilterChipText("Screen", tab == AndroidTab.SCREEN) { onTab(AndroidTab.SCREEN) }
-    }
+    val tabs = listOfNotNull(AndroidTab.RUN, AndroidTab.LOGCAT, AndroidTab.SCREEN.takeIf { withScreen })
+    dev.opencode.mobile.ui.common.Segmented(
+        labels = tabs.map { when (it) { AndroidTab.RUN -> "Run"; AndroidTab.LOGCAT -> if (ios) "Logs" else "Logcat"; AndroidTab.SCREEN -> "Screen" } },
+        selected = tabs.indexOf(tab).coerceAtLeast(0),
+        onSelect = { onTab(tabs[it]) },
+    )
 }
 
 @Composable
@@ -533,7 +530,8 @@ private fun DevicePicker(
     var open by remember { mutableStateOf(false) }
     Box(modifier) {
         Row(
-            Modifier.clip(RoundedCornerShape(8.dp)).clickable { open = true }.heightIn(min = 40.dp).padding(horizontal = 8.dp),
+            Modifier.clip(RoundedCornerShape(10.dp)).background(c.surfaceVariant.copy(alpha = 0.6f)).clickable { open = true }
+                .heightIn(min = 40.dp).padding(start = 12.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val d = ui.device
@@ -619,8 +617,17 @@ private fun RunView(android: AndroidController, ui: AndroidUi) {
             val sub = ui.runCommand ?: ui.detected?.replace("<device>", ui.selected ?: "<device>") ?: ui.detectError
             if (sub != null) Text(sub, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = if (ui.detected == null && ui.runCommand == null) c.errorText else c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (ui.running) TextButton(onClick = { android.stopRun() }, enabled = !ui.busy) { Text("Stop") }
-        else TextButton(onClick = { android.run() }, enabled = !ui.busy && ui.device?.ready == true && ui.detected != null) { Text("Run") }
+        if (ui.running) TextButton(onClick = { android.stopRun() }, enabled = !ui.busy) { Text("Stop", color = c.errorText) }
+        else androidx.compose.material3.Button(
+            onClick = { android.run() },
+            enabled = !ui.busy && ui.device?.ready == true && ui.detected != null,
+            colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = c.accent, contentColor = androidx.compose.ui.graphics.Color.White),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp),
+        ) {
+            Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Run")
+        }
     }
     LogList(
         lines = ui.runLines,
@@ -637,7 +644,11 @@ private fun RunView(android: AndroidController, ui: AndroidUi) {
 private fun LogcatView(android: AndroidController, ui: AndroidUi, filter: String, onFilter: (String) -> Unit) {
     val c = OcTheme.colors
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        for (m in LogcatMode.values()) FilterChipText(m.label, ui.logcatMode == m) { android.setLogcatMode(m) }
+        dev.opencode.mobile.ui.common.Segmented(
+            labels = LogcatMode.values().map { it.label },
+            selected = ui.logcatMode.ordinal,
+            onSelect = { android.setLogcatMode(LogcatMode.values()[it]) },
+        )
         androidx.compose.foundation.text.BasicTextField(
             value = filter,
             onValueChange = onFilter,
@@ -675,7 +686,7 @@ private fun LogList(lines: List<MetroLine>, empty: String) {
 }
 
 @Composable
-private fun Empty(text: String) = Text(text, fontSize = 12.sp, color = OcTheme.colors.textSecondary, modifier = Modifier.padding(12.dp))
+private fun Empty(text: String) = Text(text, fontSize = 13.sp, lineHeight = 19.sp, color = OcTheme.colors.textSecondary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp))
 
 /** adb connect (and optionally Android 11+ "pair with code" first). Host defaults to this phone. */
 @Composable

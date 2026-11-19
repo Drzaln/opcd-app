@@ -607,6 +607,43 @@ Slice 1 = everything except the live screen.
   phone test), rotation, iPad simulators, streaming over 4G (Wi-Fi + Tailscale only), the ≥ 1000 dp
   right column with a simulator.
 
+### UI/UX pass 1 (whole app, after Phase 2)
+
+Asked: "make the UI UX good, functional and pretty" (whole app). Audit on the phone first, then:
+- **Bug found by the audit (functional):** on opencode 2.x, any file bigger than one network packet
+  failed to open ("index.tsx: Read failed") from the tree *and* Recent; `app.json` (1 KB) opened. Cause:
+  `fsRead` is `@Streaming`, so `ResponseBody.bytes()` ran on the caller's (main) thread →
+  `NetworkOnMainThreadException` (no message) once the body didn't arrive with the headers. A JVM test
+  can't see it (no StrictMode). Fix: `OpenCodeApi.readBody` reads on `Dispatchers.IO` (editor reads and
+  the read-only viewer); a message-less exception now reports its type ("Read failed: <Type>").
+- **Design system** `ui/common/Ui.kt`: `EmptyState` (tinted icon, title, help, action), `Segmented`
+  (panel tabs / filters, with count or dot badges), `StatusPill`, `SectionHeader`, `OcCard` (12 dp radius,
+  1 dp border), `Banner` (dismissible error/info). 16 dp gutter, 8 dp control radius.
+- **Navigation:** Terminal and Settings were pushed pages (back arrow, bottom bar gone) although the
+  bar looked like tabs. Now all four are tabs: Sessions is the root, switching replaces the current tab
+  (`popUpTo(sessions) { saveState }`, `restoreState`), crossfade between tabs (slide for everything
+  else), Back from any tab → Sessions. Settings from the server list keeps its back arrow (route flag
+  `tab`, explicit because a server's id can be the empty string — servers saved by older versions).
+  A live terminal takes the whole screen; its back arrow / the back gesture return to the list.
+- **Theme:** Material's default purple containers (selected segmented buttons, tonal buttons) replaced
+  by the accent (`secondaryContainer = accentSoft`); status / navigation bar icons follow the app theme
+  (they were white on white in light mode).
+- **Screens:** Sessions — bordered cards, time top-right, one quiet meta line (Working/Retrying/Shared
+  pills, +/− in green/red, compact tokens "12k tok", cost), redundant folder path dropped (the list is
+  per folder), proper empty states, error as a banner. Chat — one composer card (text, then `/`, attach,
+  agent/model/variant pills, round Send that's filled only when there's something to send), user bubble
+  with a tail corner, assistant byline "• agent · model" without the provider prefix, quiet "Diff".
+  Terminal — empty state, cards with Running pill and `~`-shortened cwd. Settings — section headers,
+  bordered cards, Mac helper "Live" pill + feature chips in words instead of "pair, lsp, …". Editor —
+  Save is filled only with unsaved changes, else a quiet "✓ Saved". Android/iOS panel and Metro —
+  segmented tabs/filters (Problems count badge), device picker as a pill, Run / Start as the primary
+  button, Stop in red, banners.
+- **Checked on the phone** (vivo I2219, release build), dark and light: all four tabs + back,
+  Sessions, Chat, Terminal empty state, Settings, Code → Android panel, Metro panel; the user's theme was
+  put back to Dark afterwards. Unit tests pass.
+- **Not done yet (next pass):** server list, Files list rows, Diff screen, read-only viewer, editor tab
+  strip, chat tool/reasoning cards, permission/question sheets, tablet two-pane layouts.
+
 ### Phase 2 design notes
 
 opencode gives the app files, PTYs and sessions, but no code intelligence and no Android/React Native

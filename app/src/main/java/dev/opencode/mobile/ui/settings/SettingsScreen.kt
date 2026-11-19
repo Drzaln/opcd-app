@@ -83,6 +83,8 @@ import java.time.Instant
 fun SettingsScreen(
     appVm: AppViewModel,
     onBack: () -> Unit,
+    /** As a top-level tab (inside a server): bottom bar instead of a back arrow. */
+    onTab: ((dev.opencode.mobile.ui.common.AppTab) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val themeMode by appVm.themeMode.collectAsState()
@@ -107,7 +109,7 @@ fun SettingsScreen(
             TopAppBar(
                 title = { Text("Settings") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    if (onTab == null) IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -116,6 +118,7 @@ fun SettingsScreen(
                 ),
             )
         },
+        bottomBar = { if (onTab != null) dev.opencode.mobile.ui.common.AppBottomBar(dev.opencode.mobile.ui.common.AppTab.SETTINGS, onTab) },
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
@@ -378,24 +381,10 @@ private fun formatReset(iso: String): String = runCatching {
 }.getOrDefault("")
 
 @Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text.uppercase(),
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 4.dp, top = 4.dp),
-    )
-}
+private fun SectionLabel(text: String) = dev.opencode.mobile.ui.common.SectionHeader(text)
 
 @Composable
-private fun SettingsCard(content: @Composable () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-    ) {
-        Column { content() }
-    }
-}
+private fun SettingsCard(content: @Composable () -> Unit) = dev.opencode.mobile.ui.common.OcCard(content = content)
 
 
 /**
@@ -414,7 +403,7 @@ private fun HelperCard(appVm: AppViewModel) {
     androidx.compose.runtime.LaunchedEffect(Unit) { appVm.refreshHelper() }
 
     val (title, detail) = when (val s = state) {
-        is dev.opencode.mobile.data.net.HelperState.Ready -> "Connected" to "${s.info.hostname} · helper ${s.info.version} · ${s.info.features.joinToString(", ")}"
+        is dev.opencode.mobile.data.net.HelperState.Ready -> "Connected" to "${s.info.hostname} · helper ${s.info.version}"
         is dev.opencode.mobile.data.net.HelperState.Unpaired -> "Found on ${s.info.hostname}" to "Pair this phone to use TypeScript completions, errors and format on save."
         is dev.opencode.mobile.data.net.HelperState.Pairing -> "Pairing…" to "Check the Mac: allow the request if it shows ${s.code}."
         is dev.opencode.mobile.data.net.HelperState.Connecting -> "Connecting…" to s.info.hostname
@@ -428,8 +417,33 @@ private fun HelperCard(appVm: AppViewModel) {
             headlineContent = { Text(title) },
             supportingContent = { if (detail.isNotBlank()) Text(detail) },
             leadingContent = { Icon(Icons.Filled.Computer, contentDescription = null) },
+            trailingContent = {
+                val c = dev.opencode.mobile.ui.theme.OcTheme.colors
+                when (state) {
+                    is dev.opencode.mobile.data.net.HelperState.Ready -> dev.opencode.mobile.ui.common.StatusPill("Live", c.green)
+                    is dev.opencode.mobile.data.net.HelperState.Absent, is dev.opencode.mobile.data.net.HelperState.Failed -> dev.opencode.mobile.ui.common.StatusPill("Off", c.textSecondary)
+                    else -> {}
+                }
+            },
             colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
         )
+        (state as? dev.opencode.mobile.data.net.HelperState.Ready)?.let { ready ->
+            // What this Mac can do, in words (the wire names are for the protocol).
+            val names = mapOf(
+                "lsp" to "TypeScript", "format" to "Format on save", "metro" to "Metro", "adb" to "Android devices",
+                "screen" to "Device screen", "emulator" to "Emulators", "ios" to "iOS simulators", "simscreen" to "iOS screen",
+            )
+            @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+            androidx.compose.foundation.layout.FlowRow(
+                Modifier.padding(start = 56.dp, end = 16.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                for (f in ready.info.features) names[f]?.let { label ->
+                    dev.opencode.mobile.ui.common.StatusPill(label, dev.opencode.mobile.ui.theme.OcTheme.colors.link, dot = false)
+                }
+            }
+        }
         error?.let {
             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp))
         }
