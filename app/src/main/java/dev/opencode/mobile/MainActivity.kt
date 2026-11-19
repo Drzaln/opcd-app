@@ -38,6 +38,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.compose.currentBackStackEntryAsState
 import dev.opencode.mobile.ui.chat.ChatScreen
 import dev.opencode.mobile.ui.common.PermissionSheet
 import dev.opencode.mobile.ui.common.QuestionSheet
@@ -141,7 +142,19 @@ class MainActivity : ComponentActivity() {
                     selectedFile = null
                 }
 
+                // Wide screens (tablets, landscape): the four tabs move from a bottom bar to one side rail
+                // drawn here, next to whatever tab is showing; AppBottomBar renders nothing meanwhile.
+                val backEntry by navController.currentBackStackEntryAsState()
+                val railTab = if (wide) railTabFor(backEntry) else null
+                val railServer = backEntry?.arguments?.getString("serverId")
+                Row(Modifier.fillMaxSize().background(dev.opencode.mobile.ui.theme.OcTheme.colors.bg)) {
+                if (railTab != null && railServer != null) {
+                    dev.opencode.mobile.ui.common.AppNavRail(railTab, labels = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp >= 480, onSelect = { tab -> navigateTab(navController, railServer, tab) })
+                    Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outline))
+                }
+                androidx.compose.runtime.CompositionLocalProvider(dev.opencode.mobile.ui.common.LocalNavRail provides (railTab != null)) {
                 NavHost(
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
                     navController = navController,
                     startDestination = Routes.SERVERS,
                     enterTransition = {
@@ -229,6 +242,7 @@ class MainActivity : ComponentActivity() {
                                 onTerminal = { navigateTab(navController, serverId, dev.opencode.mobile.ui.common.AppTab.TERMINAL) },
                                 onDiff = { sessionId -> navController.navigate(Routes.diff(serverId, sessionId)) },
                                 onBack = { appVm.clearActive(); navController.navigate(Routes.SERVERS) { popUpTo(0) { inclusive = true } } },
+                                selectedId = if (wide) selectedSession else null,
                             )
                         }
                         if (wide) {
@@ -432,8 +446,23 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 }
+                }
+                }
             }
         }
+    }
+}
+
+/** Which tab a destination belongs to, for the wide-screen rail; null for pushed screens (chat, diff, ...). */
+private fun railTabFor(entry: androidx.navigation.NavBackStackEntry?): dev.opencode.mobile.ui.common.AppTab? {
+    val route = entry?.destination?.route ?: return null
+    return when {
+        route == Routes.SESSIONS -> dev.opencode.mobile.ui.common.AppTab.SESSIONS
+        // On wide screens a file link (editor route) opens the IDE layout, which is the Code tab.
+        route == Routes.CODE || route == Routes.EDITOR -> dev.opencode.mobile.ui.common.AppTab.CODE
+        route == Routes.TERMINAL -> dev.opencode.mobile.ui.common.AppTab.TERMINAL
+        route == Routes.SETTINGS && entry.arguments?.getBoolean("tab") == true -> dev.opencode.mobile.ui.common.AppTab.SETTINGS
+        else -> null
     }
 }
 
@@ -466,15 +495,19 @@ private fun WideTwoPane(
     list: @Composable () -> Unit,
     detail: @Composable () -> Unit,
 ) {
+    // The list keeps a list's width (300-420 dp); the detail (chat, file) gets the rest of a wide screen.
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+    val listWidth = (maxWidth * 0.4f).coerceIn(300.dp, 420.dp)
     Row(Modifier.fillMaxSize()) {
-        Box(Modifier.weight(0.42f).fillMaxHeight()) { list() }
+        Box(Modifier.width(listWidth).fillMaxHeight().background(dev.opencode.mobile.ui.theme.OcTheme.colors.bg)) { list() }
         Box(
             Modifier
                 .width(1.dp)
                 .fillMaxHeight()
                 .background(MaterialTheme.colorScheme.outline),
         )
-        Box(Modifier.weight(0.58f).fillMaxHeight()) { detail() }
+        Box(Modifier.weight(1f).fillMaxHeight().background(dev.opencode.mobile.ui.theme.OcTheme.colors.bg)) { detail() }
+    }
     }
 }
 

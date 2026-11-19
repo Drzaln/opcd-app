@@ -677,8 +677,7 @@ Asked: "make the UI UX good, functional and pretty" (whole app). Audit on the ph
   - **Checked on the phone in light mode:** server list, sessions, chat, viewer, Diff empty state.
     Dark was restored afterwards. The question sheet wasn't triggered, because it needs a model to ask a
     real question.
-- **Still open:** tablet layouts beyond the existing `WideTwoPane` for Files/viewer (not checked on a
-  tablet).
+- **Tablet layouts** were followed up in `opencode-android-app-895` (see "Tablet layouts" below).
 
 ### Latency and data (`opencode-android-app-859`)
 
@@ -952,6 +951,38 @@ Changes sheet with diffs, Commit (see "Code editor (Phase 1)").
   (currently full refetch), update check only over Wi-Fi + manual "check now" button, widget for
   multiple sessions, richer wide-screen layout (three panes / list-detail for servers),
   per-model Go usage / Zen balance (not exposed by the public usage endpoint).
+
+### Tablet layouts (`opencode-android-app-895`)
+
+Checked on the **Medium Tablet** emulator (2560×1600, 1280×800 dp) against `make serve`-style local
+opencode 2.x on :4199 (`adb reverse`), landscape and portrait, plus phone-sized overrides of the same
+emulator (`wm size`/`wm density`, reset afterwards).
+
+- **Side rail on wide screens (≥ 720 dp):** `MainActivity` draws one `AppNavRail` next to the
+  `NavHost` whenever the current destination is a tab (Sessions, Code — including the wide `editor`
+  route, Terminal, Settings-as-tab) and provides `LocalNavRail = true`; `AppBottomBar` renders nothing
+  then, and `WideCode` skips its own rail/bottom bar and pads for the gesture bar itself. Before, the
+  Sessions bottom bar only spanned the list pane and each tab placed it differently. Labels show when
+  the screen is ≥ 480 dp tall (tablets); a landscape phone keeps the icon-only rail, which also gives
+  the session list back the bottom bar's height. Pushed screens (chat, diff, viewer) and the server
+  list's Settings have no rail.
+- **Sessions │ chat:** the open session is highlighted in the list (accent fill + border). The list
+  pane is 40 % of the width clamped to 300–420 dp, so the chat gets the rest. Both panes paint the
+  theme background (the empty detail pane used to show the dark window colour in light mode).
+- **Readable width:** Settings and the server list are a centered column ≤ 760 dp
+  (`Modifier.readableWidth()` in `Ui.kt`) instead of stretching across 1200 dp.
+- **Code:** the device-screen placeholder text is no longer cut off at two lines.
+- **Checked:** servers, sessions + chat (landscape and portrait), Code with a file open, Terminal with a
+  live shell, Settings; phone portrait (bottom bar back, no rail) and phone landscape (icon rail).
+- **Small Tablet emulator (7", 1920×1200 at 320 dpi = 960×600 dp landscape, 600×960 dp portrait):**
+  landscape gets the labelled rail, sessions │ chat and the IDE layout; portrait (600 dp) keeps the
+  phone layout on purpose — two 300 dp panes would squeeze the chat. One fix: at 600 dp of height the
+  Code bottom panel used to open by default and take ~half the screen (the editor showed ~6 lines),
+  and stayed while typing. `WideCode` now has `roomy` (height ≥ 720 dp): only then does the panel
+  start open, use the taller Metro/Android heights, and stay up while the editor has the keyboard.
+  Below that it starts collapsed (tab strip at the bottom, one tap to open).
+- **Not checked:** a real tablet, foldables (the Pixel Fold AVD exists but wasn't booted), split-screen
+  multi-window resizing.
 
 ## Verification
 

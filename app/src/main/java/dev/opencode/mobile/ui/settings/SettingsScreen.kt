@@ -1,5 +1,6 @@
 package dev.opencode.mobile.ui.settings
 
+import dev.opencode.mobile.ui.common.readableWidth
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -121,7 +122,7 @@ fun SettingsScreen(
         bottomBar = { if (onTab != null) dev.opencode.mobile.ui.common.AppBottomBar(dev.opencode.mobile.ui.common.AppTab.SETTINGS, onTab) },
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier.fillMaxSize().padding(padding).readableWidth(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {

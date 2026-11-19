@@ -330,6 +330,8 @@ fun SessionsScreen(
     onTerminal: () -> Unit,
     onDiff: (String) -> Unit,
     onBack: () -> Unit,
+    /** The session open beside the list (wide two-pane layout), highlighted. */
+    selectedId: String? = null,
 ) {
     val servers by appVm.servers.collectAsState()
     val server = servers.firstOrNull { it.id == serverId }
@@ -497,6 +499,7 @@ fun SessionsScreen(
                         session = session,
                         showPath = session.directory != projectDir,
                         status = ui.statuses[session.id],
+                        selected = session.id == selectedId,
                         onClick = { onChat(session.id) },
                         onDiff = { onDiff(session.id) },
                         onRename = { editTarget = session },
@@ -938,6 +941,7 @@ private fun SessionCard(
     /** Only when the session lives in another folder than the one shown (the list is per folder). */
     showPath: Boolean = false,
     status: SessionStatus?,
+    selected: Boolean = false,
     onClick: () -> Unit,
     onDiff: () -> Unit,
     onRename: () -> Unit,
@@ -954,8 +958,8 @@ private fun SessionCard(
             Modifier
                 .fillMaxWidth()
                 .clip(dev.opencode.mobile.ui.common.Ui.cardShape)
-                .background(c.surface)
-                .border(1.dp, c.border, dev.opencode.mobile.ui.common.Ui.cardShape)
+                .background(if (selected) c.accentSoft else c.surface)
+                .border(if (selected) 1.5.dp else 1.dp, if (selected) c.link else c.border, dev.opencode.mobile.ui.common.Ui.cardShape)
                 .combinedClickable(onClick = onClick, onLongClick = { menu = true })
                 .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 10.dp),
         ) {

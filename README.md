@@ -14,7 +14,7 @@ Kotlin · Jetpack Compose · Material 3 · dark theme · minSdk 26.
 | Area | What you get |
 |---|---|
 | Code | **CodeMirror 6 editor that saves to your Mac**: tabs with dirty dots, undo per tab, syntax highlighting (TS/TSX, JS/JSX, JSON, Kotlin + Gradle KTS, Markdown, CSS, YAML, XML), bracket matching + auto-close, auto-indent, soft wrap, find/replace, go to line, coding key row above the keyboard, hardware shortcuts (Ctrl+S/P/F/G, Ctrl+/), "Go to file" palette, recent files. Saves are verified by SHA-256; if the file changed on the Mac you get **Reload / Overwrite / Show diff** instead of a silent overwrite |
-| Code (tablet / landscape) | File tree │ editor │ Terminal / Git / Metro / Android bottom panel side by side (≥ 720 dp); live device screen in a right-hand column (≥ 1000 dp, with the Mac helper) |
+| Tablet / landscape | The four tabs move to a side rail (≥ 720 dp). Sessions │ chat side by side, with the open session highlighted; Files │ preview likewise. Code: file tree │ editor │ Terminal / Git / Metro / Android bottom panel; live device screen in a right-hand column (≥ 1000 dp, with the Mac helper). Settings and the server list stay a readable centered column |
 | Git | Branch + "N changed" in the editor, Changes list with per-file diffs, **Commit…** (`git add -A && git commit`, no push) |
 | Mac helper (optional) | A small companion you run on the Mac (`helper/`, see [section 6](#6-mac-helper-optional)): **TypeScript** completions, errors, go to definition, rename, find references; **format on save** (Prettier/ESLint); **Metro** start/stop/reload with live logs; **Android** devices — build & run, wireless connect, logcat; a **live device screen** with touch (a lighter stream on mobile data); **start/stop the Mac's emulators** (uses `avdslim` when installed); **iOS simulators** on the Mac — start/stop (slim with `simslim`), build & run, logs, live screen with touch |
 | Sessions | List/resume, new (opens it immediately), rename (long-press), delete, per-session folder picker, git branch bar (switch/create), status dots, tokens + cost |
@@ -197,9 +197,11 @@ More: the search icon / Ctrl+P is **Go to file**; ⋮ has find/replace, go to li
 comment. Several files open as tabs (a dot marks unsaved ones). File links in chat and diffs open the
 editor at that line. Files over 2 MB and binary files open read-only.
 
-**Tablet or landscape phone (≥ 720 dp):** Code becomes a small IDE — file tree │ editor │ a bottom
-panel with **Terminal** and **Git** (plus **Metro** and **Android** when the Mac helper runs). On
-≥ 1000 dp a right-hand column shows the live device screen.
+**Tablet or landscape phone (≥ 720 dp):** the Code · Sessions · Terminal · Settings tabs sit in a
+side rail instead of the bottom bar (with labels on tablets, icons only on a landscape phone).
+Sessions shows the list and the open chat side by side. Code becomes a small IDE — file tree │ editor │
+a bottom panel with **Terminal** and **Git** (plus **Metro** and **Android** when the Mac helper runs).
+On ≥ 1000 dp a right-hand column shows the live device screen.
 
 ---
 

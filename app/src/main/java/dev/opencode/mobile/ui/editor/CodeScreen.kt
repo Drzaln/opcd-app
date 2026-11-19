@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
@@ -117,6 +118,7 @@ fun CodeScreen(
                 onViewReadOnly = onViewReadOnly,
                 threePane = maxWidth.value >= CODE_THREE_PANE_DP,
                 tall = maxHeight.value >= 600,
+                roomy = maxHeight.value >= 720,
                 onTab = onTab,
             )
         }
@@ -139,15 +141,18 @@ private fun WideCode(
     onViewReadOnly: (String) -> Unit,
     threePane: Boolean,
     tall: Boolean,
+    /** Height to spare (≥ 720 dp, e.g. a 10" tablet in landscape): the bottom panel starts open and the
+     *  editor keeps it while typing. On a 7" tablet in landscape (600 dp) the editor needs that room. */
+    roomy: Boolean = tall,
     onTab: (AppTab) -> Unit,
 ) {
     val c = OcTheme.colors
     val ui by vm.ui.collectAsState()
     // Short (landscape phone) screens: while typing *in the editor*, give it the whole height. Typing in
     // the terminal or a dialog must keep the panel (and anything open in it) composed.
-    val imeVisible = WindowInsets.isImeVisible && ui.editorFocused && !tall
+    val imeVisible = WindowInsets.isImeVisible && ui.editorFocused && !roomy
     val connection by appVm.connection.collectAsState()
-    var panel by rememberSaveable { mutableStateOf(if (tall) BottomPanel.TERMINAL else null) }
+    var panel by rememberSaveable { mutableStateOf(if (roomy) BottomPanel.TERMINAL else null) }
     var lastPanel by rememberSaveable { mutableStateOf(BottomPanel.TERMINAL) }
     LaunchedEffect(Unit) { vm.refreshGit() }
     // Offline: a file with a saved copy opens in the read-only viewer instead of failing.
@@ -171,11 +176,13 @@ private fun WideCode(
     }
 
     Row(Modifier.fillMaxSize()) {
-    if (!tall) {
+    if (!tall && !dev.opencode.mobile.ui.common.LocalNavRail.current) {
         AppNavRail(AppTab.CODE, onTab)
         VerticalDivider()
     }
-    Column(Modifier.weight(1f).fillMaxHeight().imePadding()) {
+    // With the activity's side rail there is no bottom bar to keep the panel off the gesture bar.
+    val railed = dev.opencode.mobile.ui.common.LocalNavRail.current
+    Column(Modifier.weight(1f).fillMaxHeight().then(if (railed) Modifier.navigationBarsPadding() else Modifier).imePadding()) {
         // Header: project · Mac + status dot · branch · N changed · Go to file (Ctrl P) · Save.
         Row(
             Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 6.dp),
@@ -283,8 +290,8 @@ private fun WideCode(
                         TerminalScreen(appVm = appVm, serverId = serverId, onBack = {}, embedded = true)
                     }
                     BottomPanel.GIT -> ChangesPanel(vm = vm, modifier = Modifier.fillMaxWidth().height(190.dp))
-                    BottomPanel.METRO -> MetroPanel(metro = vm.metro, modifier = Modifier.fillMaxWidth().height(if (tall) 240.dp else 190.dp))
-                    BottomPanel.ANDROID -> AndroidPanel(android = vm.android, screen = vm.screen.takeIf { screenAvailable && !threePane }, modifier = Modifier.fillMaxWidth().height(if (tall) 260.dp else 190.dp))
+                    BottomPanel.METRO -> MetroPanel(metro = vm.metro, modifier = Modifier.fillMaxWidth().height(if (roomy) 240.dp else 190.dp))
+                    BottomPanel.ANDROID -> AndroidPanel(android = vm.android, screen = vm.screen.takeIf { screenAvailable && !threePane }, modifier = Modifier.fillMaxWidth().height(if (roomy) 260.dp else 190.dp))
                     null -> Unit
                 }
                 }
@@ -307,14 +314,14 @@ private fun WideCode(
                         "Device screen: run the Mac helper with scrcpy (Android) or idb-companion (iOS simulators)",
                         fontSize = 12.sp,
                         color = c.textSecondary,
-                        maxLines = 2,
+                        maxLines = 4,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(24.dp),
                     )
                 }
             }
         }
-        if (!imeVisible && tall) {
+        if (!imeVisible && tall && !dev.opencode.mobile.ui.common.LocalNavRail.current) {
             Divider()
             AppBottomBar(AppTab.CODE, onTab)
         }

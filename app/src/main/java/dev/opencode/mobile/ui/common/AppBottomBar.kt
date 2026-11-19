@@ -11,14 +11,20 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import dev.opencode.mobile.ui.theme.OcTheme
 
 enum class AppTab { CODE, SESSIONS, TERMINAL, SETTINGS }
 
+/** True while the activity draws the tabs as a side rail (wide screens): bottom bars then stay hidden. */
+val LocalNavRail = androidx.compose.runtime.staticCompositionLocalOf { false }
+
 /** Top-level navigation: Code · Sessions · Terminal · Settings (selected = accent-soft pill, link-colored icon). */
 @Composable
 fun AppBottomBar(selected: AppTab, onSelect: (AppTab) -> Unit) {
+    if (LocalNavRail.current) return
     val c = OcTheme.colors
     NavigationBar(containerColor = c.bg) {
         fun item(tab: AppTab, icon: ImageVector, label: String): @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
@@ -43,9 +49,12 @@ fun AppBottomBar(selected: AppTab, onSelect: (AppTab) -> Unit) {
     }
 }
 
-/** The same destinations as a 72 dp side rail, for short (landscape phone) layouts. */
+/**
+ * The same destinations as a side rail: icons only on short (landscape phone) layouts, with labels
+ * on tablets ([labels]).
+ */
 @Composable
-fun AppNavRail(selected: AppTab, onSelect: (AppTab) -> Unit, footer: @Composable () -> Unit = {}) {
+fun AppNavRail(selected: AppTab, onSelect: (AppTab) -> Unit, labels: Boolean = false, footer: @Composable () -> Unit = {}) {
     val c = OcTheme.colors
     androidx.compose.material3.NavigationRail(containerColor = c.bg) {
         val items = listOf(
@@ -58,9 +67,13 @@ fun AppNavRail(selected: AppTab, onSelect: (AppTab) -> Unit, footer: @Composable
             androidx.compose.material3.NavigationRailItem(
                 selected = selected == tab,
                 onClick = { if (selected != tab) onSelect(tab) },
-                icon = { Icon(icon, contentDescription = label) },
+                icon = { Icon(icon, contentDescription = if (labels) null else label) },
+                label = if (labels) ({ Text(label) }) else null,
+                modifier = if (labels) androidx.compose.ui.Modifier.padding(vertical = 4.dp) else androidx.compose.ui.Modifier,
                 colors = androidx.compose.material3.NavigationRailItemDefaults.colors(
                     selectedIconColor = c.link,
+                    selectedTextColor = c.textPrimary,
+                    unselectedTextColor = c.textSecondary,
                     indicatorColor = c.accentSoft,
                     unselectedIconColor = c.textSecondary,
                 ),

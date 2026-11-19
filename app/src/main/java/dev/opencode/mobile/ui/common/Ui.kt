@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledTonalButton
@@ -44,7 +45,14 @@ object Ui {
     val gutter = 16.dp
     val cardShape = RoundedCornerShape(12.dp)
     val controlShape = RoundedCornerShape(8.dp)
+    /** Widest a single column of cards/forms gets on tablets; beyond it lines get hard to scan. */
+    val readableWidth = 760.dp
 }
+
+/** Fills the space but keeps the content a centered column no wider than [Ui.readableWidth]. */
+fun Modifier.readableWidth(): Modifier = this
+    .wrapContentWidth(androidx.compose.ui.Alignment.CenterHorizontally)
+    .widthIn(max = Ui.readableWidth)
 
 /**
  * A centered empty / not-ready state: tinted icon, title, one or two lines of help and an optional
