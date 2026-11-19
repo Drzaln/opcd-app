@@ -1,5 +1,10 @@
 package dev.opencode.mobile.ui.diff
 
+import androidx.compose.ui.text.withStyle
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Check
 import dev.opencode.mobile.ui.theme.OcTheme
 
 import androidx.compose.foundation.background
@@ -135,14 +140,20 @@ fun DiffScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (ui.error != null) {
-                Text(ui.error!!, color = OcTheme.colors.red, modifier = Modifier.padding(16.dp))
+                dev.opencode.mobile.ui.common.Banner(ui.error!!, error = true, onDismiss = {})
             }
-            if (!ui.loading && ui.diffs.isEmpty()) {
-                Text(
-                    "No changes in this session.",
-                    color = OcTheme.colors.textSecondary,
-                    modifier = Modifier.padding(24.dp),
-                )
+            if (ui.loading && ui.diffs.isEmpty()) {
+                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { androidx.compose.material3.CircularProgressIndicator() }
+            }
+            if (!ui.loading && ui.diffs.isEmpty() && ui.error == null) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    dev.opencode.mobile.ui.common.EmptyState(
+                        icon = androidx.compose.material.icons.Icons.Filled.Check,
+                        title = if (messageId != null) "No changes from this message" else "No changes in this session",
+                        body = "Files opencode edits show up here, line by line.",
+                        tint = OcTheme.colors.green,
+                    )
+                }
             }
             val computed = remember(ui.diffs) {
                 ui.diffs.map { diff ->
@@ -175,25 +186,31 @@ private fun DiffHeader(diff: FileDiff, onOpen: (() -> Unit)? = null) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(OcTheme.colors.surfaceVariant)
+            .background(OcTheme.colors.surface)
             .then(if (onOpen != null) Modifier.clickable(onClickLabel = "Open in editor", onClick = onOpen) else Modifier)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // "src/app/" muted, "index.tsx" bright: the file name is what you scan for.
+        val dir = diff.file.substringBeforeLast('/', "")
         Text(
-            diff.file,
-            style = MaterialTheme.typography.titleSmall,
+            androidx.compose.ui.text.buildAnnotatedString {
+                if (dir.isNotEmpty()) withStyle(androidx.compose.ui.text.SpanStyle(color = OcTheme.colors.textSecondary)) { append("$dir/") }
+                withStyle(androidx.compose.ui.text.SpanStyle(color = OcTheme.colors.textPrimary, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)) { append(diff.file.substringAfterLast('/')) }
+            },
+            fontSize = 13.sp,
             fontFamily = FontFamily.Monospace,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            color = if (onOpen != null) OcTheme.colors.link else androidx.compose.ui.graphics.Color.Unspecified,
+            overflow = TextOverflow.StartEllipsis,
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(8.dp))
-        Text("+${diff.additions}", color = OcTheme.colors.green, style = MaterialTheme.typography.labelSmall)
+        Text("+${diff.additions}", color = OcTheme.colors.green, fontSize = 12.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
         Spacer(Modifier.width(6.dp))
-        Text("-${diff.deletions}", color = OcTheme.colors.red, style = MaterialTheme.typography.labelSmall)
+        Text("−${diff.deletions}", color = OcTheme.colors.red, fontSize = 12.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        if (onOpen != null) Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Open in editor", tint = OcTheme.colors.textSecondary, modifier = Modifier.padding(start = 4.dp).size(18.dp))
     }
+    Box(Modifier.fillMaxWidth().height(1.dp).background(OcTheme.colors.border))
 }
 
 @Composable

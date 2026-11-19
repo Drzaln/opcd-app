@@ -1,5 +1,12 @@
 package dev.opencode.mobile.ui.servers
 
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Computer
 import dev.opencode.mobile.ui.theme.OcTheme
 
 import androidx.compose.foundation.clickable
@@ -69,6 +76,7 @@ fun ServersScreen(
     var showForm by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<ServerConfig?>(null) }
     var showScan by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<ServerConfig?>(null) }
     val scope = rememberCoroutineScope()
 
     Scaffold(
@@ -113,17 +121,24 @@ fun ServersScreen(
                     Text("Auto-detect on network (mDNS)")
                 }
             }
+            if (servers.isEmpty()) item {
+                Box(Modifier.fillMaxWidth().padding(top = 24.dp), contentAlignment = Alignment.Center) {
+                    dev.opencode.mobile.ui.common.EmptyState(
+                        icon = Icons.Filled.Computer,
+                        title = "No servers yet",
+                        body = "Add your Mac's Tailscale address (for example http://100.x.y.z:4096) and the opencode server password.",
+                        action = "Add server",
+                        onAction = { editing = null; showForm = true },
+                    )
+                }
+            }
+            if (servers.isNotEmpty()) item { dev.opencode.mobile.ui.common.SectionHeader("Servers") }
             items(servers, key = { it.id }) { server ->
                 ServerCard(
                     server = server,
                     onConnect = { appVm.setActive(server.id); onOpen(server.id) },
                     onEdit = { editing = server; showForm = true },
-                    onDelete = {
-                        scope.launch {
-                            appVm.removeServer(server.id)
-                            if (appVm.activeServer.value?.id == server.id) appVm.clearActive()
-                        }
-                    },
+                    onDelete = { deleting = server },
                 )
             }
         }
@@ -141,6 +156,24 @@ fun ServersScreen(
                     onOpen(server.id)
                 }
             },
+        )
+    }
+
+    deleting?.let { server ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("Remove ${server.name.ifBlank { "this server" }}?") },
+            text = { Text("The app forgets its address and password. Nothing changes on the Mac.") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    deleting = null
+                    scope.launch {
+                        appVm.removeServer(server.id)
+                        if (appVm.activeServer.value?.id == server.id) appVm.clearActive()
+                    }
+                }) { Text("Remove", color = OcTheme.colors.red) }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { deleting = null }) { Text("Cancel") } },
         )
     }
 
@@ -164,16 +197,45 @@ private fun ServerCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(server.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = "Edit") }
-                IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, contentDescription = "Delete") }
+    val c = OcTheme.colors
+    var menu by remember { mutableStateOf(false) }
+    dev.opencode.mobile.ui.common.OcCard {
+        Row(
+            Modifier.fillMaxWidth().clickable(onClick = onConnect).padding(start = 14.dp, top = 14.dp, bottom = 14.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(40.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).background(c.accentSoft),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Computer, contentDescription = null, tint = c.link, modifier = Modifier.size(22.dp)) }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(server.name.ifBlank { "Mac" }, style = MaterialTheme.typography.titleMedium, color = c.textPrimary, maxLines = 1)
+                Text(
+                    server.baseUrl.removePrefix("http://").removePrefix("https://"),
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = c.textSecondary,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
             }
-            Text(server.baseUrl, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = OcTheme.colors.textSecondary)
-            Spacer(Modifier.height(8.dp))
-            Button(onClick = onConnect) { Text("Connect") }
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Server options", tint = c.textSecondary) }
+                androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("Edit") },
+                        leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                        onClick = { menu = false; onEdit() },
+                    )
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("Remove", color = c.red) },
+                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = c.red) },
+                        onClick = { menu = false; onDelete() },
+                    )
+                }
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = c.textSecondary)
         }
     }
 }

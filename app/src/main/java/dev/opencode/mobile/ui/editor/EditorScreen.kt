@@ -1,5 +1,6 @@
 package dev.opencode.mobile.ui.editor
 
+import androidx.compose.ui.draw.drawBehind
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -417,10 +418,16 @@ private fun EditorTabs(vm: EditorViewModel, ui: EditorUi, showGit: Boolean, onOp
         ) {
             for (tab in ui.tabs) {
                 val active = tab.path == ui.active
+                val accent = c.link
                 Row(
                     Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (active) c.surface else androidx.compose.ui.graphics.Color.Transparent)
+                        // Active tab: an accent underline, so the open file is obvious at a glance.
+                        .then(if (active) Modifier.drawBehind {
+                            val h = 2.dp.toPx()
+                            drawRect(accent, topLeft = androidx.compose.ui.geometry.Offset(10.dp.toPx(), size.height - h), size = androidx.compose.ui.geometry.Size(size.width - 20.dp.toPx(), h))
+                        } else Modifier)
                         .clickable { vm.select(tab.path) }
                         .heightIn(min = 40.dp)
                         .padding(start = 12.dp),

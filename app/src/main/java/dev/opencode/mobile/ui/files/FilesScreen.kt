@@ -1,5 +1,6 @@
 package dev.opencode.mobile.ui.files
 
+import androidx.compose.foundation.layout.size
 import dev.opencode.mobile.ui.theme.OcTheme
 
 import androidx.compose.foundation.clickable
@@ -308,13 +309,7 @@ fun FilesScreen(
                 ) {
                     if (dir.isEmpty() && recentFiles.isNotEmpty()) {
                         item(key = "recent_header") {
-                            Text(
-                                "RECENT",
-                                style = MaterialTheme.typography.labelMedium,
-                                letterSpacing = androidx.compose.ui.unit.TextUnit(0.96f, androidx.compose.ui.unit.TextUnitType.Sp),
-                                color = OcTheme.colors.textSecondary,
-                                modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp),
-                            )
+                            dev.opencode.mobile.ui.common.SectionHeader("Recent", Modifier.padding(horizontal = 12.dp))
                         }
                         items(recentFiles.take(5), key = { "recent_$it" }) { path ->
                             Row(
@@ -334,13 +329,7 @@ fun FilesScreen(
                             }
                         }
                         item(key = "files_header") {
-                            Text(
-                                "FILES",
-                                style = MaterialTheme.typography.labelMedium,
-                                letterSpacing = androidx.compose.ui.unit.TextUnit(0.96f, androidx.compose.ui.unit.TextUnitType.Sp),
-                                color = OcTheme.colors.textSecondary,
-                                modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
-                            )
+                            dev.opencode.mobile.ui.common.SectionHeader("Files", Modifier.padding(horizontal = 12.dp).padding(top = 8.dp))
                         }
                     }
                     items(ui.files, key = { it.path }) { node ->
@@ -358,7 +347,8 @@ fun FilesScreen(
                                 Icon(
                                     if (isDir) Icons.Filled.Folder else Icons.Filled.Description,
                                     contentDescription = null,
-                                    tint = if (isDir) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    tint = if (isDir) OcTheme.colors.link else fileTint(node.name),
+                                    modifier = Modifier.size(22.dp),
                                 )
                             },
                             headlineContent = {
@@ -409,5 +399,18 @@ private fun SearchBar(
                 label = { Text("Content") },
             )
         }
+    }
+}
+
+/** A quiet color per file type, so a long listing scans faster (code blue, data amber, docs grey). */
+@Composable
+private fun fileTint(name: String): androidx.compose.ui.graphics.Color {
+    val c = OcTheme.colors
+    return when (name.substringAfterLast('.', "").lowercase()) {
+        "ts", "tsx", "js", "jsx", "mjs", "cjs", "kt", "kts", "java", "swift", "py", "go", "rs" -> c.syntax.number
+        "json", "yaml", "yml", "toml", "xml", "gradle", "properties", "lock" -> c.orange
+        "css", "scss", "html", "svg" -> c.purple
+        "png", "jpg", "jpeg", "gif", "webp", "ico" -> c.green
+        else -> c.textSecondary
     }
 }

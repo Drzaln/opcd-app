@@ -1,5 +1,17 @@
 package dev.opencode.mobile.ui.chat
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.widthIn
@@ -903,47 +915,26 @@ private fun PartView(
         }
         "reasoning" -> {
             var expanded by rememberSaveable(part.id) { mutableStateOf(false) }
-            Surface(
-                color = OcTheme.colors.surfaceVariant,
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-            ) {
-                Column(Modifier.clickable { expanded = !expanded }.padding(10.dp)) {
-                    Text(
-                        if (expanded) "▾ reasoning" else "▸ reasoning",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = OcTheme.colors.textSecondary,
-                    )
-                    if (expanded) {
-                        Text(
-                            part.text,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = OcTheme.colors.textSecondary,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
+            val c = OcTheme.colors
+            Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                Row(
+                    Modifier.clip(RoundedCornerShape(8.dp)).clickable { expanded = !expanded }.padding(horizontal = 4.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Lightbulb, contentDescription = null, tint = c.textSecondary, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Thinking", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c.textSecondary)
+                    Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = if (expanded) "Hide" else "Show", tint = c.textSecondary, modifier = Modifier.size(18.dp))
+                }
+                if (expanded) Row(Modifier.padding(start = 10.dp, top = 2.dp, bottom = 6.dp).height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
+                    Box(Modifier.width(2.dp).fillMaxHeight().background(c.border))
+                    Text(part.text, fontSize = 13.sp, lineHeight = 19.sp, color = c.textSecondary, modifier = Modifier.padding(start = 10.dp))
                 }
             }
         }
         "tool" -> ToolCard(part)
-        "step-start" -> {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-                Box(Modifier.width(24.dp).height(1.dp).background(OcTheme.colors.border))
-                Text(" step ", color = OcTheme.colors.textSecondary, style = MaterialTheme.typography.labelSmall)
-                Box(Modifier.weight(1f).height(1.dp).background(OcTheme.colors.border))
-            }
-        }
-        "step-finish" -> {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-                Box(Modifier.width(24.dp).height(1.dp).background(OcTheme.colors.border))
-                Text(
-                    " step finished (${part.reason.ifEmpty { "done" }}) ",
-                    color = OcTheme.colors.textSecondary,
-                    style = MaterialTheme.typography.labelSmall,
-                )
-                Box(Modifier.weight(1f).height(1.dp).background(OcTheme.colors.border))
-            }
-        }
+        // Step boundaries are bookkeeping; the tokens line under the message already sums them up.
+        "step-start", "step-finish" -> Unit
         "snapshot" -> MutedLabel("snapshot ${part.snapshot}", modifier = Modifier.padding(vertical = 2.dp))
         "patch" -> MutedLabel("patch: ${part.files.size} file(s)", modifier = Modifier.padding(vertical = 2.dp))
         "compaction" -> MutedLabel("context compacted", modifier = Modifier.padding(vertical = 2.dp))
@@ -1063,74 +1054,81 @@ private fun decodeDataUrl(url: String): android.graphics.Bitmap? {
 @Composable
 private fun ToolCard(part: Part) {
     val state = part.state ?: return
-    var expandedInput by rememberSaveable(part.id) { mutableStateOf(false) }
-    var expandedOutput by rememberSaveable(part.id) { mutableStateOf(false) }
-    val statusColor = when (state.status) {
-        "completed" -> OcTheme.colors.green
-        "error" -> OcTheme.colors.red
-        else -> MaterialTheme.colorScheme.primary
+    val c = OcTheme.colors
+    var expanded by rememberSaveable(part.id) { mutableStateOf(false) }
+    val running = state.status == "running" || state.status == "pending"
+    val failed = state.status == "error"
+    val icon = when (part.tool.substringAfterLast('_').lowercase()) {
+        "bash", "shell" -> Icons.Filled.Terminal
+        "edit", "write", "patch", "multiedit" -> Icons.Filled.Edit
+        "read", "view" -> Icons.Filled.Description
+        "grep", "glob", "list", "ls", "search", "codesearch" -> Icons.Filled.Search
+        "webfetch", "websearch", "fetch" -> Icons.Filled.Public
+        "task" -> Icons.Filled.AccountTree
+        "todowrite", "todoread" -> Icons.Filled.Checklist
+        else -> Icons.Filled.Build
     }
-    Surface(
-        color = OcTheme.colors.surfaceVariant,
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+    val inputText = JsonUtil.pretty(state.input)
+    val output = state.output
+    val hasDetails = inputText.isNotBlank() || output.isNotBlank()
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 3.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(c.surface)
+            .border(1.dp, if (failed) c.red.copy(alpha = 0.5f) else c.border, RoundedCornerShape(10.dp)),
     ) {
-        Column(Modifier.padding(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(part.tool, style = MaterialTheme.typography.labelLarge, color = statusColor)
-                Spacer(Modifier.width(8.dp))
-                Text(state.status, style = MaterialTheme.typography.labelSmall, color = OcTheme.colors.textSecondary)
-                Spacer(Modifier.weight(1f))
-                if (state.status == "running" || state.status == "pending") {
-                    CircularProgressIndicator(modifier = Modifier.width(12.dp).height(12.dp), strokeWidth = 2.dp)
-                }
+        Row(
+            Modifier.fillMaxWidth().clickable(enabled = hasDetails) { expanded = !expanded }.padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = null, tint = if (failed) c.red else c.textSecondary, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(part.tool, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+            // The title when the tool gave one, else what it worked on (file, command, pattern).
+            val subject = state.title.ifBlank { toolSubject(state.input) }
+            if (subject.isNotBlank()) {
+                Spacer(Modifier.width(6.dp))
+                Text(subject, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            } else Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            when {
+                running -> CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                failed -> Icon(Icons.Filled.ErrorOutline, contentDescription = "Failed", tint = c.red, modifier = Modifier.size(16.dp))
+                state.status == "completed" -> Icon(Icons.Filled.Check, contentDescription = "Done", tint = c.green, modifier = Modifier.size(16.dp))
             }
-            if (state.title.isNotBlank()) {
-                Text(state.title, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
-            }
-            val inputText = JsonUtil.pretty(state.input)
-            if (inputText.isNotBlank()) {
-                Row(Modifier.clickable { expandedInput = !expandedInput }.padding(top = 6.dp)) {
-                    Text(
-                        if (expandedInput) "▾ input" else "▸ input",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = OcTheme.colors.textSecondary,
-                    )
-                }
-                if (expandedInput) {
-                    Text(
-                        inputText,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 12,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
-            }
-            val output = state.output
-            if (output.isNotBlank()) {
-                Row(Modifier.clickable { expandedOutput = !expandedOutput }.padding(top = 6.dp)) {
-                    Text(
-                        if (expandedOutput) "▾ output" else "▸ output",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = OcTheme.colors.textSecondary,
-                    )
-                }
-                if (expandedOutput) {
-                    Text(
-                        output.take(8000),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
-            }
-            if (state.status == "error" && state.error.isNotBlank()) {
-                Text(state.error, color = OcTheme.colors.red, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
-            }
+            if (hasDetails) Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = if (expanded) "Hide details" else "Show details", tint = c.textSecondary, modifier = Modifier.size(18.dp))
+        }
+        if (failed && state.error.isNotBlank()) {
+            Text(state.error, color = c.red, fontSize = 12.sp, maxLines = if (expanded) 40 else 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 34.dp, end = 10.dp, bottom = 8.dp))
+        }
+        if (expanded) Column(Modifier.padding(bottom = 8.dp)) {
+            if (inputText.isNotBlank()) ToolBlock("Input", inputText, 12)
+            if (output.isNotBlank()) ToolBlock("Output", output.take(8000), 200)
         }
     }
+}
+
+@Composable
+private fun ToolBlock(label: String, text: String, maxLines: Int) {
+    val c = OcTheme.colors
+    Text(label.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp, color = c.textSecondary, modifier = Modifier.padding(start = 10.dp, top = 4.dp, bottom = 4.dp))
+    Text(
+        text,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 12.sp,
+        lineHeight = 17.sp,
+        color = c.textBody,
+        maxLines = maxLines,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(6.dp)).background(c.bg).padding(8.dp),
+    )
+}
+
+private fun toolSubject(input: Any?): String {
+    val obj = input as? kotlinx.serialization.json.JsonObject ?: return ""
+    for (key in listOf("filePath", "path", "command", "pattern", "url", "query", "description")) {
+        val v = (obj[key] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content ?: continue
+        if (v.isNotBlank()) return if (key == "filePath" || key == "path") v.trimEnd('/').split('/').takeLast(3).joinToString("/") else v.lineSequence().first()
+    }
+    return ""
 }

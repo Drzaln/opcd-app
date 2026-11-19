@@ -1,5 +1,9 @@
 package dev.opencode.mobile.ui.common
 
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
+import androidx.compose.material.icons.filled.Shield
 import dev.opencode.mobile.ui.theme.OcTheme
 
 import androidx.compose.foundation.clickable
@@ -39,40 +43,45 @@ fun PermissionSheet(
     pending: Int,
     onRespond: (String) -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = {}) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
+    val c = OcTheme.colors
+    ModalBottomSheet(onDismissRequest = {}, containerColor = c.surface) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Permission requested", style = MaterialTheme.typography.titleMedium)
-                if (pending > 1) {
-                    Spacer(Modifier.width(8.dp))
-                    MutedLabel("+${pending - 1} more")
+                androidx.compose.foundation.layout.Box(
+                    Modifier.size(36.dp).clip(androidx.compose.foundation.shape.CircleShape).background(c.orange.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center,
+                ) { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.Shield, contentDescription = null, tint = c.orange, modifier = Modifier.size(20.dp)) }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("opencode wants permission", style = MaterialTheme.typography.titleMedium, color = c.textPrimary)
+                    Text(request.label, style = MaterialTheme.typography.bodyMedium, color = c.textSecondary)
                 }
+                if (pending > 1) StatusPill("+${pending - 1} more", c.textSecondary, dot = false)
             }
-            Spacer(Modifier.height(6.dp))
-            Text(request.label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
             val command = request.metadata?.get("command")?.toString()?.trim('"')
-            if (!command.isNullOrBlank()) {
+            val detail = command?.takeIf { it.isNotBlank() } ?: request.patterns.joinToString("\n").take(400).takeIf { it.isNotBlank() }
+            if (detail != null) {
                 Text(
-                    command,
+                    detail,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    color = OcTheme.colors.textSecondary,
-                    modifier = Modifier.padding(top = 6.dp),
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    color = c.textBody,
+                    maxLines = 10,
+                    modifier = Modifier.padding(top = 14.dp).fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                        .background(c.bg).padding(12.dp),
                 )
             }
-            if (request.patterns.isNotEmpty()) {
-                Text(
-                    request.patterns.joinToString(", ").take(400),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OcTheme.colors.textSecondary,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(18.dp))
+            androidx.compose.material3.Button(
+                onClick = { onRespond("once") },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = c.accent, contentColor = androidx.compose.ui.graphics.Color.White),
+            ) { Text("Allow once") }
+            Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { onRespond("once") }) { Text("Allow once") }
-                TextButton(onClick = { onRespond("always") }) { Text("Always allow") }
-                TextButton(onClick = { onRespond("reject") }) { Text("Deny", color = OcTheme.colors.red) }
+                androidx.compose.material3.FilledTonalButton(onClick = { onRespond("always") }, modifier = Modifier.weight(1f).height(44.dp)) { Text("Always allow") }
+                androidx.compose.material3.OutlinedButton(onClick = { onRespond("reject") }, modifier = Modifier.weight(1f).height(44.dp)) { Text("Deny", color = c.red) }
             }
         }
     }

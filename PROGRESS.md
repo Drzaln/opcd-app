@@ -644,6 +644,27 @@ Asked: "make the UI UX good, functional and pretty" (whole app). Audit on the ph
 - **Not done yet (next pass):** server list, Files list rows, Diff screen, read-only viewer, editor tab
   strip, chat tool/reasoning cards, permission/question sheets, tablet two-pane layouts.
 
+### UI/UX pass 2 (`opencode-android-app-2iv`)
+
+- **Server list:** cards with a computer tile, name + address (no scheme), whole card connects, ⋮ for
+  Edit / Remove; Remove now asks first (it deleted the server on one tap); empty state for a fresh install.
+- **Chat:** tool calls are compact rows — tool icon (shell, edit, read, search, web, task, todo),
+  tool name + subject (the tool's title, else the file path's last three segments / command / pattern
+  from its input), spinner / ✓ / ⚠ — tap to expand Input and Output code blocks; failures keep a red
+  border and show the error. Reasoning is a "💡 Thinking" row that expands into text with a rule. The
+  "step / step finished" dividers are gone.
+- **Permission sheet:** shield icon, "opencode wants permission" + what, the command in a code block,
+  **Allow once** as the full-width primary button, Always allow (tonal) / Deny (outlined, red).
+- **Files:** shared section headers, file icons tinted by type (code, data, styles, images).
+- **Diff:** loader, empty state ("No changes in this session" ✓), file headers with the directory muted
+  and the file name bright, +/− counts, › when it opens in the editor.
+- **Editor:** the active tab has an accent underline.
+- **Checked on the phone** (dark): server list, Files, chat tool rows and Thinking (in a session from
+  another project folder — viewed only, folder switched back to test-expo), Diff empty state, editor tabs.
+  The permission sheet wasn't triggered (it would need opencode to ask for a real action).
+- **Still open:** question sheet, read-only viewer, tablet two-pane layouts, a light-mode pass over
+  the pass-2 screens.
+
 ### Phase 2 design notes
 
 opencode gives the app files, PTYs and sessions, but no code intelligence and no Android/React Native
