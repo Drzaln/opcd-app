@@ -68,6 +68,7 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
     }
 
     init {
+        watchNetwork()
         viewModelScope.launch {
             store.currentDirectory.collect { dir ->
                 if (_currentDirectory.value != dir) _currentDirectory.value = dir
@@ -324,7 +325,8 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
                 _connection.value = ConnectionState(status = ConnectionStatus.CHECKING)
                 while (true) {
                     refreshConnection(server)
-                    kotlinx.coroutines.delay(30_000)
+                    // Re-check sooner while offline, so coming back (and the outbox) is noticed quickly.
+                    kotlinx.coroutines.delay(if (_connection.value.status == ConnectionStatus.OFFLINE) 15_000 else 30_000)
                 }
             }
         }
@@ -345,13 +347,37 @@ class AppViewModel(private val app: OpenCodeApp) : ViewModel() {
                     checkedAt = System.currentTimeMillis(),
                 )
             } else {
+                val diagnosis = runCatching { dev.opencode.mobile.data.net.ConnectionDoctor.diagnose(app, target, result.error) }.getOrNull()
+                if (activeServer.value?.id != target.id) return@launch
                 ConnectionState(
                     status = ConnectionStatus.OFFLINE,
                     error = result.error,
                     latencyMs = latency,
                     checkedAt = System.currentTimeMillis(),
+                    diagnosis = diagnosis,
                 )
             }
+            if (result.ok) app.outbox.flush(target)
+        }
+    }
+
+    /** Re-checks the moment the phone's network changes (signal back, Wi-Fi ↔ data, VPN on/off). */
+    private fun watchNetwork() {
+        val cm = app.getSystemService(android.net.ConnectivityManager::class.java) ?: return
+        val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) { recheckSoon() }
+            override fun onLost(network: android.net.Network) { recheckSoon() }
+        }
+        runCatching { cm.registerDefaultNetworkCallback(callback) }
+        addCloseable { runCatching { cm.unregisterNetworkCallback(callback) } }
+    }
+
+    private var recheckJob: kotlinx.coroutines.Job? = null
+    private fun recheckSoon() {
+        recheckJob?.cancel()
+        recheckJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(1_500) // let the new network (and Tailscale) settle
+            refreshConnection()
         }
     }
 
@@ -405,4 +431,6 @@ data class ConnectionState(
     val error: String? = null,
     val latencyMs: Long? = null,
     val checkedAt: Long = 0L,
+    /** Why it's offline, when it is (filled in by [dev.opencode.mobile.data.net.ConnectionDoctor]). */
+    val diagnosis: dev.opencode.mobile.data.net.Diagnosis? = null,
 )

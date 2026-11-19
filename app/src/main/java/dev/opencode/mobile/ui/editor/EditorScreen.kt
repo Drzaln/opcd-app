@@ -137,6 +137,10 @@ fun EditorScreen(
     }
     val vm = rememberEditorViewModel(appVm, server)
     val ui by vm.ui.collectAsState()
+    // Offline: a file with a saved copy opens in the read-only viewer instead of failing.
+    LaunchedEffect(ui.offlineCopy) {
+        ui.offlineCopy?.let { vm.offlineCopyShown(); onViewReadOnly(it) }
+    }
     LaunchedEffect(path, line) { if (!path.isNullOrBlank()) vm.open(path, line) }
 
     var leaveGuard by remember { mutableStateOf(false) }

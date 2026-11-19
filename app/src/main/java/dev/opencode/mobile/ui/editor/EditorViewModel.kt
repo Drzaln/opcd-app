@@ -87,6 +87,8 @@ data class EditorUi(
     val active: String? = null,
     val loading: String? = null,
     val error: String? = null,
+    /** A file that couldn't be fetched but has a copy saved on the phone: the screen opens it read-only. */
+    val offlineCopy: String? = null,
     val cursor: Pair<Int, Int>? = null,
     val conflict: SaveConflict? = null,
     val branch: String? = null,
@@ -316,11 +318,35 @@ class EditorViewModel(
                     }
                     send(EditorCommand.Load(file.path, file.text, language, target, null))
                     app.serverStore.addRecentFile(server.id, projectDir(), file.path)
+                    saveOfflineCopy(listOf(path, file.path).distinct(), file.text)
                     maybeStartLsp()
                 }
-                is ReadResult.Failed -> _ui.update { it.copy(loading = null, error = "${path.substringAfterLast('/')}: ${result.reason}") }
+                is ReadResult.Failed -> {
+                    // Can't fetch it: fall back to the copy saved on the phone (read-only), if any.
+                    // Only for "couldn't reach it" — not when the Mac answered (deleted file, HTTP error).
+                    val answered = "not found" in result.reason || result.reason.startsWith("Read failed (HTTP")
+                    val saved = !answered && app.cacheStore.get(offlineKey(path)) != null
+                    _ui.update {
+                        if (saved) it.copy(loading = null, offlineCopy = path)
+                        else it.copy(loading = null, error = "${path.substringAfterLast('/')}: ${result.reason}")
+                    }
+                }
             }
         }
+    }
+
+    fun offlineCopyShown() = _ui.update { it.copy(offlineCopy = null) }
+
+    /** Same key the read-only viewer uses, so either one's copy works offline. */
+    private fun offlineKey(path: String) = "file:${server.id}:${projectDir().orEmpty()}:$path"
+
+    private suspend fun saveOfflineCopy(paths: List<String>, text: String) {
+        if (text.length > 400_000) return
+        val encoded = kotlinx.serialization.json.Json.encodeToString(
+            dev.opencode.mobile.data.model.FileContent.serializer(),
+            dev.opencode.mobile.data.model.FileContent(type = "text", content = text),
+        )
+        for (p in paths) app.cacheStore.put(offlineKey(p), encoded)
     }
 
     fun onRenameRequest(word: String) = _ui.update { it.copy(renameWord = word) }

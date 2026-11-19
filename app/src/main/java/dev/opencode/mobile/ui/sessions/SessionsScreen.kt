@@ -459,7 +459,9 @@ fun SessionsScreen(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
             )
-            if (ui.error != null) {
+            if (connection.status == dev.opencode.mobile.ConnectionStatus.OFFLINE) {
+                dev.opencode.mobile.ui.common.OfflineBanner(connection, onRetry = { appVm.refreshConnection(); vm.refresh() })
+            } else if (ui.error != null) {
                 dev.opencode.mobile.ui.common.Banner(ui.error!!, error = true, onDismiss = { vm.refresh() })
             }
             if (ui.loading && ui.sessions.isEmpty()) {

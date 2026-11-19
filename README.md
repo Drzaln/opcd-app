@@ -25,10 +25,10 @@ Kotlin · Jetpack Compose · Material 3 · dark theme · minSdk 26.
 | Files | Folder browser, read-only code viewer (long-press → View read-only), fuzzy file search + content grep |
 | Terminal | Full PTY + two renderers: **xterm.js** (scrollback, mouse, reflow, hardware keys) or the native canvas; paste/copy |
 | Diffs | Session diff, per-message diff (tap `± diff` under a user message) |
-| Offline | Room cache — sessions/messages show instantly, then refresh |
+| Offline | Room cache: sessions, messages, diffs, folder listings and opened files stay readable when the Mac can't be reached (with "saved N min ago"). Prompts sent while offline wait in an outbox, survive app restarts, and send by themselves when the server answers again |
 | Notifications | Background watch: notifies when a turn finishes or opencode needs input |
 | OpenCode Go | Plan usage in Settings: paste your Go API key → 5-hour / weekly / monthly bars |
-| Connection | Live/Checking/Offline chip in the app bar (tap for version + latency + recheck) |
+| Connection | Live/Checking/Offline chip in the app bar (tap for version + latency + recheck). When offline, a banner says **why** and what to do: phone offline, Tailscale off on the phone (with Open Tailscale), Mac asleep/unreachable, opencode not running, wrong password, or the name didn't resolve. Re-checks on every network change |
 | Discovery | mDNS auto-detect on LAN + a Tailscale (remote) field |
 
 > **opencode 2.0 note:** the app auto-detects the server API generation (1.x or 2.0). On 2.0 a few

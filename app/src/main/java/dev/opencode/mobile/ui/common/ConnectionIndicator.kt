@@ -74,9 +74,15 @@ fun ConnectionIndicator(
                         Spacer(Modifier.height(6.dp))
                         Text("${it}ms round-trip", style = MaterialTheme.typography.bodySmall, color = OcTheme.colors.textSecondary)
                     }
+                    state.diagnosis?.let { d ->
+                        Spacer(Modifier.height(10.dp))
+                        Text(d.title, style = MaterialTheme.typography.titleSmall, color = OcTheme.colors.textPrimary)
+                        Spacer(Modifier.height(4.dp))
+                        Text(d.advice, style = MaterialTheme.typography.bodySmall, color = OcTheme.colors.textBody)
+                    }
                     state.error?.takeIf { it.isNotBlank() }?.let {
                         Spacer(Modifier.height(6.dp))
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = OcTheme.colors.red)
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = if (state.diagnosis != null) OcTheme.colors.textSecondary else OcTheme.colors.red)
                     }
                     if (state.checkedAt > 0) {
                         Spacer(Modifier.height(6.dp))

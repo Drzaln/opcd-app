@@ -68,12 +68,17 @@ class FileViewModel(
         val content: FileContent? = null,
         val loading: Boolean = true,
         val error: String? = null,
+        /** Set when showing the copy saved on the phone (the server didn't answer). */
+        val savedAt: Long? = null,
     )
 
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui
 
     private val api = app.repository.apiFor(server)
+    private val cache = app.cacheStore
+    private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+    private fun cacheKey() = "file:${server.id}:${projectDir().orEmpty()}:$path"
 
     init {
         refresh()
@@ -84,9 +89,17 @@ class FileViewModel(
             _ui.value = _ui.value.copy(loading = true, error = null)
             try {
                 val content = api.fileContent(path, projectDir())
-                _ui.value = _ui.value.copy(content = content, loading = false)
+                _ui.value = _ui.value.copy(content = content, loading = false, savedAt = null)
+                // Keep text files (up to ~400 KB) readable offline.
+                if (content.type != "binary" && content.content.length <= 400_000) {
+                    cache.put(cacheKey(), json.encodeToString(FileContent.serializer(), content))
+                }
             } catch (e: Exception) {
-                _ui.value = _ui.value.copy(loading = false, error = e.message ?: "Failed to read file")
+                val saved = cache.getEntry(cacheKey())?.let { entry ->
+                    runCatching { json.decodeFromString(FileContent.serializer(), entry.json) }.getOrNull()?.let { it to entry.updatedAt }
+                }
+                _ui.value = if (saved != null) _ui.value.copy(content = saved.first, loading = false, savedAt = saved.second, error = null)
+                else _ui.value.copy(loading = false, error = e.message ?: "Failed to read file")
             }
         }
     }
@@ -176,6 +189,7 @@ fun FileViewerScreen(
             }
             if (content != null) {
                 if (error != null) Banner(error, error = true, onDismiss = vm::refresh)
+                ui.savedAt?.let { dev.opencode.mobile.ui.common.SavedCopyNote(it, onRetry = vm::refresh) }
                 if (content.type == "binary") {
                     Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
                         EmptyState(

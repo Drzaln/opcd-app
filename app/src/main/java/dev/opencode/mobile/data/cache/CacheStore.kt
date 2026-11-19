@@ -28,6 +28,10 @@ interface CacheDao {
 
     @Query("DELETE FROM cache")
     suspend fun clear()
+
+    /** Drops entries not refreshed since [before] (keeps the offline copy from growing forever). */
+    @Query("DELETE FROM cache WHERE updatedAt < :before AND key != 'outbox'")
+    suspend fun prune(before: Long)
 }
 
 @Database(entities = [CacheEntry::class], version = 1, exportSchema = false)
@@ -44,8 +48,14 @@ class CacheStore(context: Context) {
 
     suspend fun get(key: String): String? = runCatching { dao.get(key)?.json }.getOrNull()
 
+    /** The saved JSON and when it was saved — for "showing the copy saved 2h ago". */
+    suspend fun getEntry(key: String): CacheEntry? = runCatching { dao.get(key) }.getOrNull()
+
+    private val pruned = java.util.concurrent.atomic.AtomicBoolean(false)
+
     suspend fun put(key: String, json: String) {
         runCatching { dao.put(CacheEntry(key, json, System.currentTimeMillis())) }
+        if (pruned.compareAndSet(false, true)) runCatching { dao.prune(System.currentTimeMillis() - 30L * 24 * 3600 * 1000) }
     }
 
     suspend fun clear() {

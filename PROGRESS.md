@@ -743,6 +743,56 @@ with about 20 tool calls could use about 10 MB. Text only showed up at the pause
     touch-forwarding layer consumed every tap even with no stream running. Now it only takes
     touches while the stream is live.
 
+### Offline reading + connection diagnosis (`opencode-android-app-4y8`)
+
+For using the phone with the Mac left at home.
+
+- **Why it's offline:** `data/net/ConnectionDoctor.kt` runs when the 30 s health check fails.
+  - Checks, in order:
+    1. Does the phone have a network?
+    2. Is a VPN up, for a Tailscale address (100.64/10, `*.ts.net`, fd7a:115c:a1e0::/48)?
+    3. Did the server answer with a 401?
+    4. A bare TCP connect to the server's port.
+  - What the TCP result means:
+    - **refused** → the Mac is up but opencode isn't running;
+    - **timeout or no route** → the Mac is asleep, off, or off Tailscale;
+    - **name didn't resolve** → MagicDNS or address problem;
+    - **open but the health check failed** → something else is on that port.
+  - `ConnectionState.diagnosis` carries the result. `OfflineBanner` shows it on Sessions and Chat, and
+    the connection chip's dialog shows it too.
+  - "Open Tailscale" uses a `<queries>` entry for `com.tailscale.ipn`.
+  - Re-checks: every 15 s while offline (30 s when online), and 1.5 s after any network change
+    (`registerDefaultNetworkCallback`).
+- **Saved copies:**
+  - Sessions and messages were already cached. Added: diffs (`diff:`), folder listings (`ls:`) and
+    files (`file:`, text up to 400 KB).
+  - The editor saves what it opens under the viewer's key. If a file can't be fetched — a network
+    failure, not a 404 — the read-only viewer opens the saved copy.
+  - Each fallback screen says "showing the copy saved N ago · tap to retry".
+  - The offline chat takes its title from the saved session list.
+  - The cache drops entries older than 30 days, never the outbox.
+- **Outbox** (`data/cache/Outbox.kt`, on disk under the `outbox` key):
+  - A plain text prompt is queued when sending would fail: the app is already offline, or the send
+    fails to reach the server. Commands and attachments still need the server.
+  - It shows under the conversation as "Waiting to send", with Cancel.
+  - It's flushed in order when the health check passes or the chat's stream reconnects.
+  - A network failure stops the flush. A refusal from the server marks that prompt "Couldn't send"
+    (Retry / Delete), and it's never resent automatically.
+- **Checked on the phone** (mobile data, throwaway folder `/tmp/opcd-offline`, opencode stopped on the
+  Mac with `opencode service stop`):
+  - The banner said "opencode isn't running", with the fix.
+  - The session list, chat, folder listing and README (closed tab → read-only saved copy) all stayed
+    readable.
+  - A prompt sent while down showed "Waiting to send" and survived an app restart.
+  - After `opencode service start`, the app went Live within about 10 s, the prompt went out once, and
+    the reply came back.
+  - Not tried on the phone: Tailscale off, and Mac asleep (that would have stopped this session). The
+    address classification is unit-tested (`ConnectionDoctorTest`).
+- **Fixed during testing:** on a phone, an offline file opened to a blank "No file open" screen. Only the
+  tablet layout acted on the saved-copy flag. The phone's editor screen now does too.
+  - This first looked like a "re-tapping a closed file doesn't reopen it" bug. Re-checked online:
+    open → close the tab → tap again reopens it fine.
+
 ### Phase 2 design notes
 
 opencode gives the app files, PTYs and sessions, but no code intelligence and no Android/React Native

@@ -150,6 +150,10 @@ private fun WideCode(
     var panel by rememberSaveable { mutableStateOf(if (tall) BottomPanel.TERMINAL else null) }
     var lastPanel by rememberSaveable { mutableStateOf(BottomPanel.TERMINAL) }
     LaunchedEffect(Unit) { vm.refreshGit() }
+    // Offline: a file with a saved copy opens in the read-only viewer instead of failing.
+    LaunchedEffect(ui.offlineCopy) {
+        ui.offlineCopy?.let { vm.offlineCopyShown(); onViewReadOnly(it) }
+    }
     val helperState by appVm.helper.collectAsState()
     val metroAvailable = MetroController.available(helperState)
     val metroUi by vm.metro.ui.collectAsState()

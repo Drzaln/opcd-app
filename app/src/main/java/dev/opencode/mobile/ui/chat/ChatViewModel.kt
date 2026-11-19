@@ -25,6 +25,10 @@ import dev.opencode.mobile.data.net.OcEvent
 import dev.opencode.mobile.data.net.ServerConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import dev.opencode.mobile.data.cache.OutboxItem
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -69,6 +73,8 @@ class ChatViewModel(
     private val sessionId: String,
     private val projectDir: () -> String?,
     private val isForeground: () -> Boolean = { true },
+    /** The app's connection check says the server is unreachable right now. */
+    private val isOffline: () -> Boolean = { false },
 ) : ViewModel() {
 
     data class UiState(
@@ -128,6 +134,12 @@ class ChatViewModel(
             if (messages.isNotEmpty()) {
                 _ui.update { it.copy(messages = messages.sortedBy { m -> m.info.time?.created ?: 0L }, loading = false) }
             }
+        }
+        // The title etc. come from the saved session list, until the server answers.
+        viewModelScope.launch {
+            val list = app.cacheStore.get("sessions:${server.id}:${projectDir().orEmpty()}") ?: return@launch
+            val saved = runCatching { json.decodeFromString<List<Session>>(list) }.getOrNull()?.firstOrNull { it.id == sessionId } ?: return@launch
+            _ui.update { if (it.session == null) it.copy(session = saved) else it }
         }
     }
 
@@ -292,6 +304,12 @@ class ChatViewModel(
         val commandName = match?.groupValues?.get(1)
         val commandArgs = match?.groupValues?.get(2)?.trim().orEmpty()
         val isCommand = pending.isEmpty() && commandName != null && _ui.value.commands.any { it.name == commandName }
+        // Plain text prompts can wait in the outbox; commands and attachments need the server now.
+        val queueable = !isCommand && pending.isEmpty() && text.isNotEmpty()
+        if (queueable && isOffline()) {
+            enqueue(text)
+            return
+        }
         viewModelScope.launch {
             _ui.update { it.copy(sending = true, queued = if (wasBusy) it.queued + 1 else it.queued) }
             var ok = true
@@ -334,6 +352,11 @@ class ChatViewModel(
                 _input.value = ""
                 _attachments.value = emptyList()
             } catch (e: Exception) {
+                if (queueable && e.isUnreachable()) {
+                    enqueue(text)
+                    _ui.update { it.copy(sending = false, queued = if (wasBusy) (it.queued - 1).coerceAtLeast(0) else it.queued) }
+                    return@launch
+                }
                 ok = false
                 _ui.value = _ui.value.copy(sending = false, error = e.message ?: "Send failed: unknown error")
             }
@@ -448,7 +471,10 @@ class ChatViewModel(
                                 scheduleFullRefresh()
                             }
                             "todo.updated" -> applyTodos(event)
-                            "server.connected" -> scheduleFullRefresh(full = true)
+                            "server.connected" -> {
+                                scheduleFullRefresh(full = true)
+                                app.outbox.flush(server)
+                            }
                             "session.updated", "session.diff", "session.compacted" ->
                                 if (isOwnSession(event)) scheduleFullRefresh()
                         }
@@ -635,10 +661,40 @@ class ChatViewModel(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _ui.value = _ui.value.copy(loading = false, error = "Load messages: ${e.message ?: "unknown error"}")
+                // Unreachable: keep the saved copy on screen; the offline banner says why.
+                _ui.value = if (e.isUnreachable()) _ui.value.copy(loading = false)
+                else _ui.value.copy(loading = false, error = "Load messages: ${e.message ?: "unknown error"}")
             }
         }
     }
+
+    // ---- Outbox: prompts typed while offline ----
+
+    /** This session's queued prompts, oldest first. */
+    val outbox: StateFlow<List<OutboxItem>> = app.outbox.items
+        .map { list -> list.filter { it.serverId == server.id && it.sessionId == sessionId } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private fun enqueue(text: String) {
+        val state = _ui.value
+        app.outbox.add(
+            OutboxItem(
+                serverId = server.id,
+                sessionId = sessionId,
+                directory = projectDir(),
+                body = SendMessageBody(
+                    agent = state.selectedAgent,
+                    model = state.selectedModel?.let { ModelRef(it.providerId, it.modelId, state.selectedVariant) },
+                    parts = listOf(PartInput(type = "text", text = text)),
+                ),
+                text = text,
+            ),
+        )
+        _input.value = ""
+    }
+
+    fun removeQueued(id: String) = app.outbox.remove(id)
+    fun retryQueued(id: String) = app.outbox.retry(id, server)
 
     private fun updateWidget(session: Session?, status: SessionStatus?, messages: List<MessageData>) {
         val snippet = messages.lastOrNull { it.info.role == "assistant" }
@@ -674,3 +730,9 @@ class ChatViewModel(
         private const val SSE_TIMEOUT_MS = 45_000L
     }
 }
+
+/** A failure to reach the server at all (as opposed to the server answering with an error). */
+private fun Throwable.isUnreachable(): Boolean = this is java.net.ConnectException ||
+    this is java.net.SocketTimeoutException || this is java.net.UnknownHostException ||
+    this is java.net.NoRouteToHostException || this is java.net.PortUnreachableException ||
+    (this is IOException && message?.contains("Failed to connect", ignoreCase = true) == true)

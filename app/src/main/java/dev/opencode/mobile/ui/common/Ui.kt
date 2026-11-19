@@ -184,3 +184,10 @@ fun Banner(text: String, error: Boolean, onDismiss: () -> Unit, modifier: Modifi
             .padding(horizontal = 12.dp, vertical = 8.dp),
     )
 }
+
+/** "Offline · showing the copy saved 3 hours ago" — when a screen fell back to its saved copy. */
+@Composable
+fun SavedCopyNote(savedAt: Long, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    val ago = android.text.format.DateUtils.getRelativeTimeSpanString(savedAt, System.currentTimeMillis(), android.text.format.DateUtils.MINUTE_IN_MILLIS)
+    Banner("Can't reach the server · showing the copy saved $ago. Tap to retry.", error = false, onDismiss = onRetry, modifier = modifier)
+}

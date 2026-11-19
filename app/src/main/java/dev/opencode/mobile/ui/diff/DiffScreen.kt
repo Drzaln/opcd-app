@@ -56,6 +56,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
+private const val MAX_SAVED = 1_500_000
+
 class DiffViewModel(
     app: OpenCodeApp,
     private val server: ServerConfig,
@@ -68,12 +70,17 @@ class DiffViewModel(
         val diffs: List<FileDiff> = emptyList(),
         val loading: Boolean = true,
         val error: String? = null,
+        /** Set when showing the copy saved on the phone (the server didn't answer). */
+        val savedAt: Long? = null,
     )
 
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui
 
     private val api = app.repository.apiFor(server)
+    private val cache = app.cacheStore
+    private val cacheKey = "diff:${server.id}:$sessionId:${messageId.orEmpty()}"
+    private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
     init {
         refresh()
@@ -84,9 +91,15 @@ class DiffViewModel(
             _ui.value = _ui.value.copy(loading = true, error = null)
             try {
                 val diffs = api.sessionDiff(sessionId, messageId = messageId, directory = projectDir())
-                _ui.value = _ui.value.copy(diffs = diffs, loading = false)
+                _ui.value = _ui.value.copy(diffs = diffs, loading = false, savedAt = null)
+                val encoded = json.encodeToString(kotlinx.serialization.builtins.ListSerializer(FileDiff.serializer()), diffs)
+                if (encoded.length <= MAX_SAVED) cache.put(cacheKey, encoded)
             } catch (e: Exception) {
-                _ui.value = _ui.value.copy(loading = false, error = e.message ?: "Failed to load diff")
+                val saved = cache.getEntry(cacheKey)?.let { entry ->
+                    runCatching { json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(FileDiff.serializer()), entry.json) }.getOrNull()?.let { it to entry.updatedAt }
+                }
+                _ui.value = if (saved != null) _ui.value.copy(diffs = saved.first, loading = false, savedAt = saved.second)
+                else _ui.value.copy(loading = false, error = e.message ?: "Failed to load diff")
             }
         }
     }
@@ -139,6 +152,7 @@ fun DiffScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            ui.savedAt?.let { dev.opencode.mobile.ui.common.SavedCopyNote(it, onRetry = vm::refresh) }
             if (ui.error != null) {
                 dev.opencode.mobile.ui.common.Banner(ui.error!!, error = true, onDismiss = {})
             }

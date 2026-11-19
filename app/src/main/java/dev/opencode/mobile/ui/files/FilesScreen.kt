@@ -78,6 +78,8 @@ class FilesViewModel(
         val fileResults: List<String> = emptyList(),
         val contentResults: List<FindMatch> = emptyList(),
         val searching: Boolean = false,
+        /** Set when showing the listing saved on the phone (the server didn't answer). */
+        val savedAt: Long? = null,
     ) {
         val searchingActive: Boolean get() = query.isNotBlank()
     }
@@ -87,6 +89,10 @@ class FilesViewModel(
 
     private val api = app.repository.apiFor(server)
     private var searchJob: kotlinx.coroutines.Job? = null
+    private val cache = app.cacheStore
+    private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+    private fun cacheKey() = "ls:${server.id}:${projectDir().orEmpty()}:$dir"
+    private val listSerializer = kotlinx.serialization.builtins.ListSerializer(FileNode.serializer())
 
     init {
         refresh()
@@ -97,9 +103,14 @@ class FilesViewModel(
             _ui.value = _ui.value.copy(loading = true, error = null)
             try {
                 val files = api.listFiles(dir, projectDir()).sortedWith(compareBy({ it.type != "directory" }, { it.name.lowercase() }))
-                _ui.value = _ui.value.copy(files = files, loading = false)
+                _ui.value = _ui.value.copy(files = files, loading = false, savedAt = null)
+                cache.put(cacheKey(), json.encodeToString(listSerializer, files))
             } catch (e: Exception) {
-                _ui.value = _ui.value.copy(loading = false, error = e.message ?: "Failed to list files")
+                val saved = cache.getEntry(cacheKey())?.let { entry ->
+                    runCatching { json.decodeFromString(listSerializer, entry.json) }.getOrNull()?.let { it to entry.updatedAt }
+                }
+                _ui.value = if (saved != null) _ui.value.copy(files = saved.first, loading = false, savedAt = saved.second)
+                else _ui.value.copy(loading = false, error = e.message ?: "Failed to list files")
             }
         }
     }
@@ -254,8 +265,9 @@ fun FilesScreen(
                 onModeChange = { vm.setMode(it) },
                 showModes = !compact,
             )
+            ui.savedAt?.let { dev.opencode.mobile.ui.common.SavedCopyNote(it, onRetry = vm::refresh) }
             if (ui.error != null) {
-                Text(ui.error!!, color = androidx.compose.ui.graphics.Color(0xFFF85149), modifier = Modifier.padding(16.dp))
+                dev.opencode.mobile.ui.common.Banner(ui.error!!, error = true, onDismiss = vm::refresh)
             }
             if (ui.searchingActive) {
                 if (ui.searching) {

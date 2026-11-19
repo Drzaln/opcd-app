@@ -177,6 +177,7 @@ fun ChatScreen(
                     sessionId,
                     projectDir = { appVm.currentDirectory.value },
                     isForeground = { foreground },
+                    isOffline = { appVm.connection.value.status == dev.opencode.mobile.ConnectionStatus.OFFLINE },
                 )
             }
         },
@@ -184,6 +185,7 @@ fun ChatScreen(
     val ui by vm.ui.collectAsState()
     val input by vm.input.collectAsState()
     val attachments by vm.attachments.collectAsState()
+    val queuedPrompts by vm.outbox.collectAsState()
     val connection by appVm.connection.collectAsState()
 
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -302,6 +304,12 @@ fun ChatScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            dev.opencode.mobile.ui.common.OfflineBanner(
+                connection,
+                onRetry = { appVm.refreshConnection() },
+                savedNote = if (queuedPrompts.isEmpty()) "Showing the copy saved on this phone. Prompts you send now wait and go out when it's back."
+                    else "Showing the copy saved on this phone.",
+            )
             if (ui.error != null) {
                 Surface(color = OcTheme.colors.redBg, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
                     Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -321,6 +329,7 @@ fun ChatScreen(
                 }
             }
             TodosPanel(todos = ui.todos)
+            Box(Modifier.weight(1f)) {
             MessageList(
                 messages = ui.messages,
                 models = ui.models,
@@ -336,6 +345,8 @@ fun ChatScreen(
                 onRevert = { messageId -> vm.revertTo(messageId) },
                 onDelete = { messageId -> vm.deleteMessage(messageId) },
             )
+            }
+            QueuedPrompts(queuedPrompts, onRemove = vm::removeQueued, onRetry = vm::retryQueued)
         }
     }
     if (showSummarize) {
@@ -1130,4 +1141,43 @@ private fun toolSubject(input: Any?): String {
         if (v.isNotBlank()) return if (key == "filePath" || key == "path") v.trimEnd('/').split('/').takeLast(3).joinToString("/") else v.lineSequence().first()
     }
     return ""
+}
+
+/**
+ * Prompts typed while the server was unreachable, under the conversation and above the composer:
+ * "waiting" until the connection is back (then they send by themselves), or failed with the server's
+ * answer and a Retry.
+ */
+@Composable
+private fun QueuedPrompts(
+    items: List<dev.opencode.mobile.data.cache.OutboxItem>,
+    onRemove: (String) -> Unit,
+    onRetry: (String) -> Unit,
+) {
+    if (items.isEmpty()) return
+    val c = OcTheme.colors
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (item in items) {
+            val failed = item.error != null
+            Column(
+                Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (failed) c.redBg else c.surfaceVariant.copy(alpha = 0.7f))
+                    .padding(start = 12.dp, end = 4.dp, top = 8.dp),
+            ) {
+                Text(
+                    if (failed) "Couldn't send" else "Waiting to send · goes out when the server is back",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (failed) c.red else c.textSecondary,
+                )
+                Text(item.text, fontSize = 14.sp, color = c.textPrimary, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp, end = 8.dp))
+                if (failed) Text(item.error.orEmpty(), fontSize = 11.sp, color = c.red, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp, end = 8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    if (failed) TextButton(onClick = { onRetry(item.id) }) { Text("Retry") }
+                    TextButton(onClick = { onRemove(item.id) }) { Text(if (failed) "Delete" else "Cancel", color = c.textSecondary) }
+                }
+            }
+        }
+    }
 }
