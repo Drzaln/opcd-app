@@ -215,7 +215,7 @@ class FileWriter(
         } catch (e: ReadError) {
             return ReadResult.Failed(e.message ?: "Read failed")
         } catch (e: Exception) {
-            return ReadResult.Failed(e.message ?: "Read failed")
+            return ReadResult.Failed("Read failed: ${e.message ?: e.javaClass.simpleName}")
         }
         if (bytes.size > EditorFiles.MAX_BYTES) return ReadResult.Failed(EditorFiles.errorMessage("toobig"))
         val text = EditorFiles.decodeText(bytes) ?: return ReadResult.Failed("Binary file — open it read-only instead")

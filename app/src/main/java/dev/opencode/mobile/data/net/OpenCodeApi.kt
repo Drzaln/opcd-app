@@ -381,7 +381,7 @@ class OpenCodeApi(
                 append(encoded)
                 if (directory != null) append("?location[directory]=").append(URLEncoder.encode(directory, "UTF-8"))
             }
-            val bytes = v2.fsRead(url).use { it.bytes() }
+            val bytes = readBody(url)
             val binary = bytes.any { it == 0.toByte() }
             FileContent(type = if (binary) "binary" else "text", content = if (binary) "" else String(bytes, Charsets.UTF_8))
         }
@@ -397,8 +397,16 @@ class OpenCodeApi(
             append(encoded)
             if (directory != null) append("?location[directory]=").append(URLEncoder.encode(directory, "UTF-8"))
         }
-        return v2.fsRead(url).use { it.bytes() }
+        return readBody(url)
     }
+
+    /**
+     * `fsRead` is `@Streaming`: Retrofit returns once the headers arrive, and the body is read by
+     * whoever calls `bytes()`. From the main thread that's a `NetworkOnMainThreadException` (no
+     * message — the editor showed a bare "Read failed") as soon as a file doesn't fit in the first
+     * packet, so the read always happens on the IO dispatcher.
+     */
+    private suspend fun readBody(url: String): ByteArray = withContext(Dispatchers.IO) { v2.fsRead(url).use { it.bytes() } }
 
     @Volatile private var fsWriteSupported: Boolean? = null
 
