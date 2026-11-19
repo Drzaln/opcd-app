@@ -736,8 +736,12 @@ with about 20 tool calls could use about 10 MB. Text only showed up at the pause
       nothing to stream there.
     - Traffic: no message downloads during a reply; one fetch when it ends, 2–28 KB. The old code
       downloaded a 50-message page after every pause.
-  - The screen data saver was **not** tried on a device: that needs an emulator or simulator, or a
-    phone on mobile data.
+  - **Screen data saver, checked on the phone on mobile data:** the app reached the helper over
+    Tailscale and mirrored the phone itself. The "Data saver" tag showed, and scrcpy on the phone ran
+    with `max_size=600 max_fps=20 video_bit_rate=500000`.
+  - **Fixed while there:** the overlay's "Show screen" / "Retry" button didn't respond. The
+    touch-forwarding layer consumed every tap even with no stream running. Now it only takes
+    touches while the stream is live.
 
 ### Phase 2 design notes
 

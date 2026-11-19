@@ -288,6 +288,9 @@ fun DeviceScreen(screen: ScreenController, serial: String?, deviceLabel: String?
                     .background(androidx.compose.ui.graphics.Color.Black)
                     .onSizeChanged { size = it }
                     .pointerInput(ui.state) {
+                        // Only a live stream takes touches; otherwise the overlay's "Show screen" /
+                        // "Retry" button must get them (consuming here swallowed its clicks).
+                        if (ui.state != "live") return@pointerInput
                         awaitPointerEventScope {
                             while (true) {
                                 // Initial pass: take the gesture before the bottom sheet (or a scroll parent)
