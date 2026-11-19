@@ -1,5 +1,6 @@
 package dev.opencode.mobile.ui.common
 
+import androidx.compose.ui.graphics.luminance
 import dev.opencode.mobile.ui.theme.OcTheme
 
 import androidx.compose.foundation.background
@@ -41,7 +42,8 @@ fun CodeBlock(
     code: String,
     modifier: Modifier = Modifier,
 ) {
-    val highlighted = remember(language, code) { CodeHighlighter.highlight(code, language) }
+    val light = OcTheme.colors.bg.luminance() > 0.5f
+    val highlighted = remember(language, code, light) { CodeHighlighter.highlight(code, language, light) }
     val scroll = rememberScrollState()
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current

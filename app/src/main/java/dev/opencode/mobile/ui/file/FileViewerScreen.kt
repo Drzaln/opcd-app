@@ -1,5 +1,6 @@
 package dev.opencode.mobile.ui.file
 
+import androidx.compose.ui.graphics.luminance
 import dev.opencode.mobile.ui.theme.OcTheme
 
 import androidx.compose.foundation.background
@@ -12,7 +13,13 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.InsertDriveFile
+import dev.opencode.mobile.ui.common.Banner
+import dev.opencode.mobile.ui.common.EmptyState
+import dev.opencode.mobile.ui.common.StatusPill
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -100,7 +107,9 @@ fun FileViewerScreen(
     val server = remember(servers, serverId) { servers.firstOrNull { it.id == serverId } }
 
     if (server == null) {
-        Column(Modifier.fillMaxSize().padding(24.dp)) { Text("Server not found.", color = OcTheme.colors.textSecondary) }
+        Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+            EmptyState(Icons.Filled.ErrorOutline, "Server not found", body = "It may have been removed.", action = "Back", onAction = onBack)
+        }
         return
     }
 
@@ -116,11 +125,23 @@ fun FileViewerScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        path.substringAfterLast('/'),
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                    )
+                    Column {
+                        Text(
+                            path.substringAfterLast('/'),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = OcTheme.colors.textPrimary,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                        val dir = path.substringBeforeLast('/', "")
+                        if (dir.isNotEmpty()) Text(
+                            dir,
+                            fontSize = 11.sp,
+                            color = OcTheme.colors.textSecondary,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.StartEllipsis,
+                        )
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
@@ -135,39 +156,51 @@ fun FileViewerScreen(
                     }
                 },
                 colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
+                    containerColor = OcTheme.colors.surface,
                 ),
             )
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            if (ui.error != null) {
-                Text(ui.error!!, color = androidx.compose.ui.graphics.Color(0xFFF85149), modifier = Modifier.padding(16.dp))
-            }
             val content = ui.content
-            if (content != null) {
-                if (content.type == "binary") {
-                    Text(
-                        "Binary file (${content.mimeType ?: "unknown mime"}) — preview not supported.",
-                        color = OcTheme.colors.textSecondary,
-                        modifier = Modifier.padding(16.dp),
+            val error = ui.error
+            if (content == null) {
+                Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    if (error != null) EmptyState(
+                        Icons.Filled.ErrorOutline, "Couldn't open this file", body = error,
+                        action = "Try again", onAction = vm::refresh, tint = OcTheme.colors.red,
+                    ) else if (ui.loading) androidx.compose.material3.CircularProgressIndicator(
+                        color = OcTheme.colors.accent, strokeWidth = 2.dp, modifier = Modifier.size(28.dp),
                     )
+                }
+            }
+            if (content != null) {
+                if (error != null) Banner(error, error = true, onDismiss = vm::refresh)
+                if (content.type == "binary") {
+                    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        EmptyState(
+                            Icons.Filled.InsertDriveFile, "No preview for this file",
+                            body = "It's a binary file (${content.mimeType ?: "unknown type"}).",
+                            tint = OcTheme.colors.textSecondary,
+                        )
+                    }
                 } else {
                     val code = content.content
                     val lines = remember(code) { code.split('\n').map { it.replace("\t", "    ") } }
                     val lineCount = lines.size
                     val language = languageForPath(path)
+                    val light = OcTheme.colors.bg.luminance() > 0.5f
                     Row(
-                        Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        Modifier.fillMaxWidth().background(OcTheme.colors.surface).padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                     ) {
-                        Text(
-                            language ?: "plain",
-                            color = MaterialTheme.colorScheme.primary,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text("$lineCount lines", color = OcTheme.colors.textSecondary, style = MaterialTheme.typography.labelSmall)
+                        StatusPill(language ?: "plain text", OcTheme.colors.link, dot = false)
+                        Spacer(Modifier.width(10.dp))
+                        Text(if (lineCount == 1) "1 line" else "$lineCount lines", color = OcTheme.colors.textSecondary, fontSize = 12.sp)
+                        Spacer(Modifier.weight(1f))
+                        Text("Read only", color = OcTheme.colors.textSecondary, fontSize = 12.sp)
                     }
+                    androidx.compose.material3.HorizontalDivider(color = OcTheme.colors.border)
                     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
                     LaunchedEffect(code, line, lineCount) {
                         val target = (line ?: return@LaunchedEffect) - 1
@@ -193,7 +226,7 @@ fun FileViewerScreen(
                     Box(
                         Modifier
                             .fillMaxSize()
-                            .background(OcTheme.colors.surfaceVariant)
+                            .background(OcTheme.colors.bg)
                             .horizontalScroll(hScroll),
                     ) {
                         androidx.compose.foundation.lazy.LazyColumn(
@@ -209,7 +242,7 @@ fun FileViewerScreen(
                                     Modifier
                                         .fillMaxWidth()
                                         .background(
-                                            if (isTarget) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                            if (isTarget) OcTheme.colors.accent.copy(alpha = 0.16f)
                                             else androidx.compose.ui.graphics.Color.Transparent,
                                         )
                                         .padding(vertical = 1.dp),
@@ -223,15 +256,15 @@ fun FileViewerScreen(
                                         textAlign = androidx.compose.ui.text.style.TextAlign.End,
                                         modifier = Modifier.width(gutter).padding(end = 10.dp),
                                     )
-                                    val highlighted = remember(language, lines[index]) {
-                                        CodeHighlighter.highlight(lines[index], language)
+                                    val highlighted = remember(language, lines[index], light) {
+                                        CodeHighlighter.highlight(lines[index], language, light)
                                     }
                                     Text(
                                         text = highlighted,
                                         fontFamily = FontFamily.Monospace,
                                         fontSize = 13.sp,
                                         lineHeight = 19.sp,
-                                        color = MaterialTheme.colorScheme.onSurface,
+                                        color = OcTheme.colors.textBody,
                                         softWrap = false,
                                         modifier = Modifier.padding(end = 16.dp),
                                     )

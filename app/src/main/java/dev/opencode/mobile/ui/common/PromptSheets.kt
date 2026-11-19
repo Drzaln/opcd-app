@@ -3,6 +3,8 @@ package dev.opencode.mobile.ui.common
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Shield
 import dev.opencode.mobile.ui.theme.OcTheme
 
@@ -103,35 +105,44 @@ fun QuestionSheet(
         chosen.toList()
     }
     val canSubmit = answers.isNotEmpty() && answers.all { it.isNotEmpty() }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    val c = OcTheme.colors
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = c.surface) {
         Column(
             Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
+                .padding(bottom = 24.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Question from opencode", style = MaterialTheme.typography.titleMedium)
-                if (pending > 1) {
-                    Spacer(Modifier.width(8.dp))
-                    MutedLabel("+${pending - 1} more")
-                }
+                androidx.compose.foundation.layout.Box(
+                    Modifier.size(36.dp).clip(androidx.compose.foundation.shape.CircleShape).background(c.link.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center,
+                ) { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.HelpOutline, contentDescription = null, tint = c.link, modifier = Modifier.size(20.dp)) }
+                Spacer(Modifier.width(12.dp))
+                Text("opencode has a question", style = MaterialTheme.typography.titleMedium, color = c.textPrimary, modifier = Modifier.weight(1f))
+                if (pending > 1) StatusPill("+${pending - 1} more", c.textSecondary, dot = false)
             }
             for ((i, q) in request.questions.withIndex()) {
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(16.dp))
                 if (q.header.isNotBlank()) {
-                    Text(q.header, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Text(q.header.uppercase(), fontSize = 11.sp, letterSpacing = 0.8.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, color = c.link)
+                    Spacer(Modifier.height(4.dp))
                 }
-                Text(q.question, style = MaterialTheme.typography.bodyMedium)
+                Text(q.question, style = MaterialTheme.typography.bodyLarge, color = c.textPrimary)
                 if (q.multiple) {
-                    MutedLabel("select one or more", modifier = Modifier.padding(top = 2.dp))
+                    Text("Select one or more", fontSize = 12.sp, color = c.textSecondary, modifier = Modifier.padding(top = 2.dp))
                 }
+                Spacer(Modifier.height(6.dp))
                 for (option in q.options) {
                     val selected = option.label in selections[i]
                     Row(
                         Modifier
+                            .padding(top = 6.dp)
                             .fillMaxWidth()
+                            .clip(Ui.controlShape)
+                            .background(if (selected) c.accent.copy(alpha = 0.12f) else c.bg)
+                            .border(1.dp, if (selected) c.accent else c.border, Ui.controlShape)
                             .clickable {
                                 val current = selections[i]
                                 selections[i] = if (q.multiple) {
@@ -140,19 +151,21 @@ fun QuestionSheet(
                                     setOf(option.label)
                                 }
                             }
-                            .padding(top = 8.dp),
+                            .padding(horizontal = 4.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         if (q.multiple) {
-                            Checkbox(checked = selected, onCheckedChange = null)
+                            Checkbox(checked = selected, onCheckedChange = null, modifier = Modifier.padding(horizontal = 8.dp),
+                                colors = androidx.compose.material3.CheckboxDefaults.colors(checkedColor = c.accent))
                         } else {
-                            RadioButton(selected = selected, onClick = null)
+                            RadioButton(selected = selected, onClick = null, modifier = Modifier.padding(horizontal = 8.dp),
+                                colors = androidx.compose.material3.RadioButtonDefaults.colors(selectedColor = c.accent))
                         }
-                        Spacer(Modifier.width(4.dp))
-                        Column {
-                            Text(option.label, style = MaterialTheme.typography.bodyMedium)
+                        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text(option.label, style = MaterialTheme.typography.bodyMedium, color = c.textPrimary,
+                                fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.SemiBold else null)
                             if (option.description.isNotBlank()) {
-                                Text(option.description, style = MaterialTheme.typography.labelSmall, color = OcTheme.colors.textSecondary)
+                                Text(option.description, fontSize = 12.sp, lineHeight = 16.sp, color = c.textSecondary)
                             }
                         }
                     }
@@ -161,17 +174,22 @@ fun QuestionSheet(
                     OutlinedTextField(
                         value = customs[i],
                         onValueChange = { customs[i] = it },
-                        placeholder = { Text("Or type your own") },
+                        placeholder = { Text("Or type your own answer") },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        shape = Ui.controlShape,
                         maxLines = 3,
                     )
                 }
             }
-            Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onDismiss) { Text("Dismiss", color = OcTheme.colors.red) }
-                TextButton(onClick = { onSubmit(answers) }, enabled = canSubmit) { Text("Submit") }
-            }
+            Spacer(Modifier.height(20.dp))
+            androidx.compose.material3.Button(
+                onClick = { onSubmit(answers) },
+                enabled = canSubmit,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = c.accent, contentColor = androidx.compose.ui.graphics.Color.White),
+            ) { Text("Send answer") }
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Dismiss", color = c.textSecondary) }
         }
     }
 }

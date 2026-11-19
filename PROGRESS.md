@@ -662,8 +662,22 @@ Asked: "make the UI UX good, functional and pretty" (whole app). Audit on the ph
 - **Checked on the phone** (dark): server list, Files, chat tool rows and Thinking (in a session from
   another project folder — viewed only, folder switched back to test-expo), Diff empty state, editor tabs.
   The permission sheet wasn't triggered (it would need opencode to ask for a real action).
-- **Still open:** question sheet, read-only viewer, tablet two-pane layouts, a light-mode pass over
-  the pass-2 screens.
+- **Then (same bead):**
+  - **Question sheet:** same layout as the permission sheet (blue ? icon, "+N more" pill). Answers are
+    bordered rows that turn accent when picked. The free-text field is rounded. **Send answer** is the
+    full-width primary button and Dismiss is quiet.
+  - **Read-only viewer:**
+    - the title is the file name, with its folder underneath;
+    - a strip shows a language pill, the line count and "Read only";
+    - code sits on the page background; the target line gets an accent tint and a bright number;
+    - loading, error ("Try again") and binary files use the shared empty state.
+  - **Light mode:** the syntax highlighter (viewer and chat code blocks) used dark-theme colors only,
+    which washed out on white. It now has GitHub-light tones when the theme is light.
+  - **Checked on the phone in light mode:** server list, sessions, chat, viewer, Diff empty state.
+    Dark was restored afterwards. The question sheet wasn't triggered, because it needs a model to ask a
+    real question.
+- **Still open:** tablet layouts beyond the existing `WideTwoPane` for Files/viewer (not checked on a
+  tablet).
 
 ### Phase 2 design notes
 

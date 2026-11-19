@@ -76,27 +76,50 @@ object CodeHighlighter {
         "plain" to CodePlain,
     )
 
-    fun highlight(code: String, language: String?): AnnotatedString {
+    /** The same token roles in GitHub-light tones, for light mode (the dark ones wash out on white). */
+    private val lightTokenColors: Map<String, Color> = run {
+        val comment = Color(0xFF6E7781); val keyword = Color(0xFFCF222E); val number = Color(0xFF0550AE)
+        val string = Color(0xFF0A3069); val function = Color(0xFF8250DF); val type = Color(0xFF953800)
+        val tag = Color(0xFF116329); val plain = Color(0xFF1F2328); val punct = Color(0xFF57606A)
+        tokenColors.mapValues { (k, _) ->
+            when (k) {
+                "comment", "prolog", "doctype", "cdata" -> comment
+                "keyword", "atrule", "rule", "important" -> keyword
+                "boolean", "number", "constant", "unit", "property", "attr-name", "variable" -> number
+                "string", "char", "regex", "url", "attr-value" -> string
+                "function" -> function
+                "class-name", "builtin", "selector" -> type
+                "tag", "inserted" -> tag
+                "deleted" -> Color(0xFF82071E)
+                "changed" -> Color(0xFF953800)
+                "operator", "namespace", "punctuation" -> punct
+                else -> plain
+            }
+        }
+    }
+
+    fun highlight(code: String, language: String?, light: Boolean = false): AnnotatedString {
         if (code.isEmpty()) return AnnotatedString(code)
         return try {
             val grammar = prism4j.grammar(language ?: "markup") ?: return AnnotatedString(code)
             val nodes = prism4j.tokenize(code, grammar)
             val builder = AnnotatedString.Builder()
-            for (node in nodes) traverse(node, builder)
+            val colors = if (light) lightTokenColors else tokenColors
+            for (node in nodes) traverse(node, builder, colors)
             builder.toAnnotatedString()
         } catch (t: Throwable) {
             AnnotatedString(code)
         }
     }
 
-    private fun traverse(node: Node, builder: AnnotatedString.Builder) {
+    private fun traverse(node: Node, builder: AnnotatedString.Builder, tokenColors: Map<String, Color>) {
         if (node is Text) {
             builder.append(node.literal())
             return
         }
         if (node is Syntax) {
             val start = builder.length
-            for (child in node.children()) traverse(child, builder)
+            for (child in node.children()) traverse(child, builder, tokenColors)
             val color = tokenColors[node.type()] ?: tokenColors[node.alias()]
             if (color != null && builder.length > start) {
                 builder.addStyle(SpanStyle(color = color), start, builder.length)
