@@ -12,7 +12,9 @@
     --oc-kw: #FF7B72; --oc-str: #A5D6FF; --oc-num: #79C0FF; --oc-prop: #79C0FF; --oc-fn: #D2A8FF; --oc-type: #FFA657;
     --oc-tag: #7EE787; --oc-comment: #8B949E; --oc-font-size: 13px;
   }
-  html, body { margin: 0; padding: 0; height: 100%; background: var(--oc-bg); overflow: hidden; }
+  /* Transparent page: the WebView's own background (set from the app theme) shows through. A WebView's
+     first frame can paint outside its bounds; a dark page background flashed over the whole screen. */
+  html, body { margin: 0; padding: 0; height: 100%; background: transparent; overflow: hidden; }
   /* position: fixed for the same reason as the terminal: sized from the visual viewport. */
   #editor { position: fixed; inset: 0; font-size: var(--oc-font-size); }
   .cm-editor { height: 100%; }

@@ -1,6 +1,6 @@
 Bundled third-party code for the CodeMirror 6 editor (app/src/main/assets/editor/editor.js).
 Built from tools/editor-bundle (npm ci && npm run build) with esbuild.
-sha256 editor.js = 0157463a9f5fe0c52d9306fee11029ed0ab4f3211f5d2ad32c117e8a76a11634
+sha256 editor.js = 68ece491d4ddaacc10d3e2d617385f753924982cd10cba576f74b8b2376d4aef
 
 === @codemirror/autocomplete 6.20.4 (MIT) ===
 MIT License

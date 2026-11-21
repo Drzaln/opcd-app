@@ -185,10 +185,14 @@ private fun createEditorWebView(
     isFocusable = true
     isFocusableInTouchMode = true
     setBackgroundColor(backgroundArgb)
+    // Hidden until the page reports ready: a WebView's first frame can be drawn before Compose has
+    // laid it out (full-window, in the page's default colours), which flashed dark over the rest of
+    // the screen when opening Code. INVISIBLE still loads and runs the page.
+    visibility = View.INVISIBLE
     addJavascriptInterface(
         EditorBridge(
             vm = vm,
-            ready = { post(onReady) },
+            ready = { post { visibility = View.VISIBLE; onReady() } },
             fail = { message -> post { onFail(message) } },
         ),
         "AndroidEditor",
@@ -284,6 +288,7 @@ private class EditorBridge(
         when (name) {
             "palette" -> vm.showPalette(true)
             "closeTab" -> vm.closeActive()
+            "toggleTree", "togglePanel", "toggleSide" -> vm.layoutCommand(name)
         }
     }
 

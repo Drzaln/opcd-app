@@ -11,7 +11,8 @@
 <link rel="stylesheet" href="xterm.css">
 <style>
   @font-face { font-family: 'JBMono'; src: url('font') format('truetype'); font-display: block; }
-  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #11131a; }
+  /* Transparent: the WebView background (app theme) shows through; see editor.html. */
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: transparent; }
   /* fixed → sized from the visual viewport, which stays correct even if the document box collapses */
   #term { position: fixed; top: 0; left: 0; right: 0; bottom: 0; padding: 8px 8px 2px 8px; }
   .xterm .xterm-viewport { overflow-y: auto; scrollbar-width: none; }

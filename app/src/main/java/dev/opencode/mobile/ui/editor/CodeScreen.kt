@@ -1,5 +1,20 @@
 package dev.opencode.mobile.ui.editor
 
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.material.icons.outlined.CallToAction
+import androidx.compose.material.icons.outlined.ViewSidebar
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import dev.opencode.mobile.ui.common.DragGrip
+import dev.opencode.mobile.ui.common.HorizontalSplit
+import dev.opencode.mobile.ui.common.rememberPaneState
+import dev.opencode.mobile.ui.common.verticalResize
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -152,8 +167,25 @@ private fun WideCode(
     // the terminal or a dialog must keep the panel (and anything open in it) composed.
     val imeVisible = WindowInsets.isImeVisible && ui.editorFocused && !roomy
     val connection by appVm.connection.collectAsState()
-    var panel by rememberSaveable { mutableStateOf(if (roomy) BottomPanel.TERMINAL else null) }
+    // Resizable / hideable panes, remembered per orientation (see SplitPane.kt).
+    val treePane = rememberPaneState("code.tree", default = 240.dp, min = 180.dp, max = 440.dp)
+    val sidePane = rememberPaneState("code.side", default = 300.dp, min = 240.dp, max = 560.dp)
+    val panelPane = rememberPaneState("code.panel", default = if (roomy) 240.dp else 190.dp, min = 120.dp, max = 900.dp, defaultVisible = roomy)
+    var panel by rememberSaveable { mutableStateOf(if (panelPane.visible) BottomPanel.TERMINAL else null) }
     var lastPanel by rememberSaveable { mutableStateOf(BottomPanel.TERMINAL) }
+    // Keep the saved visibility in step with the panel however it was opened or closed.
+    LaunchedEffect(panel) { panelPane.show(panel != null) }
+    fun togglePanel() { panel = if (panel == null) lastPanel else null }
+    // Ctrl+B / Ctrl+J / Ctrl+Alt+B, from the editor (WebView keymap) or anywhere else in the layout.
+    LaunchedEffect(vm) {
+        vm.layoutCommands.collect { cmd ->
+            when (cmd) {
+                "toggleTree" -> treePane.toggle()
+                "togglePanel" -> togglePanel()
+                "toggleSide" -> if (threePane) sidePane.toggle()
+            }
+        }
+    }
     LaunchedEffect(Unit) { vm.refreshGit() }
     // Offline: a file with a saved copy opens in the read-only viewer instead of failing.
     LaunchedEffect(ui.offlineCopy) {
@@ -182,7 +214,17 @@ private fun WideCode(
     }
     // With the activity's side rail there is no bottom bar to keep the panel off the gesture bar.
     val railed = dev.opencode.mobile.ui.common.LocalNavRail.current
-    Column(Modifier.weight(1f).fillMaxHeight().then(if (railed) Modifier.navigationBarsPadding() else Modifier).imePadding()) {
+    Column(
+        Modifier.weight(1f).fillMaxHeight().then(if (railed) Modifier.navigationBarsPadding() else Modifier).imePadding()
+            .onPreviewKeyEvent { e ->
+                if (e.type != KeyEventType.KeyDown || !e.isCtrlPressed) return@onPreviewKeyEvent false
+                when (e.key) {
+                    Key.B -> { if (e.isAltPressed) { if (threePane) sidePane.toggle() } else treePane.toggle(); true }
+                    Key.J -> { togglePanel(); true }
+                    else -> false
+                }
+            },
+    ) {
         // Header: project · Mac + status dot · branch · N changed · Go to file (Ctrl P) · Save.
         Row(
             Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 6.dp),
@@ -222,102 +264,146 @@ private fun WideCode(
                 Text("Ctrl P", fontSize = 11.sp, color = c.lineNumber)
             }
             ui.activeTab?.let { SaveButton(vm = vm, tab = it) }
+            LayoutToggles(
+                tree = treePane.visible,
+                panel = panel != null,
+                side = if (threePane) sidePane.visible else null,
+                onTree = { treePane.toggle() },
+                onPanel = { togglePanel() },
+                onSide = { sidePane.toggle() },
+            )
             EditorOverflowMenu(vm = vm, onViewReadOnly = onViewReadOnly)
         }
         Divider()
 
-        Row(Modifier.weight(1f).fillMaxWidth()) {
-            Box(Modifier.width(240.dp).fillMaxHeight()) {
-                FilesScreen(
-                    appVm = appVm,
-                    serverId = serverId,
-                    dir = treeDir,
-                    onOpenDir = onTreeDir,
-                    onOpenFile = { path, line -> vm.open(path, line) },
-                    onBack = null,
-                    recentFiles = recent,
-                    onViewReadOnly = onViewReadOnly,
-                    selectedPath = ui.active,
-                    title = "Explorer",
-                    compact = true,
-                )
-            }
-            VerticalDivider()
-            Column(Modifier.weight(1f).fillMaxHeight()) {
-                EditorPane(vm = vm, appVm = appVm, serverId = serverId, onViewReadOnly = onViewReadOnly, modifier = Modifier.weight(1f), showGit = false)
-                if (!imeVisible) {
-                Divider()
-                // Bottom panel tabs: Terminal · Git · Metro (only while the Mac helper offers it).
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    for (tab in BottomPanel.values().filter { (it != BottomPanel.METRO || metroAvailable) && (it != BottomPanel.ANDROID || androidAvailable) }) {
-                        val selected = panel == tab
-                        Box(
-                            Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (selected) c.surface else androidx.compose.ui.graphics.Color.Transparent)
-                                .clickable { panel = tab; lastPanel = tab }
-                                .heightIn(min = 40.dp)
-                                .padding(horizontal = 12.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    tab.label,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = if (selected) c.textPrimary else c.textSecondary,
-                                )
-                                if (tab == BottomPanel.METRO) MetroTabBadge(metroUi)
-                                if (tab == BottomPanel.ANDROID) AndroidTabBadge(androidUi)
+        // tree │ editor (+ bottom panel) │ device column, each divider draggable (SplitPane.kt).
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val bodyHeight = maxHeight
+            HorizontalSplit(
+                state = treePane,
+                modifier = Modifier.fillMaxSize(),
+                restMin = if (threePane) 600.dp else 360.dp,
+                paneLabel = "file tree",
+                sized = {
+                    FilesScreen(
+                        appVm = appVm,
+                        serverId = serverId,
+                        dir = treeDir,
+                        onOpenDir = onTreeDir,
+                        onOpenFile = { path, line -> vm.open(path, line) },
+                        onBack = null,
+                        recentFiles = recent,
+                        onViewReadOnly = onViewReadOnly,
+                        selectedPath = ui.active,
+                        title = "Explorer",
+                        compact = true,
+                    )
+                },
+            ) {
+                val editorAndPanel: @Composable () -> Unit = {
+                    Column(Modifier.fillMaxSize()) {
+                        EditorPane(vm = vm, appVm = appVm, serverId = serverId, onViewReadOnly = onViewReadOnly, modifier = Modifier.weight(1f), showGit = false)
+                        if (!imeVisible) {
+                            Divider()
+                            // Bottom panel tabs: Terminal · Git · Metro · Android. Dragging the strip up or
+                            // down resizes the panel; dragging it to the bottom hides it, up again shows it.
+                            val stripDrag = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                            val stripDragging by stripDrag.collectIsDraggedAsState()
+                            val panelLimit = (bodyHeight - 160.dp - 48.dp).coerceAtLeast(panelPane.min)
+                            Box(
+                                Modifier.fillMaxWidth().verticalResize(
+                                    state = panelPane,
+                                    limit = panelLimit,
+                                    interaction = stripDrag,
+                                    onShow = { panel = lastPanel },
+                                    onHide = { panel = null },
+                                ),
+                            ) {
+                                DragGrip(Modifier.align(Alignment.TopCenter).padding(top = 3.dp), active = stripDragging)
+                                Row(
+                                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    for (tab in BottomPanel.values().filter { (it != BottomPanel.METRO || metroAvailable) && (it != BottomPanel.ANDROID || androidAvailable) }) {
+                                        val selected = panel == tab
+                                        Box(
+                                            Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (selected) c.surface else androidx.compose.ui.graphics.Color.Transparent)
+                                                .clickable { panel = tab; lastPanel = tab }
+                                                .heightIn(min = 40.dp)
+                                                .padding(horizontal = 12.dp),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    tab.label,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                                    color = if (selected) c.textPrimary else c.textSecondary,
+                                                )
+                                                if (tab == BottomPanel.METRO) MetroTabBadge(metroUi)
+                                                if (tab == BottomPanel.ANDROID) AndroidTabBadge(androidUi)
+                                            }
+                                        }
+                                    }
+                                    Spacer(Modifier.weight(1f))
+                                    IconButton(onClick = { togglePanel() }) {
+                                        Icon(
+                                            if (panel == null) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
+                                            contentDescription = if (panel == null) "Show panel" else "Hide panel",
+                                            tint = c.textSecondary,
+                                        )
+                                    }
+                                }
+                            }
+                            val panelHeight = panelPane.size.coerceAtMost(panelLimit)
+                            when (panel) {
+                                BottomPanel.TERMINAL -> Box(Modifier.fillMaxWidth().height(panelHeight)) {
+                                    TerminalScreen(appVm = appVm, serverId = serverId, onBack = {}, embedded = true)
+                                }
+                                BottomPanel.GIT -> ChangesPanel(vm = vm, modifier = Modifier.fillMaxWidth().height(panelHeight))
+                                BottomPanel.METRO -> MetroPanel(metro = vm.metro, modifier = Modifier.fillMaxWidth().height(panelHeight))
+                                BottomPanel.ANDROID -> AndroidPanel(android = vm.android, screen = vm.screen.takeIf { screenAvailable && !threePane }, modifier = Modifier.fillMaxWidth().height(panelHeight))
+                                null -> Unit
                             }
                         }
                     }
-                    Spacer(Modifier.weight(1f))
-                    IconButton(onClick = { panel = if (panel == null) lastPanel else null }) {
-                        Icon(
-                            if (panel == null) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
-                            contentDescription = if (panel == null) "Show panel" else "Hide panel",
-                            tint = c.textSecondary,
-                        )
-                    }
                 }
-                when (panel) {
-                    BottomPanel.TERMINAL -> Box(Modifier.fillMaxWidth().height(190.dp)) {
-                        TerminalScreen(appVm = appVm, serverId = serverId, onBack = {}, embedded = true)
-                    }
-                    BottomPanel.GIT -> ChangesPanel(vm = vm, modifier = Modifier.fillMaxWidth().height(190.dp))
-                    BottomPanel.METRO -> MetroPanel(metro = vm.metro, modifier = Modifier.fillMaxWidth().height(if (roomy) 240.dp else 190.dp))
-                    BottomPanel.ANDROID -> AndroidPanel(android = vm.android, screen = vm.screen.takeIf { screenAvailable && !threePane }, modifier = Modifier.fillMaxWidth().height(if (roomy) 260.dp else 190.dp))
-                    null -> Unit
-                }
-                }
-            }
-            if (threePane) {
-                VerticalDivider()
-                // The live device screen (scrcpy through the Mac helper), for the device picked in the
-                // Android panel.
-                if (screenAvailable) {
-                    val device = androidUi.device?.takeIf { it.ready }
-                    DeviceScreen(
-                        screen = vm.screen,
-                        serial = device?.serial,
-                        deviceLabel = device?.label,
-                        isThisPhone = device?.let { isThisPhone(it) } == true,
-                        modifier = Modifier.width(300.dp).fillMaxHeight(),
-                    )
-                } else Box(Modifier.width(300.dp).fillMaxHeight().background(c.surface), contentAlignment = Alignment.Center) {
-                    Text(
-                        "Device screen: run the Mac helper with scrcpy (Android) or idb-companion (iOS simulators)",
-                        fontSize = 12.sp,
-                        color = c.textSecondary,
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(24.dp),
-                    )
+                if (threePane) {
+                    HorizontalSplit(
+                        state = sidePane,
+                        modifier = Modifier.fillMaxSize(),
+                        sizedAtEnd = true,
+                        restMin = 360.dp,
+                        paneLabel = "device screen",
+                        sized = {
+                            // The live device screen (scrcpy through the Mac helper), for the device picked
+                            // in the Android panel.
+                            if (screenAvailable) {
+                                val device = androidUi.device?.takeIf { it.ready }
+                                DeviceScreen(
+                                    screen = vm.screen,
+                                    serial = device?.serial,
+                                    deviceLabel = device?.label,
+                                    isThisPhone = device?.let { isThisPhone(it) } == true,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            } else Box(Modifier.fillMaxSize().background(c.surface), contentAlignment = Alignment.Center) {
+                                Text(
+                                    "Device screen: run the Mac helper with scrcpy (Android) or idb-companion (iOS simulators)",
+                                    fontSize = 12.sp,
+                                    color = c.textSecondary,
+                                    maxLines = 4,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(24.dp),
+                                )
+                            }
+                        },
+                    ) { editorAndPanel() }
+                } else {
+                    editorAndPanel()
                 }
             }
         }
@@ -334,3 +420,32 @@ private fun Divider() = Box(Modifier.fillMaxWidth().height(1.dp).background(OcTh
 
 @Composable
 private fun VerticalDivider() = Box(Modifier.width(1.dp).fillMaxHeight().background(OcTheme.colors.border))
+
+/** Header buttons that show/hide the file tree, bottom panel and device column (Ctrl+B, Ctrl+J, Ctrl+Alt+B). */
+@Composable
+private fun LayoutToggles(
+    tree: Boolean,
+    panel: Boolean,
+    side: Boolean?,
+    onTree: () -> Unit,
+    onPanel: () -> Unit,
+    onSide: () -> Unit,
+) {
+    val c = OcTheme.colors
+    @Composable
+    fun toggle(on: Boolean, label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, mirror: Boolean = false, onClick: () -> Unit) {
+        IconButton(onClick = onClick) {
+            Icon(
+                icon,
+                contentDescription = if (on) "Hide $label" else "Show $label",
+                tint = if (on) c.link else c.textSecondary,
+                modifier = Modifier.size(20.dp).then(if (mirror) Modifier.graphicsLayer { scaleX = -1f } else Modifier),
+            )
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        toggle(tree, "file tree", Icons.Outlined.ViewSidebar, mirror = true, onClick = onTree)
+        toggle(panel, "bottom panel", Icons.Outlined.CallToAction, onClick = onPanel)
+        if (side != null) toggle(side, "device screen", Icons.Outlined.ViewSidebar, onClick = onSide)
+    }
+}

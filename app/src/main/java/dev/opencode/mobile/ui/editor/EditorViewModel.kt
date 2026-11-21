@@ -419,6 +419,11 @@ class EditorViewModel(
 
     fun onFocus(focused: Boolean) = _ui.update { it.copy(editorFocused = focused) }
 
+    /** IDE layout shortcuts from the editor's keymap (Ctrl+B / Ctrl+J / Ctrl+Alt+B), for the wide Code layout. */
+    private val _layoutCommands = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val layoutCommands: kotlinx.coroutines.flow.SharedFlow<String> = _layoutCommands
+    fun layoutCommand(name: String) { _layoutCommands.tryEmit(name) }
+
     fun onCursor(line: Int, col: Int) = _ui.update { it.copy(cursor = line to col) }
 
     fun onText(id: Int, path: String, text: String) {

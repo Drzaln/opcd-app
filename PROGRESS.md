@@ -984,6 +984,37 @@ emulator (`wm size`/`wm density`, reset afterwards).
 - **Not checked:** a real tablet, foldables (the Pixel Fold AVD exists but wasn't booted), split-screen
   multi-window resizing.
 
+### Resizable and hideable panes (`opencode-android-app-tjx`)
+
+- **`ui/common/SplitPane.kt`:** `PaneState` (size + visible, saved in the `pane_layout`
+  SharedPreferences per key and orientation) and `HorizontalSplit` (sized pane | rest, 1 dp line with a
+  24 dp touch strip drawn over both panes, double-tap resets). Dragging below half the pane's minimum
+  hides it and keeps the size it had when the drag started, so it reopens at that width; a hidden pane
+  leaves a 14 dp edge with a chevron (tap or drag out). `verticalResize` turns drags on a header into
+  height changes.
+- **Used for:** Sessions │ chat and Files │ preview (`WideTwoPane`, keys `sessions.list` /
+  `files.list`, 260–640 dp), Code tree (`code.tree`, 180–440 dp), device column (`code.side`,
+  240–560 dp, only ≥ 1000 dp), bottom panel height (`code.panel`, ≥ 120 dp; drag the tab strip, which
+  shows a grip; visibility follows the open tab). Each split keeps the other side ≥ 360 dp.
+- **Toggles:** three header buttons in Code (tree, panel, device column; blue = shown). Shortcuts
+  Ctrl+B / Ctrl+J / Ctrl+Alt+B work both inside the editor (new `Mod-b`/`Mod-j`/`Mod-Alt-b` keys in
+  the CodeMirror bundle → `onCommand` → `EditorViewModel.layoutCommands`) and from the rest of the
+  layout (`onPreviewKeyEvent`). The editor bundle was rebuilt (`tools/editor-bundle`, `npm run build`).
+- **Checked on the Medium Tablet emulator** (and its display set to 960×600 dp for the small-tablet
+  size): drag to resize all four splits, drag to hide and tap the edge to show, double-tap reset, sizes
+  kept across an app restart, header toggles, Ctrl+B and Ctrl+J from inside the editor, opening the
+  collapsed bottom panel by dragging its strip up.
+- **Flicker opening Code (fixed):** screen recordings showed one dark frame (~33 ms) when switching
+  Sessions → Code in light mode. The editor WebView (always composed, even with no file open) draws its
+  first frame outside its own bounds, over the rail, header and tree, and the page's background was
+  hard-coded dark (`--oc-bg`) until the theme script ran. `editor.html` and `terminal.html` now have a
+  transparent page background, so the WebView's own background (set from the app theme) shows; both
+  WebViews also stay `INVISIBLE` until their page reports ready, and the activity's window background
+  follows the theme (the XML theme's dark colour showed in light mode). Recorded 6 switches after the
+  fix: no dark frame (before: 2 of 3). Editor and terminal checked in light and dark.
+- **Not checked:** Ctrl+Alt+B and the shortcuts with focus outside the editor (adb key combos only
+  reached the WebView), Files │ preview drag (same component as Sessions), a real tablet.
+
 ## Verification
 
 Code editor (Nov 2026, opencode **2.2.6** via `make serve`, emulator Pixel API 36 / WebView 149):

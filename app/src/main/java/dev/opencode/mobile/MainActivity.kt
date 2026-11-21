@@ -20,6 +20,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -91,6 +92,13 @@ class MainActivity : ComponentActivity() {
             )
             val themeMode by appVm.themeMode.collectAsState()
             OpenCodeTheme(mode = themeMode) {
+                // The window background shows through for any frame the app doesn't fully paint (e.g. while
+                // the editor/terminal WebViews attach when opening Code). The XML theme can only hold one
+                // colour (dark), so keep it in step with the theme in use, or light mode flashes black.
+                val windowBg = dev.opencode.mobile.ui.theme.OcTheme.colors.bg
+                androidx.compose.runtime.SideEffect {
+                    window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(windowBg.toArgb()))
+                }
                 val active by appVm.activeServer.collectAsState()
                 val navController = rememberNavController()
 
@@ -247,6 +255,8 @@ class MainActivity : ComponentActivity() {
                         }
                         if (wide) {
                             WideTwoPane(
+                                key = "sessions.list",
+                                listLabel = "session list",
                                 list = sessionsPane,
                                 detail = {
                                     val sessionId = selectedSession
@@ -328,6 +338,8 @@ class MainActivity : ComponentActivity() {
                         }
                         if (wide) {
                             WideTwoPane(
+                                key = "files.list",
+                                listLabel = "file list",
                                 list = filesPane,
                                 detail = {
                                     val path = selectedFile
@@ -492,23 +504,28 @@ private fun navigateTab(
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @androidx.compose.runtime.Composable
 private fun WideTwoPane(
+    key: String,
+    listLabel: String,
     list: @Composable () -> Unit,
     detail: @Composable () -> Unit,
 ) {
-    // The list keeps a list's width (300-420 dp); the detail (chat, file) gets the rest of a wide screen.
-    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
-    val listWidth = (maxWidth * 0.4f).coerceIn(300.dp, 420.dp)
-    Row(Modifier.fillMaxSize()) {
-        Box(Modifier.width(listWidth).fillMaxHeight().background(dev.opencode.mobile.ui.theme.OcTheme.colors.bg)) { list() }
-        Box(
-            Modifier
-                .width(1.dp)
-                .fillMaxHeight()
-                .background(MaterialTheme.colorScheme.outline),
-        )
-        Box(Modifier.weight(1f).fillMaxHeight().background(dev.opencode.mobile.ui.theme.OcTheme.colors.bg)) { detail() }
-    }
-    }
+    // The list keeps a list's width (300-420 dp by default); the detail (chat, file) gets the rest. The
+    // divider drags (and hides the list when dragged closed); the size is remembered per orientation.
+    val screenWidth = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
+    val pane = dev.opencode.mobile.ui.common.rememberPaneState(
+        key = key,
+        default = ((screenWidth - 80.dp) * 0.4f).coerceIn(300.dp, 420.dp),
+        min = 260.dp,
+        max = 640.dp,
+    )
+    val bg = dev.opencode.mobile.ui.theme.OcTheme.colors.bg
+    dev.opencode.mobile.ui.common.HorizontalSplit(
+        state = pane,
+        modifier = Modifier.fillMaxSize().background(bg),
+        restMin = 360.dp,
+        paneLabel = listLabel,
+        sized = { list() },
+    ) { detail() }
 }
 
 @androidx.compose.runtime.Composable

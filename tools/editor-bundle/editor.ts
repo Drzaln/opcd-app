@@ -296,6 +296,10 @@ function extensions(lang: string, text: string, path = ""): Extension[] {
       { key: "Mod-p", preventDefault: true, run: () => { bridge.onCommand("palette"); return true } },
       { key: "Mod-g", preventDefault: true, run: gotoLine },
       { key: "Mod-w", preventDefault: true, run: () => { bridge.onCommand("closeTab"); return true } },
+      // IDE layout toggles (tablet Code tab): file tree, bottom panel, device-screen column.
+      { key: "Mod-b", preventDefault: true, run: () => { bridge.onCommand("toggleTree"); return true } },
+      { key: "Mod-j", preventDefault: true, run: () => { bridge.onCommand("togglePanel"); return true } },
+      { key: "Mod-Alt-b", preventDefault: true, run: () => { bridge.onCommand("toggleSide"); return true } },
       { key: "F2", preventDefault: true, run: requestRename },
     ])),
     keymap.of([

@@ -296,6 +296,10 @@ private fun createTerminalWebView(
     isVerticalScrollBarEnabled = false
     importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
     setBackgroundColor(backgroundArgb)
+    // Hidden until the page reports ready: a WebView's first frame can be drawn before Compose has
+    // laid it out (full-window, in the page's default colours), which flashed dark over the rest of
+    // the screen when opening Code. INVISIBLE still loads and runs the page.
+    visibility = View.INVISIBLE
     addJavascriptInterface(
         TerminalBridge(
             vm = vm,
@@ -311,7 +315,7 @@ private fun createTerminalWebView(
             },
             failTo = { message -> post { onFail(message) } },
             resizedTo = { cols, rows -> onResized(cols, rows) },
-            ready = { post(onReady) },
+            ready = { post { visibility = View.VISIBLE; onReady() } },
         ),
         "AndroidTerminal",
     )
