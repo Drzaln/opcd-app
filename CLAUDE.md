@@ -1,6 +1,14 @@
 # Project Instructions for AI Agents
 
-This file provides instructions and context for AI coding agents working on this project.
+OpenCode Mobile: a native Android (Kotlin + Jetpack Compose) client for the opencode server, plus an
+optional Mac helper (`helper/`, Node/TS). The full maintainer guide lives in `AGENTS.md` (shared with
+other agents) and is imported below; `PROGRESS.md` is the detailed handoff. Recipes for recurring jobs
+are project skills in `.claude/skills/` (same files as `.agents/skills/`): `verify-on-device`,
+`ship-release`, `opencode-api`, `editor-bundle`, `mac-helper`.
+
+Edit `AGENTS.md`, not this file, when the project guide changes.
+
+@AGENTS.md
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
 ## Beads Issue Tracker
@@ -56,22 +64,3 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 - Do not commit or push without clear authority from the active profile or the current user request.
 - If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
-
-
-## Build & Test
-
-_Add your build and test commands here_
-
-```bash
-# Example:
-# npm install
-# npm test
-```
-
-## Architecture Overview
-
-_Add a brief overview of your project architecture_
-
-## Conventions & Patterns
-
-_Add your project-specific conventions here_

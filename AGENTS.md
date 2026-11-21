@@ -7,7 +7,18 @@ streaming), browse the project, review session diffs and commit.
 
 ## Quick start
 
-See **`PROGRESS.md`** for the compact project handoff (architecture, integration gotchas, status).
+See **`PROGRESS.md`** for the compact project handoff (architecture, integration gotchas, status,
+per-feature notes with their bead ids). This file is the maintainer's guide; the **project skills** in
+`.agents/skills/` (also linked from `.claude/skills/`) are step-by-step recipes for the recurring jobs:
+
+| Skill | Use it to |
+|---|---|
+| `verify-on-device` | Run the app against a local test server on an emulator or USB phone, drive it with adb, take screenshots/recordings, check phone/tablet widths |
+| `ship-release` | Do a release when the user says "ship it" (docs first, `make ship`, no GitHub polling) |
+| `opencode-api` | Add or change a call to the opencode server so it works on **both 1.x and 2.x**, including live (SSE) events |
+| `editor-bundle` | Change the CodeMirror editor (JS bundle in `tools/editor-bundle/`, bridge to Kotlin) |
+| `mac-helper` | Work on the optional Mac helper (`helper/`, Node/TS) and its app side |
+| `beads` | Track work with `bd` |
 
 ```bash
 make build        # assembleDebug → app/build/outputs/apk/debug/app-debug.apk
@@ -47,9 +58,9 @@ Always do ALL of these, in order:
    permissions → "Read and write permissions", then re-run.
 5. Never create a version bump commit or tag without the user asking to ship (or saying ship/push/release).
 6. `ship.sh` does `git add -A`; keep build artifacts (`.kotlin/`, logs) out of the tree first.
-7. **Reindex this project** into the codebase-memory-mcp knowledge graph after shipping, so the graph
-   reflects the released code. Call `index_repository(repo_path="/Users/rizal/perkodingan/opencode-android-app")`
-   (it is not indexed by default; index even if it reports "project not found").
+7. **Reindex this project** into the codebase-memory-mcp knowledge graph after shipping (if that MCP
+   server is available), so the graph reflects the released code: `index_repository` with this
+   checkout's absolute path (index even if it reports "project not found").
 
 Note: release APK is signed with the debug key unless `keystore.properties` + CI signing secrets exist.
 
@@ -64,7 +75,7 @@ Note: release APK is signed with the debug key unless `keystore.properties` + CI
   ```sh
   opencode service set hostname 0.0.0.0
   opencode service set port 4096
-  opencode service set password sebuahpassword
+  opencode service set password <your-password>
   opencode service start
   ```
   Then run plain `opencode` (TUI) — it auto-discovers and authenticates to that same service.
@@ -171,9 +182,12 @@ Single `:app` module. No DI framework.
   `OcTheme.colors` roles (editor roles: `textBody`, `lineNumber`, `accent`, `accentSoft`, `link`,
   `warning`, `errorText`/`errorBg`, `editorLine`, `popup`, `syntax.*`).
 - Unit tests: `./gradlew :app:testDebugUnitTest`; `OC_IT=1` adds live round trips against `make serve`.
-- Navigation uses standard Android push/pop transitions (`NavHost` slide-in-from-right + slide-out on
-  pop, `Motion.MEDIUM` + `FastOutSlowInEasing` in `MainActivity`). Don't set per-screen transitions
-  unless a screen needs something different.
+- Navigation: the four tabs (Code · Sessions · Terminal · Settings, `Routes.isTab`) crossfade;
+  everything else uses standard push/pop slides (`Motion.MEDIUM` + `FastOutSlowInEasing` in
+  `MainActivity`). Tabs are switched with `navigateTab` (Sessions is the root; other tabs replace each
+  other with saved state). Don't set per-screen transitions unless a screen needs something different.
+- Don't hard-code user-specific things (paths, hostnames, Tailscale IPs, passwords) in code or docs;
+  use placeholders like `100.x.y.z` and `<your-password>`.
 - No comments unless they explain a non-obvious decision.
 - Chat renders messages by `part.type` in `PartView` (ChatScreen.kt). Add new part types there.
 - Chat has slash-command support: input matching `/<name> args` where `<name>` is a known `/command`
@@ -192,6 +206,16 @@ Single `:app` module. No DI framework.
 
 ## Gotchas
 
+- **WebViews (editor, xterm) can paint their first frame outside their bounds.** Keep their pages'
+  `html, body` background transparent (the WebView's own background is set from the app theme) and
+  keep them `INVISIBLE` until the page reports ready — otherwise light mode flashes dark when Code opens.
+- kapt: a `private` nested class inside a `private companion object` breaks stub generation
+  ("duplicate class"); use top-level `internal` declarations.
+- A property named `android` (e.g. in a ViewModel) shadows the `android.*` package in that class — use
+  imports instead of fully-qualified `android.net…` names there.
+- opencode 2.x live events (`/api/event`) are mapped to the app's 1.x-style events in
+  `data/net/V2LiveEvents.kt` (text/reasoning deltas, tool calls, steps); see the `opencode-api` skill.
+
 - **prism4j 2.0.0 bundles only:** markup, clike, css, javascript, java, kotlin, python, go, c, cpp,
   csharp, dart, swift, sql, json, yaml, markdown, git, groovy. Adding a language means it must be in
   the ported list AND in `@PrismBundle(include = [...])` (`ui/common/CodeHighlighter.kt`).
@@ -201,6 +225,36 @@ Single `:app` module. No DI framework.
   Don't bump blindly — the prism4j exclusion and kapt setup are sensitive.
 - Release signing: real keystore only if `keystore.properties` exists (gitignored); CI injects it from
   secrets. Otherwise release falls back to the debug key so the APK is installable.
+
+## Layouts by screen width
+
+- **Phone (< 720 dp wide):** bottom bar (`AppBottomBar`), one screen at a time, detail screens are
+  pushed routes.
+- **Wide (≥ 720 dp: tablets, landscape phones):** `MainActivity` draws one `AppNavRail` beside the
+  `NavHost` for tab destinations and provides `LocalNavRail = true`, which makes `AppBottomBar` render
+  nothing (labels on the rail when the screen is ≥ 480 dp tall). Sessions │ chat and Files │ preview
+  use `WideTwoPane`; Code uses the IDE layout (`CodeScreen.WideCode`: tree │ editor + bottom panel,
+  plus a device-screen column at ≥ 1000 dp; the bottom panel starts open only with ≥ 720 dp of height).
+- **Resizable panes:** every wide split goes through `ui/common/SplitPane.kt` — `rememberPaneState(key,
+  default, min, max)` (size + visible, saved in the `pane_layout` SharedPreferences per key and
+  orientation) and `HorizontalSplit` (drag divider, double-tap reset, drag closed to hide, edge to
+  show). Vertical panels use `Modifier.verticalResize`. Add a new split the same way.
+- Single-column screens on wide displays (Settings, server list) use `Modifier.readableWidth()`
+  (≤ 760 dp, centered).
+- Check new UI at phone width, tablet landscape (Medium Tablet AVD, 1280×800 dp) and a 7" tablet
+  (960×600 dp); see the `verify-on-device` skill.
+
+## Offline mode and connection diagnosis
+
+- `data/net/ConnectionDoctor.kt` explains *why* a server doesn't answer (phone offline, Tailscale off,
+  Mac unreachable, opencode stopped, wrong password, name not found) from cheap checks plus a TCP probe;
+  `AppViewModel` runs it while offline and re-checks on network changes. `OfflineBanner` shows it.
+- Screens save what they load in `CacheStore` (Room key/json; keys like `sessions:<server>:<dir>`,
+  `messages:<server>:<session>`, `diff:…`, `ls:…`, `file:…`; pruned after 30 days) and fall back to it
+  with `SavedCopyNote` when the server can't be reached.
+- `data/cache/Outbox.kt` queues prompts typed while offline (on disk) and sends them in order when the
+  health check or the chat stream reconnects; a network error stops the flush, an HTTP error marks the
+  item failed (Retry/Delete in the chat).
 
 ## CI
 

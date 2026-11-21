@@ -11,7 +11,7 @@ class RepositoryCacheTest {
 
     @Test
     fun probeUsesTheTypedServerEveryTime() {
-        val first = repo.probeApi(ServerConfig(id = "", baseUrl = "http://100.94.110.59:4096", password = "a"))
+        val first = repo.probeApi(ServerConfig(id = "", baseUrl = "http://100.101.102.103:4096", password = "a"))
         val second = repo.probeApi(ServerConfig(id = "", baseUrl = "http://127.0.0.1:4199", password = "secret"))
         assertNotSame(first, second)
         assertEquals("http://127.0.0.1:4199", second.server.baseUrl)
@@ -20,11 +20,11 @@ class RepositoryCacheTest {
 
     @Test
     fun editingAServerDropsItsCachedClient() {
-        val old = repo.apiFor(ServerConfig(id = "mac", baseUrl = "http://100.94.110.59:4096"))
-        assertSame(old, repo.apiFor(ServerConfig(id = "mac", baseUrl = "http://100.94.110.59:4096")))
+        val old = repo.apiFor(ServerConfig(id = "mac", baseUrl = "http://100.101.102.103:4096"))
+        assertSame(old, repo.apiFor(ServerConfig(id = "mac", baseUrl = "http://100.101.102.103:4096")))
         repo.forget("mac")
-        val edited = repo.apiFor(ServerConfig(id = "mac", baseUrl = "http://100.94.110.59:4100"))
+        val edited = repo.apiFor(ServerConfig(id = "mac", baseUrl = "http://100.101.102.103:4100"))
         assertNotSame(old, edited)
-        assertEquals("http://100.94.110.59:4100", edited.server.baseUrl)
+        assertEquals("http://100.101.102.103:4100", edited.server.baseUrl)
     }
 }

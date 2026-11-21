@@ -9,7 +9,7 @@ import org.junit.Test
 class ConnectionDoctorTest {
     @Test
     fun recognisesTailscaleAddresses() {
-        assertTrue(ConnectionDoctor.isTailscaleHost("100.94.110.59"))
+        assertTrue(ConnectionDoctor.isTailscaleHost("100.101.102.103"))
         assertTrue(ConnectionDoctor.isTailscaleHost("100.64.0.1"))
         assertTrue(ConnectionDoctor.isTailscaleHost("100.127.255.254"))
         assertTrue(ConnectionDoctor.isTailscaleHost("mac.tail1234.ts.net"))
@@ -24,7 +24,7 @@ class ConnectionDoctorTest {
     @Test
     fun spotsALoginRefusal() {
         assertEquals(DiagnosisKind.WRONG_PASSWORD, ConnectionDoctor.classifyHttpError("HTTP 401 Unauthorized"))
-        assertNull(ConnectionDoctor.classifyHttpError("Failed to connect to /100.94.110.59:4096"))
+        assertNull(ConnectionDoctor.classifyHttpError("Failed to connect to /100.101.102.103:4096"))
         assertNull(ConnectionDoctor.classifyHttpError("HTTP 4010"))
         assertNull(ConnectionDoctor.classifyHttpError(null))
     }
